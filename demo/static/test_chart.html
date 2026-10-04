@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Chart Test</title></head>
+<body>
+<h1>Chart.js Test</h1>
+<div id="status" style="padding:20px;font-size:18px;font-weight:bold;"></div>
+<canvas id="test-chart" width="600" height="300"></canvas>
+
+<script src="/static/chart.umd.min.js"></script>
+<script>
+var statusEl = document.getElementById('status');
+try {
+    if (typeof Chart === 'undefined') {
+        statusEl.textContent = 'ERROR: Chart is undefined!';
+        statusEl.style.color = 'red';
+    } else {
+        statusEl.textContent = 'Chart.js loaded OK (v' + Chart.version + ')';
+        statusEl.style.color = 'green';
+        
+        var ctx = document.getElementById('test-chart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [1,2,3,4,5],
+                datasets: [{label:'Test', data:[10,20,15,30,25], borderColor:'#38bdf8'}]
+            }
+        });
+        statusEl.textContent += ' | Chart rendered OK';
+    }
+} catch(e) {
+    statusEl.textContent = 'JS ERROR: ' + e.message;
+    statusEl.style.color = 'red';
+}
+</script>
+</body>
+</html>

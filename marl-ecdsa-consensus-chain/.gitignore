@@ -1,0 +1,63 @@
+# P0-1: 敏感文件与构建产物排除 — 防止密钥/签名材料误提交
+keys/
+keys_demo/
+*.pem
+__pycache__/
+.pytest_cache/
+data/
+results/
+training_results*.json
+*.pyc
+.env
+
+# P0-2: 匿名评审合规——含身份信息的课设PPT/文档禁止入库
+*课设*汇报*.pptx
+*课程设计*.pptx
+*课设*.pptx
+
+# P0-3: 内部过程物与缓存禁止入库（2026-09-17 追加，防止清理后回写）
+.mpl_cache/
+.matplotlib/
+.workbuddy/
+reports/
+archive/
+ppt_screenshots/
+plots/
+dashboard_static/
+docs/
+activity/
+deliverables/
+*.log
+*_log.txt
+
+# F11: 备份/快照目录禁止入库（2026-09-23 追加，架构审查 F11）
+# 理由：backup/ 存放作废口径旧版（如含 1624 的论文副本），而门禁把 backup 整目录排除 →
+# 形成"单向豁免区"：把旧口径挪进 backup 即可静默通过门禁。更危险的是它未被 .gitignore，
+# 一次 `git add -A` 就会把作废数字重新带回公开仓库。
+backup/
+*.bak-*
+*_backup_*/
+
+# 一键复现脚本的断点续跑状态目录（运行时生成，非源码）
+.oneclick_state/
+
+# 一键复现脚本的运行期产物（校验报告/检查点，非源码）
+.reproduce_checkpoint.json
+.reproduce_verify_report.json
+.reproduce_verify_report.md
+
+# 内部分析产物（属 docs/ 过程物区，不进公开库）
+nash_equilibrium_report.md
+
+# P0-12: 可复现性数据包构建产物（scripts/release_data_bundle.py 输出，非源码，由维护者挂 GitHub Release）
+release_artifacts/
+local_full_junit.xml
+_pytest_basetmp/
+
+# QA 质检产物（可再生成，不入库）
+qa_report.json
+qa_shots/
+qa_run.log
+server_err.log
+_start_server_tmp.py
+_start_server_tmp.bat

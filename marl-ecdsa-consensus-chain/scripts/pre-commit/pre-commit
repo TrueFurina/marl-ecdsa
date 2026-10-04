@@ -1,0 +1,18 @@
+#!/bin/sh
+# 通用门禁：密钥扫描 → 诚实口径 → 口径数字 → 结构守卫 → 测试文件禁改 → 锐评口径
+# 任一失败即拦截（fail-closed）。
+# 本文件是 hook 的**唯一真源模板**，由 scripts/pre-commit/install_hooks.py 幂等安装到
+# .git/hooks/pre-commit（.git/hooks/ 本身不受 git 跟踪，克隆后须重装）。
+echo "=== [1/6] 密钥扫描 ==="
+python scripts/pre-commit/secrets_scan.py $(git diff --cached --name-only --diff-filter=ACM) || exit 1
+echo "=== [2/6] 诚实口径 ==="
+python scripts/pre-commit/honesty_scan.py --cached || exit 1
+echo "=== [3/6] 作废令牌/口径门禁（fail-closed，仅扫暂存区，覆盖 thesis 与对外 PDF）==="
+python scripts/scan_void_tokens.py --cached || exit 1
+echo "=== [4/6] 结构守卫 ==="
+python scripts/pre-commit/structure_guard.py || exit 1
+echo "=== [5/6] 测试文件禁改守卫 ==="
+python scripts/pre-commit/test_file_guard.py --staged || exit 1
+echo "=== [6/6] 锐评文档口径门禁（fail-closed，阻断作废口径回潮）==="
+python scripts/scan_void_tokens.py --paths "deliverables/工程与代码锐评_20261001.md" --overwrite || exit 1
+echo "✅ 全部门禁通过"

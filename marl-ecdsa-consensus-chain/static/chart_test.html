@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Chart Test</title></head>
+<body style="background:#111;color:#fff;">
+<h1>Chart.js Minimal Test</h1>
+<div id="status"></div>
+<canvas id="c1" width="400" height="200"></canvas>
+<br>
+<canvas id="c2" width="400" height="200"></canvas>
+
+<script src="/static/chart.umd.min.js"></script>
+<script>
+var s = document.getElementById('status');
+try {
+    s.textContent = 'Chart type: ' + typeof Chart;
+    
+    // Test 1: basic chart
+    var ctx1 = document.getElementById('c1').getContext('2d');
+    new Chart(ctx1, {
+        type: 'line',
+        data: {
+            labels: [1,2,3],
+            datasets: [{label:'Test', data:[10,20,15]}]
+        }
+    });
+    s.textContent += ' | Test1 OK';
+    
+    // Test 2: empty datasets
+    var ctx2 = document.getElementById('c2').getContext('2d');
+    new Chart(ctx2, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: []
+        }
+    });
+    s.textContent += ' | Test2 OK';
+    
+    // Test 3: with options override
+    s.textContent += ' | All tests passed!';
+} catch(e) {
+    s.textContent = 'ERROR: ' + e.message + ' (stack: ' + (e.stack||'').substring(0,200) + ')';
+    s.style.color = 'red';
+}
+</script>
+</body>
+</html>

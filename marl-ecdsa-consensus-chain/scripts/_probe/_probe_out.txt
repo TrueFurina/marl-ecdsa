@@ -1,0 +1,83 @@
+E13 experiments[0]: name=Experiment B: Selfish Ratio Comparison
+E13 results keys (7): ['selfish_0pct_random', 'selfish_20pct_random', 'selfish_50pct_random', 'selfish_0pct_greedy', 'selfish_20pct_greedy', 'selfish_50pct_greedy', 'comparison']
+
+sample label 'selfish_0pct_random' full dict:
+    total_episodes: 500
+    avg_reward: -53.25087478942629
+    avg_reward_last_50: -51.40770951294365
+    avg_env_reward: -58.07409291461049
+    avg_env_reward_last_50: -56.264321720912676
+    avg_cooperation_rate: 0.4598666666666667
+    avg_betrayal_rate: 0.0
+    total_losses: 498
+    elapsed_time: 16.43396282196045
+    bc_scores_final: {'agent_0': 8036.0304321537415, 'agent_1': 8005.853866081089, 'agent_2': 8074.206327686183
+    leaderboard: [{'agent_id': 'agent_2', 'score': 8074.206327686183}, {'agent_id': 'agent_0', 'score': 803
+
+=== E13 聚合（10 种子, 500 回合）===
+可用数值指标: ['total_episodes', 'avg_reward', 'avg_reward_last_50', 'avg_env_reward', 'avg_env_reward_last_50', 'avg_cooperation_rate', 'avg_betrayal_rate', 'total_losses', 'elapsed_time']
+    0%  total_episodes             greedy=500.000±0.000(n=10)  random=500.000±0.000(n=10)
+    0%  avg_reward                 greedy=-52.474±1.628(n=10)  random=-52.638±1.445(n=10)
+    0%  avg_reward_last_50         greedy=-48.878±4.334(n=10)  random=-47.633±4.734(n=10)
+    0%  avg_env_reward             greedy=-57.309±1.614(n=10)  random=-57.473±1.429(n=10)
+    0%  avg_env_reward_last_50     greedy=-53.743±4.287(n=10)  random=-52.515±4.694(n=10)
+    0%  avg_cooperation_rate       greedy=0.478±0.015(n=10)  random=0.476±0.018(n=10)
+    0%  avg_betrayal_rate          greedy=0.000±0.000(n=10)  random=0.000±0.000(n=10)
+    0%  total_losses               greedy=498.000±0.000(n=10)  random=498.000±0.000(n=10)
+    0%  elapsed_time               greedy=15.988±0.151(n=10)  random=16.275±0.169(n=10)
+   20%  total_episodes             greedy=500.000±0.000(n=10)  random=500.000±0.000(n=10)
+   20%  avg_reward                 greedy=-43.571±1.946(n=10)  random=-54.303±2.059(n=10)
+   20%  avg_reward_last_50         greedy=-39.779±3.297(n=10)  random=-47.885±6.206(n=10)
+   20%  avg_env_reward             greedy=-46.795±1.935(n=10)  random=-57.523±2.045(n=10)
+   20%  avg_env_reward_last_50     greedy=-43.044±3.274(n=10)  random=-51.146±6.172(n=10)
+   20%  avg_cooperation_rate       greedy=0.317±0.014(n=10)  random=0.427±0.015(n=10)
+   20%  avg_betrayal_rate          greedy=0.333±0.000(n=10)  random=0.100±0.002(n=10)
+   20%  total_losses               greedy=498.000±0.000(n=10)  random=498.000±0.000(n=10)
+   20%  elapsed_time               greedy=16.074±0.187(n=10)  random=16.117±0.233(n=10)
+   50%  total_episodes             greedy=500.000±0.000(n=10)  random=500.000±0.000(n=10)
+   50%  avg_reward                 greedy=-35.140±1.408(n=10)  random=-55.768±1.129(n=10)
+   50%  avg_reward_last_50         greedy=-34.459±3.788(n=10)  random=-50.145±4.448(n=10)
+   50%  avg_env_reward             greedy=-36.753±1.401(n=10)  random=-57.381±1.125(n=10)
+   50%  avg_env_reward_last_50     greedy=-36.085±3.784(n=10)  random=-51.770±4.441(n=10)
+   50%  avg_cooperation_rate       greedy=0.161±0.011(n=10)  random=0.384±0.014(n=10)
+   50%  avg_betrayal_rate          greedy=0.667±0.000(n=10)  random=0.200±0.002(n=10)
+   50%  total_losses               greedy=498.000±0.000(n=10)  random=498.000±0.000(n=10)
+   50%  elapsed_time               greedy=15.961±0.202(n=10)  random=16.140±0.192(n=10)
+
+=== E13 配对差（greedy − random，同种子配对）===
+scipy available: False
+    0%  total_episodes             Δ=+0.000 (sd 0.000)
+    0%  avg_reward                 Δ=+0.164 (sd 2.001)
+    0%  avg_reward_last_50         Δ=-1.245 (sd 6.285)
+    0%  avg_env_reward             Δ=+0.164 (sd 1.981)
+    0%  avg_env_reward_last_50     Δ=-1.228 (sd 6.225)
+    0%  avg_cooperation_rate       Δ=+0.002 (sd 0.019)
+    0%  avg_betrayal_rate          Δ=+0.000 (sd 0.000)
+    0%  total_losses               Δ=+0.000 (sd 0.000)
+    0%  elapsed_time               Δ=-0.287 (sd 0.166)
+   20%  total_episodes             Δ=+0.000 (sd 0.000)
+   20%  avg_reward                 Δ=+10.732 (sd 2.295)
+   20%  avg_reward_last_50         Δ=+8.106 (sd 5.463)
+   20%  avg_env_reward             Δ=+10.728 (sd 2.281)
+   20%  avg_env_reward_last_50     Δ=+8.102 (sd 5.435)
+   20%  avg_cooperation_rate       Δ=-0.110 (sd 0.019)
+   20%  avg_betrayal_rate          Δ=+0.233 (sd 0.002)
+   20%  total_losses               Δ=+0.000 (sd 0.000)
+   20%  elapsed_time               Δ=-0.043 (sd 0.214)
+   50%  total_episodes             Δ=+0.000 (sd 0.000)
+   50%  avg_reward                 Δ=+20.628 (sd 1.928)
+   50%  avg_reward_last_50         Δ=+15.685 (sd 5.885)
+   50%  avg_env_reward             Δ=+20.628 (sd 1.920)
+   50%  avg_env_reward_last_50     Δ=+15.685 (sd 5.870)
+   50%  avg_cooperation_rate       Δ=-0.223 (sd 0.020)
+   50%  avg_betrayal_rate          Δ=+0.467 (sd 0.002)
+   50%  total_losses               Δ=+0.000 (sd 0.000)
+   50%  elapsed_time               Δ=-0.179 (sd 0.183)
+
+=== E14 聚合（每算法 n=10 种子, 3000 回合）===
+metric                                 iql           mappo            qmix             vdn
+avg_env_reward               -34.094±2.14    -69.081±2.42    -56.653±3.57    -65.266±1.22 
+avg_env_reward_last_50        -9.414±5.81    -69.652±3.76    -48.943±9.30    -68.769±3.24 
+avg_reward                   -29.064±2.15    -64.342±2.44    -51.817±3.60    -60.513±1.23 
+avg_cooperation_rate           0.621±0.01      0.387±0.02      0.480±0.03      0.414±0.01 
+avg_betrayal_rate              0.000±0.00      0.000±0.00      0.000±0.00      0.000±0.00 

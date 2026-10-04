@@ -1,0 +1,80 @@
+# =============================================================================
+# MARL-ECDSA Consensus Chain — Docker Compose
+# CCF 5th Blockchain Competition | Version 4.1
+# =============================================================================
+# Usage:
+#   docker-compose up -d              # Start dashboard + training
+#   docker-compose run experiment     # Run full experiment
+#   docker-compose run dashboard      # Dashboard only
+#   docker-compose down               # Stop all
+# =============================================================================
+
+version: "3.8"
+
+services:
+  # ── Main Application (Training + Dashboard) ──
+  app:
+    build: .
+    image: marl-ecdsa-chain:latest
+    container_name: marl-ecdsa-app
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./results:/app/results
+      - ./keys:/app/keys
+      - ./plots:/app/plots
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["--mode", "bc_marl", "--n_episodes", "500", "--dashboard"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('127.0.0.1',9090)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Full Experiment Runner ──
+  experiment:
+    build: .
+    image: marl-ecdsa-chain:latest
+    container_name: marl-ecdsa-experiment
+    profiles: ["experiment"]
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./results:/app/results
+    environment:
+      - PYTHONUNBUFFERED=1
+    # 覆盖镜像 ENTRYPOINT(main.py)：直接运行实验脚本而非透传参数给 main.py
+    entrypoint: ["python"]
+    command: ["scripts/one-click/run_full_experiment.py"]
+    restart: "no"
+
+  # ── Dashboard Only ──
+  dashboard:
+    build: .
+    image: marl-ecdsa-chain:latest
+    container_name: marl-ecdsa-dashboard
+    profiles: ["dashboard"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./results:/app/results
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["--dashboard"]
+    restart: unless-stopped
+
+  # ── P2P Network Demo ──
+  p2p-demo:
+    build: .
+    image: marl-ecdsa-chain:latest
+    container_name: marl-ecdsa-p2p
+    profiles: ["p2p"]
+    network_mode: "host"
+    environment:
+      - PYTHONUNBUFFERED=1
+    # 覆盖镜像 ENTRYPOINT(main.py)：网络演示是独立脚本，不透传给 main.py
+    entrypoint: ["python"]
+    command: ["scripts/network_demo.py", "--nodes", "3", "--rounds", "15"]
+    restart: "no"

@@ -1,0 +1,99 @@
+name: build-binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to upload binaries to (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux-amd64
+            sep: ':'
+            ext: ''
+          - os: macos-14
+            name: macos-arm64
+            sep: ':'
+            ext: ''
+          - os: windows-2022
+            name: windows-x64
+            sep: ';'
+            ext: '.exe'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build deps
+        run: pip install flask pyinstaller
+
+      - name: Build single-file dashboard
+        shell: bash
+        env:
+          SEP: ${{ matrix.sep }}
+        run: |
+          NAME="marlecdsa-dashboard-${{ matrix.name }}"
+          SRC="marl-ecdsa-consensus-chain"
+          pyinstaller --onefile --noconfirm --clean \
+            --name "$NAME" \
+            --paths "$SRC" \
+            --add-data "$SRC/templates${SEP}templates" \
+            --add-data "$SRC/static${SEP}static" \
+            --add-data "$SRC/training_results_pure.json${SEP}." \
+            --add-data "$SRC/training_results_bc.json${SEP}." \
+            --add-data "$SRC/results/legacy_json/training_results_selfish.json${SEP}results/legacy_json" \
+            "$SRC/scripts/exe/marlecdsa_launch.py"
+
+      - name: Smoke test (start & probe)
+        shell: bash
+        run: |
+          BIN="dist/marlecdsa-dashboard-${{ matrix.name }}${{ matrix.ext }}"
+          chmod +x "$BIN" 2>/dev/null || true
+          "$BIN" > smoke.log 2>&1 &
+          PID=$!
+          OK=0
+          for i in $(seq 1 15); do
+            sleep 2
+            if curl -sf http://127.0.0.1:9090/ | grep -q "MARL-ECDSA"; then OK=1; break; fi
+          done
+          kill $PID 2>/dev/null || true
+          if [ "$OK" != "1" ]; then echo "smoke test FAILED"; tail -20 smoke.log; exit 1; fi
+          echo "smoke test OK"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/marlecdsa-dashboard-${{ matrix.name }}${{ matrix.ext }}
+
+  upload:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Attach binaries to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+        run: |
+          ls -la dist
+          gh release upload "$TAG" dist/marlecdsa-dashboard-* --repo "$GITHUB_REPOSITORY" --clobber
+          echo "attached to $TAG"
