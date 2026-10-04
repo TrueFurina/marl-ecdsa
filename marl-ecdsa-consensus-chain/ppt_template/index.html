@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<!--
+🔴 **口径过期警示（2026-09-28 标注） — 引用前必须对齐登记簿**
+本文件写成时的主实验口径为 **n=22 种子/组**（对应 +29.2%、Welch p=0.126 不显著）。该口径**已被后续扩种取代、现已作废**。
+现行唯一权威口径为 **n=71/组**（`deliverables/number_registry.json` → NR-1 / NR-2）：
+・末 50 回合 `env_reward`（不含 BC 激励）**+28.17%**，Welch p=0.009524，Cohen d=0.4412，95%CI [0.6476, +4.5761]，检验力≈0.742，**BH-FDR 下显著 / Bonferroni 下不显著**；
+・全程平均 `env_reward` **+7.92%**，Welch p<1e-10，Cohen d=1.1962，检验力≈1.0。
+**两口径必须同报**，禁单点宣称「激励有效」「强证据」或「证明」。
+⚠️ 本文件**仅加标注、未修改任何原数字**；正式对外出材料前须按 n=71 改写（见 `deliverables/gstack/full-check-marl-ecdsa-2026-09-28.md` §7 方案 B）。
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MARL-ECDSA 共识链 · 课程设计答辩模板</title>
+<style>
+/* ============================================================
+   设计令牌（固化自 Dashboard 视觉语言，统一修正后的配色）
+   Deep-space sci-fi · 深空蓝底 + 青/靛/绿 三主色 + 红/琥珀 语义色
+   ============================================================ */
+:root{
+  --bg-deep:#040810;
+  --bg-card:rgba(12,20,40,0.88);
+  --bg-card-2:rgba(18,32,58,0.92);
+  --border:rgba(56,189,248,0.12);
+  --border-glow:rgba(56,189,248,0.38);
+  --accent:#38bdf8;      /* 青 */
+  --accent2:#818cf8;     /* 靛 */
+  --accent3:#34d399;     /* 绿 */
+  --danger:#f87171;      /* 红 */
+  --warn:#fbbf24;        /* 琥珀 */
+  --text:#cbd5e1;
+  --text-dim:#94a3b8;    /* 提亮后的次要文字，满足对比度 */
+  --text-bright:#f1f5f9;
+  --radius:16px;
+  --space:8px;
+  --font:'Inter','Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  font-family:var(--font);
+  background:var(--bg-deep);
+  color:var(--text);
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+/* 背景：径向辉光 + 细栅格，呼应 Dashboard 粒子感但更克制 */
+.bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(900px 500px at 12% 8%, rgba(56,189,248,0.10), transparent 60%),
+    radial-gradient(800px 500px at 88% 92%, rgba(129,140,248,0.10), transparent 60%),
+    radial-gradient(700px 400px at 70% 12%, rgba(52,211,153,0.06), transparent 60%);
+}
+.bg::after{content:"";position:absolute;inset:0;opacity:0.25;
+  background-image:linear-gradient(rgba(148,163,184,0.05) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(148,163,184,0.05) 1px,transparent 1px);
+  background-size:48px 48px;mask-image:radial-gradient(circle at 50% 40%,#000 30%,transparent 80%);}
+
+/* 舞台：固定 16:9，JS 缩放适配视口 */
+#viewport{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:1;}
+#stage{position:relative;width:1280px;height:720px;flex:none;overflow:hidden;}
+
+/* 单页 */
+.slide{position:absolute;inset:0;padding:56px 72px;display:none;flex-direction:column;
+  opacity:0;transition:opacity .35s ease;}
+.slide.active{display:flex;opacity:1;}
+
+/* 页眉 */
+.kicker{display:flex;align-items:center;gap:10px;font-size:13px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:10px;}
+.kicker .idx{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
+  border-radius:8px;border:1px solid var(--border-glow);color:var(--accent);font-size:12px;
+  background:rgba(56,189,248,0.08);}
+.title{font-size:34px;font-weight:700;color:var(--text-bright);line-height:1.2;
+  background:linear-gradient(120deg,var(--accent),var(--accent2) 55%,var(--accent3));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+.rule{height:1px;background:linear-gradient(90deg,var(--border-glow),transparent);margin:16px 0 22px;}
+.body{flex:1;min-height:0;}
+
+/* 页脚 */
+.footer{position:absolute;left:72px;right:72px;bottom:26px;display:flex;align-items:center;
+  justify-content:space-between;font-size:12px;color:var(--text-dim);}
+.footer .brand{color:var(--accent);font-weight:600;}
+.footer .pg{font-variant-numeric:tabular-nums;letter-spacing:.05em;}
+
+/* 通用卡片 */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:20px 22px;position:relative;overflow:hidden;transition:.3s cubic-bezier(.4,0,.2,1);}
+.card:hover{border-color:var(--border-glow);transform:translateY(-2px);}
+.card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0;transition:.4s;}
+.card:hover::before{opacity:1;}
+.card h3{font-size:16px;color:var(--text-bright);margin-bottom:10px;font-weight:600;display:flex;align-items:center;gap:8px;}
+.card p,.card li{font-size:13.5px;line-height:1.7;color:var(--text);}
+.card ul{list-style:none;display:flex;flex-direction:column;gap:8px;}
+.card li{padding-left:18px;position:relative;}
+.card li::before{content:"";position:absolute;left:2px;top:9px;width:6px;height:6px;border-radius:50%;
+  background:var(--accent);}
+.dot-c{color:var(--accent);} .dot-g{color:var(--accent3);} .dot-i{color:var(--accent2);}
+.dot-r{color:var(--danger);} .dot-w{color:var(--warn);}
+
+/* KPI */
+.kpi{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px;text-align:center;}
+.kpi .v{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1;}
+.kpi .l{font-size:12.5px;color:var(--text-dim);margin-top:6px;}
+.kpi.c .v{color:var(--accent);} .kpi.g .v{color:var(--accent3);}
+.kpi.i .v{color:var(--accent2);} .kpi.r .v{color:var(--danger);} .kpi.w .v{color:var(--warn);}
+
+/* 表格 */
+.tbl{width:100%;border-collapse:collapse;font-size:13px;}
+.tbl th,.tbl td{padding:11px 14px;text-align:left;border-bottom:1px solid rgba(148,163,184,0.08);}
+.tbl th{color:var(--text-dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+.tbl td{color:var(--text);}
+.tbl tr:hover td{background:rgba(255,255,255,0.02);}
+.tc-c{color:var(--accent);font-weight:600;text-align:center;}
+.tc-g{color:var(--accent3);font-weight:600;text-align:center;}
+.tc-r{color:var(--danger);font-weight:600;text-align:center;}
+.tc-n{color:var(--text-dim);text-align:center;}
+
+/* 网格工具 */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+.col{display:flex;flex-direction:column;gap:16px;}
+
+/* 标签 */
+.tag{display:inline-block;font-size:11.5px;padding:3px 11px;border-radius:20px;
+  background:rgba(56,189,248,0.10);color:var(--accent);border:1px solid rgba(56,189,248,0.22);font-weight:500;}
+.tag.g{background:rgba(52,211,153,0.10);color:var(--accent3);border-color:rgba(52,211,153,0.22);}
+.tag.i{background:rgba(129,140,248,0.10);color:var(--accent2);border-color:rgba(129,140,248,0.22);}
+.tag.r{background:rgba(248,113,113,0.10);color:var(--danger);border-color:rgba(248,113,113,0.22);}
+
+/* ============ 封面 ============ */
+.cover{justify-content:center;align-items:flex-start;text-align:left;}
+.cover .badge{font-size:13px;letter-spacing:.22em;color:var(--accent2);text-transform:uppercase;font-weight:600;margin-bottom:18px;}
+.cover h1{font-size:62px;font-weight:800;line-height:1.08;color:var(--text-bright);
+  background:linear-gradient(120deg,var(--accent),var(--accent2) 50%,var(--accent3));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;max-width:1000px;}
+.cover .sub{font-size:19px;color:var(--text);margin-top:20px;max-width:880px;line-height:1.7;}
+.cover .meta{margin-top:40px;display:flex;gap:14px;flex-wrap:wrap;}
+.cover .meta .m{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;font-size:13.5px;}
+.cover .meta .m b{color:var(--accent);}
+.cover .hexes{position:absolute;right:64px;bottom:90px;display:flex;gap:14px;opacity:.9;}
+.cover .hex{width:64px;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;
+  font-size:26px;border:1px solid var(--border);}
+.cover .hex.c{background:rgba(56,189,248,0.10);color:var(--accent);}
+.cover .hex.i{background:rgba(129,140,248,0.10);color:var(--accent2);}
+.cover .hex.g{background:rgba(52,211,153,0.10);color:var(--accent3);}
+
+/* ============ 目录 ============ */
+.toc{display:grid;grid-template-columns:1fr 1fr;gap:12px 28px;align-content:start;}
+.toc .it{display:flex;align-items:center;gap:16px;padding:14px 16px;border-radius:12px;
+  border:1px solid transparent;transition:.25s;}
+.toc .it:hover{border-color:var(--border);background:rgba(255,255,255,0.02);}
+.toc .n{font-size:22px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;min-width:42px;
+  background:rgba(56,189,248,0.08);border-radius:10px;height:42px;display:flex;align-items:center;justify-content:center;}
+.toc .t{font-size:15.5px;color:var(--text-bright);font-weight:500;}
+.toc .d{font-size:12px;color:var(--text-dim);margin-top:2px;}
+
+/* ============ 章节分隔 ============ */
+.divider{justify-content:center;}
+.divider .big{font-size:160px;font-weight:800;line-height:.9;
+  background:linear-gradient(120deg,rgba(56,189,248,0.25),rgba(129,140,248,0.25));
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+.divider h2{font-size:40px;font-weight:700;color:var(--text-bright);margin-top:8px;}
+.divider p{font-size:16px;color:var(--text-dim);margin-top:12px;max-width:620px;}
+
+/* 图表容器 */
+.chartwrap{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:14px 16px;height:100%;display:flex;flex-direction:column;}
+.chartwrap h4{font-size:14px;color:var(--text-bright);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;}
+.chartwrap .legend{display:flex;gap:14px;font-size:11.5px;color:var(--text-dim);}
+.chartwrap .legend i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle;}
+.chartwrap svg{flex:1;width:100%;height:100%;}
+
+/* 导航（屏幕空间，独立于缩放舞台） */
+#nav{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:14px;}
+#nav button{width:38px;height:38px;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);
+  color:var(--text);font-size:16px;cursor:pointer;transition:.25s;}
+#nav button:hover{border-color:var(--border-glow);color:var(--accent);}
+#dots{display:flex;gap:6px;}
+#dots .d{width:7px;height:7px;border-radius:50%;background:rgba(148,163,184,0.35);cursor:pointer;transition:.25s;}
+#dots .d.on{background:var(--accent);width:18px;border-radius:4px;}
+#counter{position:fixed;top:16px;right:22px;z-index:50;font-size:12px;color:var(--text-dim);
+  font-variant-numeric:tabular-nums;letter-spacing:.05em;}
+#hint{position:fixed;top:16px;left:22px;z-index:50;font-size:11.5px;color:var(--text-dim);opacity:.7;}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div id="counter">01 / 19</div>
+<div id="hint">← → 翻页 · F 全屏</div>
+
+<div id="viewport"><div id="stage">
+
+<!-- ============ 1 · 封面 ============ -->
+<section class="slide cover active">
+  <div class="badge">CCF 第五届区块链竞赛 · 课程设计答辩</div>
+  <h1>面向 MARL 的区块链共识机制<br>MARL-ECDSA 共识链</h1>
+  <p class="sub">基于 IQL 独立强化学习 + CW-PBFT 贡献加权共识 + ECDSA 安全签名的双向协同框架，
+  在 SimpleSpread 协同导航任务中验证区块链激励对多智能体协作的提升效果。</p>
+  <div class="meta">
+    <div class="m"><b>课程</b> · 网络编程与应用 / 区块链AI协同</div>
+    <div class="m"><b>算法</b> · IQL + CW-PBFT</div>
+    <div class="m"><b>安全</b> · ECDSA secp256r1</div>
+    <div class="m"><b>团队</b> · MARL-ECDSA Team</div>
+  </div>
+  <div class="hexes">
+    <div class="hex c">⬡</div><div class="hex i">⛓</div><div class="hex g">🔐</div>
+  </div>
+</section>
+
+<!-- ============ 2 · 目录 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">02</span> Agenda</div>
+  <div class="title">目录</div>
+  <div class="rule"></div>
+  <div class="body toc">
+    <div class="it"><div class="n">01</div><div><div class="t">研究背景与问题</div><div class="d">多智能体协作困境与现有激励缺失</div></div></div>
+    <div class="it"><div class="n">02</div><div><div class="t">相关工作</div><div class="d">MARL / 区块链共识 / 安全签名</div></div></div>
+    <div class="it"><div class="n">03</div><div><div class="t">系统总览与架构</div><div class="d">双向协同框架与编排流水线</div></div></div>
+    <div class="it"><div class="n">04</div><div><div class="t">核心模块</div><div class="d">MARL层 · 区块链层 · Bridge</div></div></div></div>
+    <div class="it"><div class="n">05</div><div><div class="t">安全与共识机制</div><div class="d">ECDSA · CW-PBFT · 分级惩罚</div></div></div>
+    <div class="it"><div class="n">06</div><div><div class="t">实验与结果</div><div class="d">设置 · 奖励/合作曲线 · 三模式对比</div></div></div>
+    <div class="it"><div class="n">07</div><div><div class="t">安全性分析与结论</div><div class="d">攻击防御 · 结论与展望</div></div></div>
+    <div class="it"><div class="n">08</div><div><div class="t">致谢与问答</div><div class="d">Q&amp;A</div></div></div>
+  </div>
+</section>
+
+<!-- ============ 3 · 研究背景与问题 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">03</span> Background &amp; Problem</div>
+  <div class="title">研究背景与问题</div>
+  <div class="rule"></div>
+  <div class="body g3">
+    <div class="card"><h3><span class="dot-c">●</span> 协作困境</h3>
+      <p>在多智能体协同任务（如 SimpleSpread 协同导航）中，个体理性智能体倾向于“搭便车”或背叛，
+      导致全局奖励难以收敛，团队目标达成率低。</p></div>
+    <div class="card"><h3><span class="dot-i">●</span> 激励缺失</h3>
+      <p>传统 MARL 仅靠环境奖励塑形，缺乏对“贡献/背叛”的可量化存证，
+      自私行为难以被识别、归因与惩罚。</p></div>
+    <div class="card"><h3><span class="dot-r">●</span> 安全空白</h3>
+      <p>开放网络中智能体身份可被伪造、消息可被篡改，缺乏不可抵赖的
+      身份签名与防重放机制，协同链路存在信任风险。</p></div>
+  </div>
+  <div class="body" style="margin-top:16px;">
+    <div class="card"><h3><span class="dot-g">●</span> 核心研究问题</h3>
+      <p style="font-size:15px;color:var(--text-bright);">能否用<b style="color:var(--accent)"> 区块链的不可篡改激励 </b>+
+      <b style="color:var(--accent3)"> 密码学身份存证 </b>，在不破坏 MARL 学习效率的前提下，
+      持续提升多智能体协作率并抵御自私/伪造攻击？—— 这正是本项目的出发点。</p></div>
+  </div>
+</section>
+
+<!-- ============ 4 · 相关工作 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">04</span> Related Work</div>
+  <div class="title">相关工作</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="col">
+      <div class="card"><h3><span class="dot-c">●</span> 多智能体强化学习 (MARL)</h3>
+        <ul>
+          <li>IQL / VDN / QMIX：值分解与独立学习范式</li>
+          <li>通信协议（DIAL、CommNet）：隐式共识生成</li>
+          <li>协作收益分配（Shapley、Credit Assignment）</li>
+        </ul></div>
+      <div class="card"><h3><span class="dot-i">●</span> 区块链共识</h3>
+        <ul>
+          <li>PBFT / Tendermint：拜占庭容错经典方案</li>
+          <li>PoS / 贡献加权：以贡献替代算力</li>
+          <li>联盟链：低延迟、可控节点的工程现实</li>
+        </ul></div>
+    </div>
+    <div class="col">
+      <div class="card"><h3><span class="dot-g">●</span> 安全签名与身份</h3>
+        <ul>
+          <li>ECDSA secp256r1：FIPS 186-5 标准曲线</li>
+          <li>RFC 6979：确定性 k 值，杜绝随机性泄露</li>
+          <li>nonce 单调递增 + 时间戳：防重放</li>
+        </ul></div>
+      <div class="card"><h3><span class="dot-w">●</span> 现有方案的不足</h3>
+        <ul>
+          <li>MARL 与链上激励多为“离线对账”，缺乏实时双向闭环</li>
+          <li>共识权重未与 MARL 贡献度对齐</li>
+          <li>身份层与安全层常分离，难以追责</li>
+        </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5 · 系统总览与架构 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">05</span> System Overview</div>
+  <div class="title">系统总览：MARL × 区块链双向协同</div>
+  <div class="rule"></div>
+  <div class="body" style="display:flex;justify-content:center;">
+    <svg viewBox="0 0 980 360" style="width:100%;max-width:960px;">
+      <defs>
+        <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient>
+        <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#38bdf8"/></linearGradient>
+        <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <rect x="40" y="110" width="220" height="140" rx="14" fill="rgba(56,189,248,0.06)" stroke="rgba(56,189,248,0.25)" stroke-width="1.5"/>
+      <text x="150" y="155" text-anchor="middle" fill="#38bdf8" font-size="16" font-weight="700" filter="url(#glow)">MARL 协同层</text>
+      <text x="150" y="182" text-anchor="middle" fill="#94a3b8" font-size="12">IQL · SimpleSpread</text>
+      <text x="150" y="202" text-anchor="middle" fill="#94a3b8" font-size="12">ε-greedy · Replay Buffer</text>
+      <text x="150" y="222" text-anchor="middle" fill="#94a3b8" font-size="12">决策 + 学习</text>
+
+      <rect x="720" y="110" width="220" height="140" rx="14" fill="rgba(129,140,248,0.06)" stroke="rgba(129,140,248,0.25)" stroke-width="1.5"/>
+      <text x="830" y="155" text-anchor="middle" fill="#818cf8" font-size="16" font-weight="700" filter="url(#glow)">区块链激励层</text>
+      <text x="830" y="182" text-anchor="middle" fill="#94a3b8" font-size="12">CW-PBFT · ECDSA</text>
+      <text x="830" y="202" text-anchor="middle" fill="#94a3b8" font-size="12">贡献量化 · 分级惩罚</text>
+      <text x="830" y="222" text-anchor="middle" fill="#94a3b8" font-size="12">激励 + 存证</text>
+
+      <rect x="370" y="120" width="240" height="120" rx="14" fill="rgba(52,211,153,0.05)" stroke="rgba(52,211,153,0.22)" stroke-width="1.5"/>
+      <text x="490" y="158" text-anchor="middle" fill="#34d399" font-size="15" font-weight="700" filter="url(#glow)">Bridge 编排器</text>
+      <text x="490" y="182" text-anchor="middle" fill="#94a3b8" font-size="12">4 子组件流水线</text>
+      <text x="490" y="202" text-anchor="middle" fill="#94a3b8" font-size="11">Signing→Recorder→Detector→Settlement</text>
+
+      <line x1="260" y1="180" x2="368" y2="180" stroke="rgba(56,189,248,0.4)" stroke-width="2.5" stroke-dasharray="7,5"><animate attributeName="stroke-dashoffset" from="24" to="0" dur="2s" repeatCount="indefinite"/></line>
+      <line x1="612" y1="180" x2="720" y2="180" stroke="rgba(129,140,248,0.4)" stroke-width="2.5" stroke-dasharray="7,5"><animate attributeName="stroke-dashoffset" from="24" to="0" dur="2s" repeatCount="indefinite"/></line>
+      <line x1="368" y1="200" x2="260" y2="200" stroke="rgba(52,211,153,0.25)" stroke-width="1.5" stroke-dasharray="5,4"><animate attributeName="stroke-dashoffset" from="18" to="0" dur="3s" repeatCount="indefinite"/></line>
+      <line x1="720" y1="200" x2="612" y2="200" stroke="rgba(52,211,153,0.25)" stroke-width="1.5" stroke-dasharray="5,4"><animate attributeName="stroke-dashoffset" from="18" to="0" dur="3s" repeatCount="indefinite"/></line>
+
+      <rect x="250" y="280" width="480" height="56" rx="10" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+      <text x="490" y="305" text-anchor="middle" fill="#e2e8f0" font-size="13" font-weight="600">实验验证：pure_marl vs bc_marl vs selfish</text>
+      <text x="490" y="325" text-anchor="middle" fill="#64748b" font-size="11">3000 回合 · BC 环境奖励 +29.2%（n=22 · 方向一致不显著）· ECDSA 75K 签名 · 1K 区块</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ============ 6 · 核心模块：MARL 协同层 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">06</span> Module · MARL Layer</div>
+  <div class="title">核心模块 · MARL 协同层</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="col">
+      <div class="card"><h3><span class="dot-c">●</span> 算法：IQL (Independent Q-Learning)</h3>
+        <ul>
+          <li>每个智能体独立维护 Q 网络，隐藏维度 128</li>
+          <li>ε-greedy 探索，ε 衰减 5000 步</li>
+          <li>经验回放 Buffer 2500，Target 网络 τ=0.01</li>
+        </ul></div>
+      <div class="card"><h3><span class="dot-i">●</span> 环境：SimpleSpread (NumPy)</h3>
+        <ul>
+          <li>3 智能体 / 3 目标点，最大步数 25</li>
+          <li>状态维度 18，观测维度 14，离散动作 5</li>
+          <li>奖励 = 覆盖目标 − 碰撞惩罚</li>
+        </ul></div>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;justify-content:center;">
+      <h3><span class="dot-g">●</span> 协同—激励接口</h3>
+      <p>每步智能体的动作与状态被 Bridge 采集，作为链上“贡献”的原始证据：</p>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
+        <span class="tag">动作序列</span><span class="tag">状态轨迹</span>
+        <span class="tag g">合作度评分</span><span class="tag i">合规评分</span>
+        <span class="tag r">背叛检测</span>
+      </div>
+      <p style="margin-top:14px;color:var(--text-dim);">→ 这些信号经签名后上链，成为共识投票权重的依据。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7 · 核心模块：区块链激励层 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">07</span> Module · Blockchain Layer</div>
+  <div class="title">核心模块 · 区块链激励层</div>
+  <div class="rule"></div>
+  <div class="body g3">
+    <div class="card"><h3><span class="dot-c">●</span> 共识算法</h3>
+      <p>CW-PBFT：贡献加权实用拜占庭容错。投票权重来自任务/合作/合规三项贡献，
+      阈值 ≥ 2/3 权重同意即确认。</p></div>
+    <div class="card"><h3><span class="dot-g">●</span> 贡献量化</h3>
+      <p>Shapley 风格权重：task=0.40，coop=0.35，compliance=0.25。
+      每步结算链上积分，主节点每 10 区块轮换。</p></div>
+    <div class="card"><h3><span class="dot-i">●</span> 分级惩罚</h3>
+      <p>警告(10) → 降权(30) → 封禁(50)。
+      将背叛成本显式写入共识经济，抑制自私行为。</p></div>
+  </div>
+  <div class="body" style="margin-top:16px;">
+    <div class="card"><h3><span class="dot-w">●</span> 身份与存证</h3>
+      <p style="font-size:14.5px;">每个智能体持有 <b style="color:var(--accent2)">ECDSA:secp256r1:agent_i</b> 密钥对，
+      所有上链动作均经 SHA256 + ECDSA 签名，形成不可抵赖的行为存证链；区块头包含前序哈希，
+      保证整体不可篡改。</p></div>
+  </div>
+</section>
+
+<!-- ============ 8 · Bridge 编排器 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">08</span> Module · Bridge Orchestrator</div>
+  <div class="title">Bridge 编排器 · 4 子组件流水线</div>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g4">
+      <div class="card"><h3><span class="dot-c">①</span> SigningService</h3>
+        <p>对动作/状态进行 ECDSA 签名与验签，保障来源可信与不可抵赖。</p>
+        <div class="kpi c" style="margin-top:12px;padding:10px;"><div class="v" style="font-size:20px;">75K</div><div class="l">签名累计</div></div></div>
+      <div class="card"><h3><span class="dot-i">②</span> ActionRecorder</h3>
+        <p>记录待上链动作并打包为交易，驱动区块生成与流水。</p>
+        <div class="kpi i" style="margin-top:12px;padding:10px;"><div class="v" style="font-size:20px;">1K</div><div class="l">区块高度</div></div></div>
+      <div class="card"><h3><span class="dot-g">③</span> CooperationDetector</h3>
+        <p>实时估算合作/背叛，输出合作度与合规评分供共识加权。</p>
+        <div class="kpi g" style="margin-top:12px;padding:10px;"><div class="v" style="font-size:20px;">100%</div><div class="l">协同覆盖</div></div></div>
+      <div class="card"><h3><span class="dot-w">④</span> SettlementCoordinator</h3>
+        <p>按 λ 权重结算链上积分，触发分级惩罚与激励分发。</p>
+        <div class="kpi w" style="margin-top:12px;padding:10px;"><div class="v" style="font-size:20px;">λ=0.1</div><div class="l">激励权重</div></div></div>
+    </div>
+    <div class="card" style="margin-top:16px;text-align:center;color:var(--text-dim);font-size:13.5px;">
+      Signing <span style="color:var(--accent)">→</span> Recorder <span style="color:var(--accent2)">→</span> Detector <span style="color:var(--accent3)">→</span> Settlement
+      &nbsp;·&nbsp; 形成“行为采集 → 存证 → 评估 → 结算”的实时闭环
+    </div>
+  </div>
+</section>
+
+<!-- ============ 9 · ECDSA 安全机制 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">09</span> Security · ECDSA</div>
+  <div class="title">ECDSA 安全机制</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="col">
+      <div class="card"><h3><span class="dot-c">●</span> 密钥与签名标准</h3>
+        <ul>
+          <li>曲线：secp256r1 (P-256)，符合 FIPS 186-5</li>
+          <li>k 值：RFC 6979 确定性生成，杜绝随机数泄露</li>
+          <li>哈希：SHA-256 预处理消息</li>
+        </ul></div>
+      <div class="card"><h3><span class="dot-g">●</span> 防重放与时效</h3>
+        <ul>
+          <li>nonce 单调递增，绑定单调递增计数器</li>
+          <li>时间戳有效期 ±30s，过期签名拒绝上链</li>
+          <li>每智能体独立密钥，身份不可伪造</li>
+        </ul></div>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;justify-content:center;">
+      <h3><span class="dot-r">●</span> 异常检测</h3>
+      <p>SecurityGuard 对签名进行实时审计：</p>
+      <div class="g2" style="margin-top:14px;gap:12px;">
+        <div class="kpi g" style="padding:12px;"><div class="v" style="font-size:22px;">PASS</div><div class="l">安全校验通过</div></div>
+        <div class="kpi r" style="padding:12px;"><div class="v" style="font-size:22px;">ALERT</div><div class="l">k 值重用告警</div></div>
+      </div>
+      <p style="margin-top:14px;color:var(--text-dim);">相同 r 值签名 → 判定私钥可推导风险 → 触发告警/封禁。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10 · CW-PBFT 共识 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">10</span> Consensus · CW-PBFT</div>
+  <div class="title">CW-PBFT 贡献加权共识</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="card">
+      <h3><span class="dot-i">●</span> 流程</h3>
+      <svg viewBox="0 0 460 200" style="width:100%;">
+        <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#38bdf8"/></marker></defs>
+        <rect x="10" y="80" width="90" height="40" rx="10" fill="rgba(56,189,248,0.10)" stroke="#38bdf8" stroke-width="1.2"/><text x="55" y="104" text-anchor="middle" fill="#cbd5e1" font-size="12">Pre-Prepare</text>
+        <rect x="130" y="80" width="90" height="40" rx="10" fill="rgba(129,140,248,0.10)" stroke="#818cf8" stroke-width="1.2"/><text x="175" y="104" text-anchor="middle" fill="#cbd5e1" font-size="12">Prepare</text>
+        <rect x="250" y="80" width="90" height="40" rx="10" fill="rgba(52,211,153,0.10)" stroke="#34d399" stroke-width="1.2"/><text x="295" y="104" text-anchor="middle" fill="#cbd5e1" font-size="12">Commit</text>
+        <rect x="370" y="80" width="80" height="40" rx="10" fill="rgba(251,191,36,0.10)" stroke="#fbbf24" stroke-width="1.2"/><text x="410" y="104" text-anchor="middle" fill="#cbd5e1" font-size="12">Reply</text>
+        <line x1="100" y1="100" x2="128" y2="100" stroke="#38bdf8" stroke-width="2" marker-end="url(#ar)"/>
+        <line x1="220" y1="100" x2="248" y2="100" stroke="#818cf8" stroke-width="2" marker-end="url(#ar)"/>
+        <line x1="340" y1="100" x2="368" y2="100" stroke="#34d399" stroke-width="2" marker-end="url(#ar)"/>
+        <text x="230" y="160" text-anchor="middle" fill="#94a3b8" font-size="11">权重来自贡献度 · ≥2/3 同意即确认</text>
+      </svg>
+    </div>
+    <div class="col">
+      <div class="card"><h3><span class="dot-c">●</span> 容错与阈值</h3>
+        <ul><li>f = floor((n−1)/3) = 0（n=3）</li><li>投票阈值 ≥ 2/3 权重</li></ul></div>
+      <div class="card"><h3><span class="dot-g">●</span> 贡献权重</h3>
+        <ul><li>task=0.40 · coop=0.35 · compliance=0.25</li><li>与 MARL 行为直接挂钩</li></ul></div>
+      <div class="card"><h3><span class="dot-r">●</span> 惩罚经济</h3>
+        <ul><li>警告(10)→降权(30)→封禁(50)</li><li>背叛成本显式化</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 11 · 实验设置 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">11</span> Experiment Setup</div>
+  <div class="title">实验设置</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="card">
+      <h3><span class="dot-c">●</span> 三组对照实验</h3>
+      <table class="tbl">
+        <thead><tr><th>组别</th><th>模式</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="tc-n">A</td><td>Pure MARL</td><td class="tc-n">纯多智能体协同</td></tr>
+          <tr><td class="tc-n">B</td><td class="tc-c">BC-MARL</td><td class="tc-n">MARL + 区块链激励</td></tr>
+          <tr><td class="tc-n">C</td><td class="tc-r">Selfish</td><td class="tc-n">含自私智能体</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3><span class="dot-i">●</span> 关键超参数</h3>
+      <table class="tbl">
+        <tbody>
+          <tr><td>算法</td><td>IQL (Independent Q-Learning)</td></tr>
+          <tr><td>环境</td><td>SimpleSpread (NumPy)</td></tr>
+          <tr><td>智能体 / 目标</td><td>3 / 3</td></tr>
+          <tr><td>最大步数</td><td>25</td></tr>
+          <tr><td>隐藏维度 / 学习率</td><td>128 / 0.001</td></tr>
+          <tr><td>折扣因子 γ / λ</td><td>0.8 / 0.1</td></tr>
+          <tr><td>训练回合</td><td>1000</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 12 · 结果：奖励曲线 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">12</span> Result · Reward</div>
+  <div class="title">实验结果 · 奖励曲线对比</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="chartwrap">
+      <h4>全程平均奖励（50 回合平滑 · 示意）<span class="legend"><span><i style="background:#94a3b8"></i>Pure</span><span><i style="background:#38bdf8"></i>BC-MARL</span></span></h4>
+      <svg viewBox="0 0 1000 420" preserveAspectRatio="none">
+        <line x1="60" y1="40" x2="60" y2="360" stroke="rgba(148,163,184,0.18)"/>
+        <line x1="60" y1="360" x2="960" y2="360" stroke="rgba(148,163,184,0.18)"/>
+        <line x1="60" y1="200" x2="960" y2="200" stroke="rgba(148,163,184,0.07)"/>
+        <line x1="60" y1="120" x2="960" y2="120" stroke="rgba(148,163,184,0.07)"/>
+        <path d="M60,300 L180,288 L300,276 L420,266 L540,258 L660,252 L780,248 L900,247 L960,246" fill="none" stroke="#94a3b8" stroke-width="2.4" stroke-dasharray="7,5"/>
+        <path d="M60,300 L180,276 L300,250 L420,226 L540,206 L660,190 L780,178 L900,170 L960,167 L60,360 L960,360 Z" fill="rgba(56,189,248,0.12)" stroke="none"/>
+        <path d="M60,300 L180,276 L300,250 L420,226 L540,206 L660,190 L780,178 L900,170 L960,167" fill="none" stroke="#38bdf8" stroke-width="3"/>
+        <text x="60" y="385" fill="#64748b" font-size="12">0</text>
+        <text x="900" y="385" fill="#64748b" font-size="12">1000 回合</text>
+        <text x="74" y="56" fill="#38bdf8" font-size="12">BC 收敛于更高奖励</text>
+      </svg>
+    </div>
+    <div class="col">
+      <div class="kpi c"><div class="v">+29.2%</div><div class="l">BC vs Pure 环境奖励（n=22 · p=0.126 不显著）</div></div>
+      <div class="kpi g"><div class="v">−45.0</div><div class="l">BC 平均奖励（基准线）</div></div>
+      <div class="card" style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+        <h3><span class="dot-c">●</span> 解读</h3>
+        <p>BC-MARL 在约 400 回合后稳定超越 Pure，且方差更小；
+        区块链激励将“合作”转化为可累积的链上收益，缓解了早期探索期的背叛塌陷。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 13 · 结果：合作率 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">13</span> Result · Cooperation</div>
+  <div class="title">实验结果 · 合作率对比</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="chartwrap">
+      <h4>合作率曲线（示意）<span class="legend"><span><i style="background:#94a3b8"></i>Pure</span><span><i style="background:#34d399"></i>BC</span><span><i style="background:#f87171"></i>Selfish</span></span></h4>
+      <svg viewBox="0 0 1000 420" preserveAspectRatio="none">
+        <line x1="60" y1="40" x2="60" y2="360" stroke="rgba(148,163,184,0.18)"/>
+        <line x1="60" y1="360" x2="960" y2="360" stroke="rgba(148,163,184,0.18)"/>
+        <line x1="60" y1="80" x2="960" y2="80" stroke="rgba(148,163,184,0.07)"/>
+        <path d="M60,120 L180,100 L300,86 L420,78 L540,72 L660,68 L780,66 L900,65 L960,65" fill="none" stroke="#94a3b8" stroke-width="2.4" stroke-dasharray="7,5"/>
+        <path d="M60,150 L180,112 L300,92 L420,82 L540,76 L660,72 L780,69 L900,68 L960,68" fill="none" stroke="#34d399" stroke-width="3"/>
+        <path d="M60,150 L180,170 L300,196 L420,214 L540,226 L660,234 L780,240 L900,244 L960,246" fill="none" stroke="#f87171" stroke-width="2.4" stroke-dasharray="6,4"/>
+        <text x="60" y="385" fill="#64748b" font-size="12">0</text>
+        <text x="900" y="385" fill="#64748b" font-size="12">1000 回合</text>
+        <text x="700" y="60" fill="#34d399" font-size="12">BC 更快逼近 100%</text>
+      </svg>
+    </div>
+    <div class="col">
+      <div class="kpi g"><div class="v">100%</div><div class="l">BC 收敛合作率</div></div>
+      <div class="kpi r"><div class="v">↓ 显著</div><div class="l">Selfish 组合作率塌陷</div></div>
+      <div class="card" style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+        <h3><span class="dot-g">●</span> 解读</h3>
+        <p>BC 组合作率以更陡斜率收敛至满值；Selfish 组因自私智能体拉低团队效用，
+        合作率持续下滑——印证分级惩罚对自私行为的抑制必要。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 14 · 三模式对比 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">14</span> Result · Tri-mode</div>
+  <div class="title">三模式对照数据</div>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="card">
+      <table class="tbl">
+        <thead><tr><th>指标</th><th class="tc-n">Pure MARL</th><th class="tc-c">BC-MARL</th><th class="tc-r">Selfish</th><th class="tc-g">BC vs Pure</th></tr></thead>
+        <tbody>
+          <tr><td>全程均奖励</td><td class="tc-n">−64.0</td><td class="tc-c">−45.0</td><td class="tc-r">−58.0</td><td class="tc-g">↑ 29.2%</td></tr>
+          <tr><td>后 50 回合均奖励</td><td class="tc-n">−48.0</td><td class="tc-c">−38.0</td><td class="tc-r">−52.0</td><td class="tc-g">↑ 20.8%</td></tr>
+          <tr><td>合作率</td><td class="tc-n">100%</td><td class="tc-c">100%</td><td class="tc-r">~82%</td><td class="tc-g">稳定达标</td></tr>
+          <tr><td>背叛率</td><td class="tc-n">0%</td><td class="tc-c">0%</td><td class="tc-r">↑ 显著</td><td class="tc-g">无恶意</td></tr>
+          <tr><td>ECDSA 签名</td><td class="tc-n">0</td><td class="tc-c">75,000</td><td class="tc-r">75,000</td><td class="tc-g">—</td></tr>
+          <tr><td>区块高度 / 共识轮</td><td class="tc-n">0 / 0</td><td class="tc-c">1,000 / 1,000</td><td class="tc-r">1,000 / 1,000</td><td class="tc-g">—</td></tr>
+        </tbody>
+      </table>
+      <p style="color:#94a3b8;font-size:11px;margin-top:8px;">注：上表奖励为 V2 演示口径（1000 回合 total_reward，含 BC 激励，已作废）；权威口径为 n=22 环境奖励——末 50 回合 bc −6.11 vs pure −8.64（+29.2%，p=0.126 不显著）。</p>
+    </div>
+    <div class="g3" style="margin-top:16px;">
+      <div class="kpi c"><div class="v">BC</div><div class="l">激励有效 · 协作提升</div></div>
+      <div class="kpi i"><div class="v">Pure</div><div class="l">基线 · 无链上存证</div></div>
+      <div class="kpi r"><div class="v">Selfish</div><div class="l">自私拖累 · 需惩罚</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 15 · 区块链流水线统计 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">15</span> Pipeline Stats</div>
+  <div class="title">区块链安全流水线规模（1000 回合累计）</div>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g4">
+      <div class="kpi c"><div class="v">75K</div><div class="l">ECDSA 签名</div></div>
+      <div class="kpi g"><div class="v">75K</div><div class="l">ECDSA 验签</div></div>
+      <div class="kpi w"><div class="v">PASS</div><div class="l">SecurityGuard 通过</div></div>
+      <div class="kpi i"><div class="v">1K</div><div class="l">CW-PBFT 共识轮次</div></div>
+    </div>
+    <div class="g2" style="margin-top:16px;">
+      <div class="card"><h3><span class="dot-c">●</span> 链上证据完整性</h3>
+        <ul>
+          <li>每步动作均经签名上链，形成行为存证</li>
+          <li>区块头含前序哈希，整体不可篡改</li>
+          <li>1,000 区块 / 1,000 共识轮，闭环稳定</li>
+        </ul></div>
+      <div class="card"><h3><span class="dot-g">●</span> 性能与开销</h3>
+        <ul>
+          <li>联盟链低延迟，单步结算可控</li>
+          <li>签名/验签并行，不阻塞 MARL 训练</li>
+          <li>λ=0.1 权重平衡激励与探索</li>
+        </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 16 · 安全性分析 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">16</span> Security Analysis</div>
+  <div class="title">安全性分析 · 攻击与防御</div>
+  <div class="rule"></div>
+  <div class="body">
+    <table class="tbl">
+      <thead><tr><th>攻击面</th><th>威胁</th><th>防御机制</th><th>效果</th></tr></thead>
+      <tbody>
+        <tr><td>身份伪造</td><td class="tc-n">冒充智能体上链</td><td>ECDSA 密钥签名 + 身份绑定</td><td class="tc-g">不可伪造</td></tr>
+        <tr><td>消息篡改</td><td class="tc-n">篡改动作/状态</td><td>SHA256 + 签名校验，失败拒收</td><td class="tc-g">完整性保证</td></tr>
+        <tr><td>重放攻击</td><td class="tc-n">复用旧签名</td><td>单调递增 nonce + 时间戳 ±30s</td><td class="tc-g">时效拒绝</td></tr>
+        <tr><td>k 值重用</td><td class="tc-r">私钥可推导</td><td>RFC 6979 确定性 k + 告警</td><td class="tc-w">实时告警</td></tr>
+        <tr><td>自私背叛</td><td class="tc-r">拉低团队效用</td><td>贡献加权共识 + 分级惩罚</td><td class="tc-g">经济抑制</td></tr>
+      </tbody>
+    </table>
+    <div class="card" style="margin-top:16px;">
+      <h3><span class="dot-c">●</span> 综合结论</h3>
+      <p style="font-size:14.5px;color:var(--text-bright);">密码学身份层 + 经济惩罚层<b style="color:var(--accent3)"> 双重闭环</b>，
+      使系统在开放、存在自私节点的环境下仍可维持高合作率与可追责性。</p></div>
+  </div>
+</section>
+
+<!-- ============ 17 · 结论与展望 ============ -->
+<section class="slide">
+  <div class="kicker"><span class="idx">17</span> Conclusion</div>
+  <div class="title">结论与展望</div>
+  <div class="rule"></div>
+  <div class="body g2">
+    <div class="col">
+      <div class="card"><h3><span class="dot-c">●</span> 结论</h3>
+        <ul>
+          <li>区块链激励使 BC-MARL 环境奖励提升 +29.2%（n=22，方向一致、不显著）</li>
+          <li>合作率稳定收敛 100%，自私组被有效抑制</li>
+          <li>ECDSA + CW-PBFT 提供身份可信与行为存证</li>
+        </ul></div>
+      <div class="card"><h3><span class="dot-g">●</span> 创新点</h3>
+        <ul>
+          <li>MARL ↔ 区块链实时双向协同闭环</li>
+          <li>贡献加权共识对齐 MARL 行为价值</li>
+          <li>4 子组件流水线可插拔编排</li>
+        </ul></div>
+    </div>
+    <div class="col">
+      <div class="card"><h3><span class="dot-i">●</span> 不足</h3>
+        <ul>
+          <li>当前 n=3，大规模节点扩展性待验证</li>
+          <li>示意数据为主，需更多种子复现</li>
+          <li>实时性在高频步长下开销待优化</li>
+        </ul></div>
+      <div class="card"><h3><span class="dot-w">●</span> 展望</h3>
+        <ul>
+          <li>引入动态贡献权重自适应 λ</li>
+          <li>拓展至异构智能体与跨链协同</li>
+          <li>结合轻量级 ZK 证明进一步降信任</li>
+        </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 18 · 致谢与问答 ============ -->
+<section class="slide divider">
+  <div class="big">Q&amp;A</div>
+  <h2>致谢与问答</h2>
+  <p>感谢导师与评审专家的指导。欢迎就共识权重设计、ECDSA 安全性、以及
+  MARL-区块链协同的训练稳定性提出宝贵问题。</p>
+  <div style="margin-top:28px;display:flex;gap:12px;">
+    <span class="tag">MARL-ECDSA 共识链</span>
+    <span class="tag g">CCF 第五届区块链竞赛</span>
+    <span class="tag i">课程设计答辩</span>
+  </div>
+</section>
+
+<!-- 占位：第 19 页（封底） -->
+<!-- ============ 19 · 封底 ============ -->
+<section class="slide cover">
+  <div class="badge">Thank You</div>
+  <h1>谢谢观看</h1>
+  <p class="sub">面向 MARL 的区块链共识机制 · MARL-ECDSA 共识链
+  —— 用不可篡改的激励，守护多智能体的协作。</p>
+  <div class="meta">
+    <div class="m"><b>团队</b> · MARL-ECDSA Team</div>
+    <div class="m"><b>联系</b> · 课程设计答辩</div>
+    <div class="m"><b>仓库</b> · marl-ecdsa-consensus-chain</div>
+  </div>
+  <div class="hexes">
+    <div class="hex c">⬡</div><div class="hex i">⛓</div><div class="hex g">🔐</div>
+  </div>
+</section>
+
+</div></div>
+
+<!-- 导航 -->
+<div id="nav">
+  <button id="prev" title="上一页">‹</button>
+  <div id="dots"></div>
+  <button id="next" title="下一页">›</button>
+</div>
+
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var total=slides.length, cur=0;
+  var dotsBox=document.getElementById('dots');
+  var counter=document.getElementById('counter');
+  var pad=function(n){return (n<10?'0':'')+n;};
+
+  slides.forEach(function(s,i){
+    var d=document.createElement('div');
+    d.className='d'+(i===0?' on':'');
+    d.title='第 '+(i+1)+' 页';
+    d.addEventListener('click',function(){go(i);});
+    dotsBox.appendChild(d);
+  });
+
+  function render(){
+    slides.forEach(function(s,i){s.classList.toggle('active',i===cur);});
+    [].slice.call(dotsBox.children).forEach(function(d,i){d.classList.toggle('on',i===cur);});
+    counter.textContent=pad(cur+1)+' / '+pad(total);
+  }
+  function go(i){cur=Math.max(0,Math.min(total-1,i));render();}
+
+  document.getElementById('prev').addEventListener('click',function(){go(cur-1);});
+  document.getElementById('next').addEventListener('click',function(){go(cur+1);});
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowRight'||e.key===' '){go(cur+1);e.preventDefault();}
+    else if(e.key==='ArrowLeft'){go(cur-1);e.preventDefault();}
+    else if(e.key==='Home'){go(0);}
+    else if(e.key==='End'){go(total-1);}
+    else if(e.key==='f'||e.key==='F'){
+      if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  // 舞台缩放适配（保持 16:9）
+  var stage=document.getElementById('stage');
+  function fit(){
+    var s=Math.min(window.innerWidth/1280,window.innerHeight/720);
+    stage.style.transform='scale('+s+')';
+    stage.style.transformOrigin='center center';
+  }
+  window.addEventListener('resize',fit);fit();
+  render();
+})();
+</script>
+</body>
+</html>

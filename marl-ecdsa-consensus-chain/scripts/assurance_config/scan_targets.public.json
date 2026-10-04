@@ -1,0 +1,127 @@
+{
+ "schema_version": "1.0",
+ "note": "本文件由 scripts/gen_assurance_config.py 从工作区私有配置派生，**入库、供 CI 使用**；请勿手改，改私有配置后跑 `python -X utf8 scripts/gen_assurance_config.py` 刷新。身份串（真名/QQ/邮箱）与机器本地路径不在本文件，仅在仓库外私有配置中。 内含扫描范围与严重度判定标记。",
+ "_generated_from": "deliverables/assurance/config/scan_targets.json",
+ "_public_keys": [
+  "scan_roots",
+  "include_ext",
+  "exclude_dirs",
+  "exclude_globs",
+  "semantic_scan_ext",
+  "semantic_scan_ext_severity",
+  "identity_self_exclude",
+  "thesis_drafts_dir",
+  "held_drafts_dir",
+  "snapshot_dir_markers",
+  "snapshot_name_markers",
+  "meta_name_markers",
+  "external_material_markers"
+ ],
+ "_private_only_keys": [
+  "thesis_inbox_dir"
+ ],
+ "scan_roots": [
+  "."
+ ],
+ "include_ext": [
+  ".md",
+  ".txt",
+  ".html",
+  ".htm",
+  ".pdf",
+  ".pptx"
+ ],
+ "exclude_dirs": [
+  ".git",
+  ".mpl_cache",
+  ".pytest_cache",
+  ".venv",
+  "MARL-ECDSA_共识链_提交包_backup_20260919",
+  "_INVALID_stub",
+  "__pycache__",
+  "_quarantine",
+  "_scratch_20260923_git_anon",
+  "_t2_extract",
+  "_t2_extract2",
+  "_旧PDF归档_20260920",
+  "assurance",
+  "backup",
+  "dev_junk_20260914",
+  "dev_junk_20260919",
+  "images",
+  "images_before_20260914",
+  "images_old_20260914_1700",
+  "node_modules",
+  "pkg_removed_20260916",
+  "ppt_stale_20260914",
+  "results"
+ ],
+ "exclude_globs": [
+  "**/*.png",
+  "**/*.jpg",
+  "**/*.jpeg",
+  "**/*.gif",
+  "**/*.bak",
+  "**/*.bak-*",
+  "**/*.zip",
+  "**/*.docx",
+  "**/*.xlsx",
+  "**/_scan_full_*.md",
+  "**/_scan_full_*.json",
+  "**/scan_*_report.json",
+  "**/_gate_probe_*",
+  "**/CHANGELOG.md"
+ ],
+ "semantic_scan_ext": [
+  ".py"
+ ],
+ "semantic_scan_ext_severity": "block",
+ "identity_self_exclude": [
+  "assurance/config/assurance_blacklist.json"
+ ],
+ "thesis_drafts_dir": "deliverables/thesis_drafts",
+ "held_drafts_dir": "deliverables/assurance/held_drafts",
+ "snapshot_dir_markers": [
+  "archive",
+  "_archive",
+  "backup",
+  "_legacy",
+  "_INVALID",
+  "history",
+  "old"
+ ],
+ "snapshot_name_markers": [
+  "赛前",
+  "冲刺",
+  "历史",
+  "评估报告",
+  "交付清单",
+  "全过程",
+  "审计",
+  "核验",
+  "复验"
+ ],
+ "meta_name_markers": [
+  "review",
+  "审稿",
+  "审查",
+  "意见",
+  "manifest",
+  "_qa_",
+  "终核清单",
+  "核查"
+ ],
+ "external_material_markers": [
+  "MARL-ECDSA_共识链_提交包",
+  "PPT",
+  "README",
+  "competition-materials",
+  "competition_submission",
+  "ppt",
+  "thesis",
+  "thesis_drafts",
+  "毕设深度研究",
+  "答辩",
+  "工程与代码锐评"
+ ]
+}

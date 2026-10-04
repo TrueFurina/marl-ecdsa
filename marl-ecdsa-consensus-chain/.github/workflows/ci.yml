@@ -1,0 +1,128 @@
+name: CI - Test Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # P3-12修复: CI 需安装 asyncio/timeout 插件（--strict-markers 下
+          # test_gossip_discovery/p2p_consensus_network 的 marker 才被注册）
+          pip install pytest pytest-cov pytest-asyncio pytest-timeout
+
+      - name: Run test suite
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+      - name: Test coverage report
+        run: |
+          # P0: 行覆盖率报告（CI 环境补跑，本地 pytest-cov 与 coverage 兼容问题已定位）
+          python -m pytest tests/ -q --cov=blockchain --cov=marl --cov-report=term-missing | tail -20
+
+      - name: Verify dashboard imports (Flask route registration)
+        run: |
+          python -c "from visualization.dashboard import _create_app; app = _create_app(); assert app is not None; print('dashboard OK, routes:', len(app.url_map._rules))"
+
+      - name: Verify consensus factory (all modes)
+        run: |
+          python -c "
+          from blockchain.consensus.factory import create_consensus_engine
+          for mode in ['cw_pbft', 'standard_pbft', 'fast']:
+              eng = create_consensus_engine('node_0', ['node_0','node_1','node_2'], mode=mode)
+              assert eng is not None
+          print('consensus factory OK')
+          "
+
+      # ---- 裸命令冒烟（2026-10-01 纳入 CI）---------------------------------- #
+      # 教训：conftest 把项目根注入 sys.path，导致 tests/ 全绿但评委按说明书
+      # 裸跑入口脚本时 ModuleNotFoundError（sys.path 少一层 dirname 的同款 bug
+      # 曾在 network_demo / smoke_test_e2e / start_p2p_cluster 连环出现 3 处）。
+      # 本步骤以 env -u PYTHONPATH 模拟评委视角，防第 4 次。
+      - name: Bare-command smoke (评委视角裸跑，无 PYTHONPATH)
+        run: |
+          env -u PYTHONPATH python scripts/network_demo.py --help >/dev/null
+          env -u PYTHONPATH python scripts/one-click/start_p2p_cluster.py --help >/dev/null
+          env -u PYTHONPATH python scripts/one-click/run_full_experiment.py --help >/dev/null
+          env -u PYTHONPATH python train.py --help >/dev/null
+          env -u PYTHONPATH python main.py --help >/dev/null
+          env -u PYTHONPATH python scripts/smoke_test_e2e.py
+          echo "bare-command smoke OK"
+
+      # ---- 口径门禁（2026-09-23 纳入 CI）------------------------------------ #
+      # 此前 4 步口径门禁只挂在未入库的 .git/hooks/pre-commit 上：换机、克隆、
+      # `--no-verify` 或并行会话都会让它整体失效，而 CI 从不检查口径。
+      #
+      # 现在可运行的原因：规则表已分层——作废令牌 / 语义规则 / 引用黑名单 /
+      # 扫描范围存于**入库**的 scripts/assurance_config/*.public.json；
+      # 私有身份表（真名 / QQ）与本机路径仍只在仓库外配置里，不入库。
+      # assurance_common 的加载器按「public 基线 → private 覆盖」合并，
+      # 故 CI 无私有配置时规则依然完整生效（本地实测两者命中数逐位相同）。
+      #
+      # 注意 --root 必须用**绝对路径**：扫描器的相对路径是基于 WORKSPACE_ROOT
+      # （检出目录的父级）解析的，`--root .` 会指向父目录而非仓库根。
+      - name: Caliber gate — void tokens (fail-closed)
+        run: |
+          python scripts/scan_void_tokens.py \
+            --root "$PWD" \
+            --report "$RUNNER_TEMP/scan_void_tokens_report.json" \
+            --overwrite
+
+      # ---- pre-commit 门禁全仓化（2026-10-02 纳入 CI）---------------------- #
+      # 本地 pre-commit 6 步只拦本机提交：--no-verify、换机、克隆者都会绕过。
+      # 此前 CI 只覆盖了 6 步中的 1 步（void tokens）。现将与其余 4 步对齐
+      # （第 5 步 test_file_guard 依赖暂存区语义，CI 上无意义，不纳入）：
+      #   secrets_scan（全 tracked 文件）——本地修复 allowlist fail-open 后
+      #     已可全仓零噪音跑（真实 AWS key 必检出 / 绝对路径与纯 hex 不误报）；
+      #   honesty_scan（全仓）——假水位短语/正则；
+      #   caliber_check --strict（全仓）——登记簿驱动的口径漂移体检，
+      #     存量 22 条命中全带「已作废」豁免标记，strict 下 0 未豁免；
+      #   structure_guard --all ——根级平铺违规（存量 0）。
+      - name: Pre-commit gates — repo-wide (fail-closed)
+        run: |
+          python scripts/pre-commit/secrets_scan.py $(git -c core.quotePath=false ls-files)
+          python scripts/pre-commit/honesty_scan.py
+          python scripts/pre-commit/caliber_check.py --strict
+          python scripts/pre-commit/structure_guard.py --all
+
+      - name: Citation gate — synthetic references
+        run: |
+          python scripts/scan_citation_blacklist.py \
+            --root "$PWD" \
+            --report "$RUNNER_TEMP/scan_citation_report.json" \
+            --overwrite
+
+      # 权威登记表在仓库外（不入库），CI 里必然缺失 → 本步打印 SKIP 并对
+      # 入库镜像做结构校验。它不是空转：能抓住「提交了半截 JSON / 条目丢字段」。
+      - name: Registry mirror integrity
+        run: python scripts/check_registry_mirror.py

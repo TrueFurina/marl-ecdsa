@@ -1,0 +1,52 @@
+# =============================================================================
+# MARL-ECDSA 共识链 依赖清单
+# =============================================================================
+#
+# 两种清单的用途差异：
+#   * requirements.txt   —— 宽松下界式（如 cryptography>=41.0.0）。用于「灵活安装」，
+#                           允许 pip 解析较新的兼容版本，适合日常开发 / CI 宽泛环境。
+#   * requirements.lock.txt —— 精确锁定式（如 cryptography==49.0.0）。由本机实际可运行
+#                           环境的 pip freeze 导出，仅含项目实际依赖。用于「可复现安装」，
+#                           锁定提交时验证通过的精确版本，避免下游解析到不兼容的新版本。
+#   推荐复现：pip install -r requirements.lock.txt
+#   日常开发：pip install -r requirements.txt
+#
+
+# --- 核心密码学（必需）---
+cryptography>=41.0.0
+
+# --- 后量子密码（可选，ML-DSA-44/Dilithium2，抗量子签名）---
+dilithium-py>=1.4.0          # FIPS 204 后量子数字签名，与 ECDSA 可替换
+
+# --- MARL 深度学习（推荐，支持GPU加速）---
+# 安装命令: pip install torch
+# CPU版: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+
+# --- 数值计算 ---
+numpy>=1.24.0
+scipy>=1.11.0               # Welch's t-test 统计检验
+
+# --- 机器学习（CooperationDetector ML 路径）---
+scikit-learn>=1.3.0         # ExtraTreesClassifier 合作分类器（P3-12）
+
+# --- 配置解析（docker-compose 验证）---
+pyyaml>=6.0                 # docker-compose.yml YAML 解析（P3-12）
+
+# --- 可视化（可选）---
+matplotlib>=3.7.0          # 结果图表导出
+flask>=3.0.0                # Web Dashboard
+tqdm>=4.65.0                # 训练进度条
+
+# =============================================================================
+# 安装命令
+# =============================================================================
+# 最小安装（仅密码学+环境，NumPy回退）:
+#   pip install cryptography numpy
+#
+# 完整安装（含训练+可视化）:
+#   pip install cryptography torch numpy scipy tqdm matplotlib flask
+#
+# 纯验证（无PyTorch，NumPy回退）:
+#   python main.py --mode bc_marl --demo
+# =============================================================================

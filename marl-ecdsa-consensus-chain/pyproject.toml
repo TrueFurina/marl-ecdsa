@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marl-ecdsa-consensus-chain"
+version = "4.0.0"
+description = "面向多智能体强化学习的区块链AI协同共识机制 — CCF 第五届区块链竞赛参赛项目"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "MARL-ECDSA 共识链项目组" },
+]
+keywords = [
+    "marl", "multi-agent-reinforcement-learning",
+    "blockchain", "consensus", "ecdsa",
+    "cw-pbft", "smart-contract",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security :: Cryptography",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "cryptography>=41.0.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+full = [
+    "cryptography>=41.0.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "tqdm>=4.65.0",
+    "matplotlib>=3.7.0",
+    "flask>=3.0.0",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://example.invalid/marl-ecdsa-consensus-chain"
+
+[tool.setuptools.packages.find]
+include = [
+    "blockchain*",
+    "marl*",
+    "visualization*",
+    "experiments*",
+    "scripts*",
+    "tests*",
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "crypto: cryptography-related tests (ECDSA key generation, sign/verify, serialization)",
+    "blockchain: blockchain structure tests (Transaction, Block, Blockchain)",
+    "security: security guard tests (timestamp, nonce, k-value reuse detection)",
+    "asyncio: asyncio-based tests (requires pytest-asyncio)",
+    "timeout: tests with per-test timeout (requires pytest-timeout)",
+]

@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MARL-ECDSA 共识链 — 国赛演示平台 v3.9 (共识投票 + 区块浏览器增强版)</title>
+    <script src="/static/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+
+<!-- 调试状态条 -->
+<div id="debug-bar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;padding:6px 16px;font-size:13px;font-family:monospace;text-align:center;"></div>
+
+<!-- 加载遮罩 -->
+<div class="loading-overlay" id="loading-overlay">
+    <div class="loading-logo">⬡</div>
+    <div class="loading-text">正在加载训练数据...</div>
+    <div class="loading-bar"><div class="loading-bar-inner" id="loading-bar"></div></div>
+</div>
+
+<!-- 粒子背景 -->
+<canvas id="particles"></canvas>
+
+<!-- 顶栏（左侧logo + 居中菜单 + 右侧操作） -->
+<div class="topbar">
+    <div class="logo">
+        <div class="icon">⬡</div>
+        MARL-ECDSA 共识链
+    </div>
+    <div class="nav-tabs" id="nav-tabs">
+        <button class="nav-tab active" data-tab="overview">总览</button>
+        <button class="nav-tab" data-tab="monitor">训练监控</button>
+        <button class="nav-tab" data-tab="compare">对比分析</button>
+        <button class="nav-tab" data-tab="tri">三模式对比</button>
+        <button class="nav-tab" data-tab="blockchain">区块链</button>
+        <button class="nav-tab" data-tab="consensus">共识投票</button>
+        <button class="nav-tab" data-tab="explorer">区块浏览器</button>
+        <button class="nav-tab" data-tab="attack">攻防演示</button>
+        <button class="nav-tab" data-tab="system">系统</button>
+        <button class="nav-tab" data-tab="p2p">P2P网络</button>
+    </div>
+    <div class="topbar-right">
+        <div class="live-chip" id="data-updated-chip" title="最近一次成功加载训练数据的时间">
+            <span class="dot"></span><span id="data-updated">数据未加载</span>
+        </div>
+        <div class="mode-tag" id="top-mode">平台就绪</div>
+        <button class="demo-btn" id="btn-demo" onclick="toggleDemoMode()" title="演示模式：自动轮播标签页（快捷键 P）">演示模式</button>
+        <button class="export-btn" onclick="showExportModal()" title="导出报告（快捷键 E）">导出报告</button>
+    </div>
+</div>
+
+<!-- 主内容区 -->
+<div class="main">
+
+    <!-- ═══════ 总览（Bento Box Grid：Executive Dashboard 布局）═══════ -->
+    <div class="tab-content active" id="tab-overview">
+        <div class="hero">
+            <h1>多智能体强化学习 × 区块链双向协同</h1>
+            <p class="subtitle">
+                基于 IQL 独立 Q-Learning + CW-PBFT 贡献加权共识 + ECDSA 安全签名的
+                新型共识机制，在 SimpleSpread 协同导航任务中验证区块链激励对多智能体协作的提升效果。
+            </p>
+        </div>
+
+        <!-- Bento 网格：主卡（权威口径头号指标）+ 相关小卡 -->
+        <div class="bento-grid">
+            <!-- 主卡：登记簿权威口径（NR-1/NR-2 必须同报） -->
+            <div class="bento-card hero-card">
+                <div class="bento-label">🏆 头号指标 · 权威申报口径（n=<span id="cal-n">71</span>/组）</div>
+                <div class="bento-value pos" id="cal-nr1-pct">+28.17%</div>
+                <div class="bento-sub">
+                    <strong>NR-1</strong> 末 50 回合 env_reward（不含 BC 激励）：
+                    Welch p=<span id="cal-nr1-p">0.0095</span>、Cohen d=<span id="cal-nr1-d">0.44</span>，
+                    <span class="pill pill-info">BH-FDR 显著</span> <span class="pill pill-warn">Bonferroni 不显著</span>
+                </div>
+                <hr class="bento-divider">
+                <div class="bento-kv"><span class="k">NR-2 全程 env_reward（必须同报）</span>
+                    <span class="v"><span id="cal-nr2-pct">+7.92%</span>（p=<span id="cal-nr2-p">&lt;1e-10</span>，d=<span id="cal-nr2-d">1.20</span>）</span></div>
+                <div class="bento-kv"><span class="k">NR-3 全程平均合作率</span>
+                    <span class="v"><span id="cal-nr3-pct">+1.95%</span>（p=&lt;1e-10）</span></div>
+                <div class="bento-sub" style="margin-top:6px;">诚实定位：主口径效应量小-中，不作单点因果归因。</div>
+                <div class="caliber-src"><span class="src-icon">🗄</span><span id="cal-src">口径出处：number_registry.json NR-1 / NR-2 / NR-3</span></div>
+            </div>
+
+            <!-- 小卡：安全 / 工程 / 规模 -->
+            <div class="bento-card">
+                <div class="bento-label">🛡️ 签名层攻击拦截</div>
+                <div class="bento-value">100%</div>
+                <div class="bento-sub">六类签名层攻击全部拦截（6/6）；Wilson 95% 置信下界 ≥92.9%</div>
+                <div class="caliber-src"><span class="src-icon">🗄</span>results/attack_defense_report.json</div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-label">✅ 自动化测试</div>
+                <div class="bento-value">1600+</div>
+                <div class="bento-sub">全部通过（0 失败）；下限式表述，精确值见登记簿 NR-19</div>
+                <div class="caliber-src"><span class="src-icon">🗄</span>number_registry.json NR-19</div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-label">🤖 实验规模</div>
+                <div class="bento-value">3<span style="font-size:1.2rem;"> × </span>3000<span style="font-size:1.2rem;"> × </span>71</div>
+                <div class="bento-sub">3 智能体 × 3000 回合 × 71 种子/组（两臂完全配对）</div>
+                <div class="caliber-src"><span class="src-icon">🗄</span>results/convergence_3000/（142 次运行）</div>
+            </div>
+            <div class="bento-card">
+                <div class="bento-label">⚖️ 共识机制</div>
+                <div class="bento-value" style="font-size:1.6rem;">CW-PBFT</div>
+                <div class="bento-sub">贡献度加权投票；安全条件 b &lt; n/(2R+1)；ECDSA（RFC6979）身份锚定</div>
+                <div class="caliber-src"><span class="src-icon">🗄</span>blockchain/consensus · crypto/identity</div>
+            </div>
+        </div>
+
+        <!-- 架构图 -->
+        <div class="arch-diagram">
+            <svg viewBox="0 0 680 260" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient>
+                    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#38bdf8"/></linearGradient>
+                    <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                </defs>
+                <!-- MARL -->
+                <rect x="30" y="80" width="160" height="100" rx="14" fill="rgba(56,189,248,0.06)" stroke="rgba(56,189,248,0.25)" stroke-width="1.5"/>
+                <text x="110" y="115" text-anchor="middle" fill="#38bdf8" font-size="14" font-weight="700" filter="url(#glow)">MARL 协同层</text>
+                <text x="110" y="138" text-anchor="middle" fill="#94a3b8" font-size="10">IQL · SimpleSpread</text>
+                <text x="110" y="155" text-anchor="middle" fill="#94a3b8" font-size="10">ε-greedy · Replay Buffer</text>
+
+                <!-- Blockchain -->
+                <rect x="490" y="80" width="160" height="100" rx="14" fill="rgba(129,140,248,0.06)" stroke="rgba(129,140,248,0.25)" stroke-width="1.5"/>
+                <text x="570" y="115" text-anchor="middle" fill="#818cf8" font-size="14" font-weight="700" filter="url(#glow)">区块链激励层</text>
+                <text x="570" y="138" text-anchor="middle" fill="#94a3b8" font-size="10">CW-PBFT · ECDSA</text>
+                <text x="570" y="155" text-anchor="middle" fill="#94a3b8" font-size="10">贡献量化 · 分级惩罚</text>
+
+                <!-- Bridge (v3.8: 4子组件编排) -->
+                <rect x="260" y="90" width="160" height="80" rx="14" fill="rgba(52,211,153,0.05)" stroke="rgba(52,211,153,0.2)" stroke-width="1.5"/>
+                <text x="340" y="118" text-anchor="middle" fill="#34d399" font-size="13" font-weight="700" filter="url(#glow)">Bridge 编排器</text>
+                <text x="340" y="136" text-anchor="middle" fill="#94a3b8" font-size="9">4子组件流水线架构(v3.8)</text>
+                <text x="340" y="152" text-anchor="middle" fill="#94a3b8" font-size="8">Signing→Recorder→Detector→Settlement</text>
+
+                <!-- Animated Arrows -->
+                <line x1="190" y1="130" x2="258" y2="130" stroke="rgba(56,189,248,0.35)" stroke-width="2" stroke-dasharray="6,4">
+                    <animate attributeName="stroke-dashoffset" from="20" to="0" dur="2s" repeatCount="indefinite"/>
+                </line>
+                <line x1="422" y1="130" x2="488" y2="130" stroke="rgba(129,140,248,0.35)" stroke-width="2" stroke-dasharray="6,4">
+                    <animate attributeName="stroke-dashoffset" from="20" to="0" dur="2s" repeatCount="indefinite"/>
+                </line>
+                <!-- Return arrows (feedback) -->
+                <line x1="258" y1="145" x2="190" y2="145" stroke="rgba(52,211,153,0.2)" stroke-width="1.5" stroke-dasharray="4,3">
+                    <animate attributeName="stroke-dashoffset" from="14" to="0" dur="3s" repeatCount="indefinite"/>
+                </line>
+                <line x1="488" y1="145" x2="422" y2="145" stroke="rgba(52,211,153,0.2)" stroke-width="1.5" stroke-dasharray="4,3">
+                    <animate attributeName="stroke-dashoffset" from="14" to="0" dur="3s" repeatCount="indefinite"/>
+                </line>
+
+                <!-- Bottom: Results -->
+                <rect x="190" y="200" width="300" height="50" rx="10" fill="rgba(255,255,255,0.02)" stroke="rgba(0,0,0,0.06)" stroke-width="1"/>
+                <text x="340" y="220" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="600">实验验证：pure_marl vs bc_marl vs selfish</text>
+                <text x="340" y="240" text-anchor="middle" fill="#64748b" font-size="10">主口径 n=71/组：末50回合 env_reward +28.2% (p=0.0095，BH-FDR 显著/Bonferroni 不显著) · 全程 +7.9% (p&lt;1e-10)</text>
+
+                <!-- labels -->
+                <text x="110" y="72" text-anchor="middle" fill="#64748b" font-size="9">决策 + 学习</text>
+                <text x="570" y="72" text-anchor="middle" fill="#64748b" font-size="9">激励 + 存证</text>
+            </svg>
+        </div>
+
+        <!-- 当前加载运行（演示数据 · 本机观测，非权威申报口径） -->
+        <div class="data-card" style="padding-bottom:6px;">
+            <h3 style="display:flex;align-items:center;gap:8px;">
+                <span style="color:var(--accent);">📡</span> 当前加载运行 — 本机观测值
+                <span class="note-tag">演示数据 · 非权威申报口径（权威口径见上方 Bento 卡）</span>
+            </h3>
+        </div>
+        <div class="stats-row" id="overview-stats"></div>
+
+        <!-- v3.4: 实验核心结论对比表格 -->
+        <div class="data-card" style="margin-top:14px;">
+            <h3 style="display:flex;align-items:center;gap:8px;">
+                <span style="color:var(--accent3);">⚡</span> 实验核心结论 — 三模式对照数据
+            </h3>
+            <table style="width:100%;font-size:0.85rem;">
+                <thead>
+                    <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
+                        <th style="color:var(--text-dim);text-align:left;padding:8px;">指标</th>
+                        <th style="color:#94a3b8;text-align:center;padding:8px;">Pure MARL</th>
+                        <th style="color:#38bdf8;text-align:center;padding:8px;">BC-MARL</th>
+                        <th style="color:#f87171;text-align:center;padding:8px;">Selfish</th>
+                        <th style="color:#34d399;text-align:center;padding:8px;">BC vs Pure</th>
+                    </tr>
+                </thead>
+                <tbody id="ov-comparison-table"></tbody>
+            </table>
+        </div>
+
+        <!-- v3.4: 区块链流水线规模 -->
+        <div class="data-card" style="margin-top:14px;">
+            <h3 style="display:flex;align-items:center;gap:8px;">
+                <span style="color:#818cf8;">🔗</span> 区块链安全流水线规模（当前加载运行累计）
+            </h3>
+            <div id="ov-pipeline-scale" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;"></div>
+        </div>
+    </div>
+
+    <!-- ═══════ 训练监控 ═══════ -->
+    <div class="tab-content" id="tab-monitor">
+        <div class="stats-row" id="monitor-stats"></div>
+        <div class="chart-grid">
+            <div class="chart-card"><h3>回合奖励曲线</h3><canvas id="chart-reward"></canvas></div>
+            <div class="chart-card"><h3>合作率 / 背叛率</h3><canvas id="chart-coop"></canvas></div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card"><h3>区块链积分变化</h3><canvas id="chart-bc"></canvas></div>
+            <div class="chart-card"><h3>训练 Loss</h3><canvas id="chart-loss"></canvas></div>
+        </div>
+        <div class="bottom-row">
+            <div class="data-card">
+                <h3>积分排行榜</h3>
+                <table><thead><tr><th>排名</th><th>智能体</th><th>链上积分</th><th>状态</th></tr></thead>
+                <tbody id="mon-leaderboard"></tbody></table>
+            </div>
+            <div class="data-card">
+                <h3>训练摘要</h3>
+                <table><tbody id="mon-summary"></tbody></table>
+            </div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:14px;">
+            <button class="nav-tab active" onclick="switchMonitorMode('bc')" id="btn-bc" style="border-radius:8px;padding:6px 14px;">BC-MARL</button>
+            <button class="nav-tab" onclick="switchMonitorMode('pure')" id="btn-pure" style="border-radius:8px;padding:6px 14px;">Pure MARL</button>
+            <button class="nav-tab" onclick="switchMonitorMode('selfish')" id="btn-selfish" style="border-radius:8px;padding:6px 14px;">Selfish</button>
+        </div>
+    </div>
+
+    <!-- ═══════ 对比分析 ═══════ -->
+    <div class="tab-content" id="tab-compare">
+        <div class="compare-grid">
+            <div class="compare-card pure">
+                <h3>Pure MARL（纯多智能体）</h3>
+                <div class="compare-metrics" id="cmp-pure-metrics"></div>
+            </div>
+            <div class="compare-card bc">
+                <h3>BC-MARL（区块链协同）</h3>
+                <div class="compare-metrics" id="cmp-bc-metrics"></div>
+                <div class="improvement-badge" id="cmp-improve"></div>
+            </div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card full"><h3>奖励曲线对比（50回合平滑）</h3><canvas id="chart-cmp-reward"></canvas></div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card"><h3>合作率对比</h3><canvas id="chart-cmp-coop"></canvas></div>
+            <div class="chart-card"><h3>奖励分布对比</h3><canvas id="chart-cmp-dist"></canvas></div>
+        </div>
+    </div>
+
+    <!-- ═══════ 三模式对比 ═══════ -->
+    <div class="tab-content" id="tab-tri">
+        <div class="tri-grid">
+            <div class="compare-card pure">
+                <h3>Exp A：Pure MARL</h3>
+                <p style="font-size:0.76rem;color:var(--text-dim);margin-bottom:8px;">纯多智能体协同，无区块链激励</p>
+                <div class="compare-metrics" id="tri-pure-metrics"></div>
+            </div>
+            <div class="compare-card bc">
+                <h3>Exp B：BC-MARL</h3>
+                <p style="font-size:0.76rem;color:var(--text-dim);margin-bottom:8px;">MARL + 区块链双向协同激励</p>
+                <div class="compare-metrics" id="tri-bc-metrics"></div>
+            </div>
+            <div class="compare-card selfish">
+                <h3>Exp C：Selfish</h3>
+                <p style="font-size:0.76rem;color:var(--text-dim);margin-bottom:8px;">含自私智能体的对抗场景</p>
+                <div class="compare-metrics" id="tri-selfish-metrics"></div>
+            </div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card full"><h3>三模式奖励曲线对比</h3><canvas id="chart-tri-reward"></canvas></div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card"><h3>三模式合作率对比</h3><canvas id="chart-tri-coop"></canvas></div>
+            <div class="chart-card"><h3>三模式奖励分布</h3><canvas id="chart-tri-dist"></canvas></div>
+        </div>
+        <div class="data-card" style="margin-top:14px;">
+            <h3>对照实验设计说明</h3>
+            <table><tbody>
+                <tr><td style="color:var(--text-dim);width:200px">实验组 A</td><td>Pure MARL — IQL + 局部奖励，无区块链介入 <span class="note-tag">合作率为 behavioral 口径本运行观测值</span></td></tr>
+                <tr><td style="color:var(--text-dim)">实验组 B</td><td>BC-MARL — IQL + 区块链激励融合奖励 (λ=0.1) <span class="note-tag">合作率由阈值检测动态计算</span></td></tr>
+                <tr><td style="color:var(--text-dim)">实验组 C</td><td>Selfish — 含 30% 自私智能体，验证区块链抑制背叛能力</td></tr>
+                <tr><td style="color:var(--text-dim)">控制变量</td><td>相同环境 (SimpleSpread)、相同超参、相同种子</td></tr>
+                <tr><td style="color:var(--text-dim)">核心结论</td><td style="color:var(--accent3);font-weight:600">BC-MARL vs Pure MARL（主口径 n=71/组，env_reward，λ=0.1）：末50回合 +28.2%（Welch p=0.0095，d=0.44；BH-FDR 显著 / Bonferroni 不显著）；全程 +7.9%（p&lt;1e-10，d=1.20）。两口径必须同报；效果强依赖底层算法（IQL/VDN/QMIX/MAPPO 方向不一致）</td></tr>
+            </tbody></table>
+        </div>
+    </div>
+
+    <!-- ═══════ 区块链 ═══════ -->
+    <div class="tab-content" id="tab-blockchain">
+        <div class="stats-row" id="bc-stats"></div>
+
+        <!-- ECDSA 签名验证流程 -->
+        <div class="ecdsa-flow">
+            <h3>ECDSA 签名验证流程（secp256r1 / P-256）</h3>
+            <svg viewBox="0 0 680 130" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <filter id="glowE"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                </defs>
+                <!-- 步骤 1: 生成密钥 -->
+                <rect x="10" y="30" width="120" height="70" rx="12" fill="rgba(56,189,248,0.06)" stroke="rgba(56,189,248,0.25)" stroke-width="1.2"/>
+                <text x="70" y="52" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="700">密钥生成</text>
+                <text x="70" y="68" text-anchor="middle" fill="#94a3b8" font-size="9">secp256r1</text>
+                <text x="70" y="82" text-anchor="middle" fill="#94a3b8" font-size="8">私钥→本地PEM</text>
+                <!-- Arrow 1→2 -->
+                <line x1="132" y1="65" x2="155" y2="65" stroke="rgba(52,211,153,0.4)" stroke-width="2" stroke-dasharray="4,3">
+                    <animate attributeName="stroke-dashoffset" from="7" to="0" dur="1.5s" repeatCount="indefinite"/>
+                </line>
+
+                <!-- 步骤 2: 签名 -->
+                <rect x="158" y="30" width="130" height="70" rx="12" fill="rgba(52,211,153,0.06)" stroke="rgba(52,211,153,0.25)" stroke-width="1.2"/>
+                <text x="223" y="52" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">ECDSA签名</text>
+                <text x="223" y="68" text-anchor="middle" fill="#94a3b8" font-size="9">SHA256+ECDSA</text>
+                <text x="223" y="82" text-anchor="middle" fill="#94a3b8" font-size="8">RFC 6979 确定性k</text>
+                <!-- v3.4: 签名计数徽章（骑卡片右上角外侧，不压标题） -->
+                <circle cx="288" cy="30" r="12" fill="#ffffff" stroke="#34d399" stroke-width="1.5"/>
+                <text id="ecdsa-sign-badge" x="288" y="33" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="700">0</text>
+                <!-- Arrow 2→3 -->
+                <line x1="290" y1="65" x2="313" y2="65" stroke="rgba(251,191,36,0.4)" stroke-width="2" stroke-dasharray="4,3">
+                    <animate attributeName="stroke-dashoffset" from="7" to="0" dur="1.5s" repeatCount="indefinite"/>
+                </line>
+
+                <!-- 步骤 3: 安全校验 -->
+                <rect x="316" y="25" width="130" height="80" rx="12" fill="rgba(251,191,36,0.06)" stroke="rgba(251,191,36,0.25)" stroke-width="1.2"/>
+                <text x="381" y="47" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">安全守卫校验</text>
+                <text x="381" y="62" text-anchor="middle" fill="#94a3b8" font-size="8">k值重用检测</text>
+                <text x="381" y="74" text-anchor="middle" fill="#94a3b8" font-size="8">nonce防重放</text>
+                <text x="381" y="86" text-anchor="middle" fill="#94a3b8" font-size="8">时间戳±30s验证</text>
+                <!-- Arrow 3→4 -->
+                <line x1="448" y1="65" x2="471" y2="65" stroke="rgba(129,140,248,0.4)" stroke-width="2" stroke-dasharray="4,3">
+                    <animate attributeName="stroke-dashoffset" from="7" to="0" dur="1.5s" repeatCount="indefinite"/>
+                </line>
+
+                <!-- 步骤 4: 共识上链 -->
+                <rect x="474" y="30" width="130" height="70" rx="12" fill="rgba(129,140,248,0.06)" stroke="rgba(129,140,248,0.25)" stroke-width="1.2"/>
+                <text x="539" y="52" text-anchor="middle" fill="#818cf8" font-size="11" font-weight="700">CW-PBFT共识</text>
+                <text x="539" y="68" text-anchor="middle" fill="#94a3b8" font-size="9">三阶段投票</text>
+                <text x="539" y="82" text-anchor="middle" fill="#94a3b8" font-size="8">2/3权重确认</text>
+
+                <!-- 步骤 5: 验签 -->
+                <rect x="610" y="30" width="60" height="70" rx="12" fill="rgba(56,189,248,0.06)" stroke="rgba(56,189,248,0.25)" stroke-width="1.2"/>
+                <text x="640" y="52" text-anchor="middle" fill="#38bdf8" font-size="10" font-weight="700">验签</text>
+                <text x="640" y="68" text-anchor="middle" fill="#94a3b8" font-size="8">公钥</text>
+                <text x="640" y="82" text-anchor="middle" fill="#94a3b8" font-size="8">验证</text>
+                <!-- v3.4: 验签计数徽章（骑卡片右上角内侧，不超出画布） -->
+                <circle cx="662" cy="28" r="9" fill="#ffffff" stroke="#38bdf8" stroke-width="1.2"/>
+                <text id="ecdsa-verify-badge" x="662" y="31" text-anchor="middle" fill="#38bdf8" font-size="7" font-weight="700">0</text>
+
+                <!-- Arrow 4→5 -->
+                <line x1="606" y1="65" x2="608" y2="65" stroke="rgba(56,189,248,0.3)" stroke-width="2"/>
+                <!-- Feedback arrow: 验签→密钥 (闭环) -->
+                <path d="M640,100 Q640,115 70,115 Q10,115 10,100" fill="none" stroke="rgba(52,211,153,0.15)" stroke-width="1.5" stroke-dasharray="4,3">
+                    <animate attributeName="stroke-dashoffset" from="7" to="0" dur="3s" repeatCount="indefinite"/>
+                </path>
+                <text x="340" y="125" text-anchor="middle" fill="#64748b" font-size="8">闭环安全：签名→校验→共识→验签→信任传递</text>
+            </svg>
+        </div>
+
+        <!-- v3.4: 完整数据流可视化（端到端流水线） -->
+        <div class="ecdsa-flow" style="margin-bottom:16px;">
+            <h3>完整数据流（每步→每10步→每回合）</h3>
+            <svg viewBox="0 0 680 80" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <filter id="glowF"><feGaussianBlur stdDeviation="1.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                </defs>
+                <!-- 每步: Agent决策→ECDSA签名→SecurityGuard -->
+                <rect x="5" y="15" width="200" height="55" rx="10" fill="rgba(52,211,153,0.04)" stroke="rgba(52,211,153,0.18)" stroke-width="1"/>
+                <text x="105" y="30" text-anchor="middle" fill="#34d399" font-size="9" font-weight="600">每步 PER-STEP</text>
+                <text x="30" y="48" text-anchor="middle" fill="#94a3b8" font-size="7.5">Agent决策</text>
+                <line x1="50" y1="48" x2="70" y2="48" stroke="rgba(52,211,153,0.3)" stroke-width="1" stroke-dasharray="3,2"><animate attributeName="stroke-dashoffset" from="5" to="0" dur="1s" repeatCount="indefinite"/></line>
+                <text x="100" y="48" text-anchor="middle" fill="#34d399" font-size="7.5">ECDSA签名</text>
+                <line x1="125" y1="48" x2="145" y2="48" stroke="rgba(251,191,36,0.3)" stroke-width="1" stroke-dasharray="3,2"><animate attributeName="stroke-dashoffset" from="5" to="0" dur="1s" repeatCount="indefinite"/></line>
+                <text x="175" y="48" text-anchor="middle" fill="#fbbf24" font-size="7.5">SecurityGuard</text>
+
+                <!-- 每10步: 缓冲→Transaction上链 -->
+                <rect x="215" y="15" width="145" height="55" rx="10" fill="rgba(56,189,248,0.04)" stroke="rgba(56,189,248,0.18)" stroke-width="1"/>
+                <text x="287" y="30" text-anchor="middle" fill="#38bdf8" font-size="9" font-weight="600">每10步 BATCH</text>
+                <text x="245" y="48" text-anchor="middle" fill="#94a3b8" font-size="7.5">缓冲签名包</text>
+                <line x1="268" y1="48" x2="285" y2="48" stroke="rgba(56,189,248,0.3)" stroke-width="1" stroke-dasharray="3,2"><animate attributeName="stroke-dashoffset" from="5" to="0" dur="1s" repeatCount="indefinite"/></line>
+                <text x="325" y="48" text-anchor="middle" fill="#38bdf8" font-size="7.5">Transaction上链</text>
+
+                <!-- 每回合: 验签→结算→Block→CW-PBFT→链追加 -->
+                <rect x="370" y="15" width="305" height="55" rx="10" fill="rgba(129,140,248,0.04)" stroke="rgba(129,140,248,0.18)" stroke-width="1"/>
+                <text x="522" y="30" text-anchor="middle" fill="#818cf8" font-size="9" font-weight="600">每回合 EPISODE-END</text>
+                <text x="395" y="48" text-anchor="middle" fill="#94a3b8" font-size="7">验签</text>
+                <line x1="408" y1="48" x2="418" y2="48" stroke="rgba(52,211,153,0.3)" stroke-width="1"/>
+                <text x="440" y="48" text-anchor="middle" fill="#52d399" font-size="7">结算</text>
+                <line x1="455" y1="48" x2="465" y2="48" stroke="rgba(56,189,248,0.3)" stroke-width="1"/>
+                <text x="495" y="48" text-anchor="middle" fill="#38bdf8" font-size="7">Block打包</text>
+                <line x1="518" y1="48" x2="528" y2="48" stroke="rgba(129,140,248,0.3)" stroke-width="1"/>
+                <text x="558" y="48" text-anchor="middle" fill="#818cf8" font-size="7">CW-PBFT</text>
+                <line x1="580" y1="48" x2="590" y2="48" stroke="rgba(129,140,248,0.3)" stroke-width="1"/>
+                <text x="630" y="48" text-anchor="middle" fill="#818cf8" font-size="7">链追加+权重</text>
+            </svg>
+        </div>
+
+        <!-- v3.8: 子组件流水线 SVG 图 -->
+        <div class="ecdsa-flow" style="margin-bottom:16px;">
+            <h3>v3.8 子组件流水线架构（Bridge 编排器拆分可视化）</h3>
+            <svg viewBox="0 0 680 210" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <filter id="glowSC"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                    <linearGradient id="gSC1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#38bdf8"/></linearGradient>
+                    <linearGradient id="gSC2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient>
+                </defs>
+
+                <!-- SigningService -->
+                <rect x="15" y="25" width="130" height="85" rx="12" fill="rgba(52,211,153,0.06)" stroke="rgba(52,211,153,0.25)" stroke-width="1.5"/>
+                <text x="80" y="48" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700" filter="url(#glowSC)">SigningService</text>
+                <text x="80" y="65" text-anchor="middle" fill="#94a3b8" font-size="9">ECDSA签名+SecurityGuard</text>
+                <text x="80" y="80" text-anchor="middle" fill="#94a3b8" font-size="8">nonce递增防重放</text>
+                <!-- 签名计数徽章（骑卡片右上角外侧） -->
+                <circle cx="145" cy="25" r="11" fill="#ffffff" stroke="#34d399" stroke-width="1.2"/>
+                <text id="sc-sign-badge" x="145" y="28" text-anchor="middle" fill="#34d399" font-size="8" font-weight="700">0</text>
+
+                <!-- Arrow SigningService → ActionRecorder -->
+                <line x1="147" y1="67" x2="175" y2="67" stroke="rgba(52,211,153,0.4)" stroke-width="2" stroke-dasharray="5,3">
+                    <animate attributeName="stroke-dashoffset" from="8" to="0" dur="1.5s" repeatCount="indefinite"/>
+                </line>
+                <text x="161" y="58" text-anchor="middle" fill="#64748b" font-size="7">签名包</text>
+
+                <!-- ActionRecorder -->
+                <rect x="178" y="25" width="130" height="85" rx="12" fill="rgba(56,189,248,0.06)" stroke="rgba(56,189,248,0.25)" stroke-width="1.5"/>
+                <text x="243" y="48" text-anchor="middle" fill="#38bdf8" font-size="12" font-weight="700" filter="url(#glowSC)">ActionRecorder</text>
+                <text x="243" y="65" text-anchor="middle" fill="#94a3b8" font-size="9">行为缓冲→Transaction</text>
+                <text x="243" y="80" text-anchor="middle" fill="#94a3b8" font-size="8">每10步批量上链</text>
+                <!-- 交易计数徽章（骑卡片右上角外侧） -->
+                <circle cx="308" cy="25" r="11" fill="#ffffff" stroke="#38bdf8" stroke-width="1.2"/>
+                <text id="sc-tx-badge" x="308" y="28" text-anchor="middle" fill="#38bdf8" font-size="8" font-weight="700">0</text>
+
+                <!-- Arrow ActionRecorder → CooperationDetector -->
+                <line x1="310" y1="67" x2="338" y2="67" stroke="rgba(56,189,248,0.4)" stroke-width="2" stroke-dasharray="5,3">
+                    <animate attributeName="stroke-dashoffset" from="8" to="0" dur="1.5s" repeatCount="indefinite"/>
+                </line>
+                <text x="324" y="58" text-anchor="middle" fill="#64748b" font-size="7">行为数据</text>
+
+                <!-- CooperationDetector -->
+                <rect x="341" y="25" width="130" height="85" rx="12" fill="rgba(251,191,36,0.06)" stroke="rgba(251,191,36,0.25)" stroke-width="1.5"/>
+                <text x="406" y="48" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="700" filter="url(#glowSC)">CooperationDetector</text>
+                <text x="406" y="65" text-anchor="middle" fill="#94a3b8" font-size="9">合作/背叛检测</text>
+                <text x="406" y="80" text-anchor="middle" fill="#94a3b8" font-size="8">距离阈值0.5+累积</text>
+                <!-- 合作状态徽章（骑卡片右上角外侧） -->
+                <circle cx="471" cy="25" r="11" fill="#ffffff" stroke="#fbbf24" stroke-width="1.2"/>
+                <text id="sc-coop-badge" x="471" y="28" text-anchor="middle" fill="#fbbf24" font-size="8" font-weight="700">0</text>
+
+                <!-- Arrow CooperationDetector → SettlementCoordinator -->
+                <line x1="473" y1="67" x2="501" y2="67" stroke="rgba(251,191,36,0.4)" stroke-width="2" stroke-dasharray="5,3">
+                    <animate attributeName="stroke-dashoffset" from="8" to="0" dur="1.5s" repeatCount="indefinite"/>
+                </line>
+                <text x="487" y="58" text-anchor="middle" fill="#64748b" font-size="7">合作判定</text>
+
+                <!-- SettlementCoordinator -->
+                <rect x="504" y="25" width="160" height="85" rx="12" fill="rgba(129,140,248,0.06)" stroke="rgba(129,140,248,0.25)" stroke-width="1.5"/>
+                <text x="584" y="48" text-anchor="middle" fill="#818cf8" font-size="12" font-weight="700" filter="url(#glowSC)">SettlementCoordinator</text>
+                <text x="584" y="65" text-anchor="middle" fill="#94a3b8" font-size="9">贡献度+激励结算+λ融合</text>
+                <text x="584" y="80" text-anchor="middle" fill="#94a3b8" font-size="8">weighted=0.4t+0.35c+0.25p</text>
+                <!-- 结算徽章（骑卡片右上角内侧，不超出画布） -->
+                <circle cx="655" cy="24" r="9" fill="#ffffff" stroke="#818cf8" stroke-width="1.2"/>
+                <text id="sc-settle-badge" x="655" y="27" text-anchor="middle" fill="#818cf8" font-size="7.5" font-weight="700">λ</text>
+
+                <!-- Bridge 编排器标注 -->
+                <rect x="15" y="120" width="650" height="30" rx="8" fill="rgba(52,211,153,0.03)" stroke="rgba(52,211,153,0.12)" stroke-width="1"/>
+                <text x="340" y="140" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">Bridge 编排器（485行） — on_step() 签名→缓冲→检测 | on_episode_end() 验签→结算→Block→CW-PBFT</text>
+
+                <!-- Per-agent 签名/合作状态面板 -->
+                <rect x="15" y="155" width="650" height="45" rx="8" fill="rgba(56,189,248,0.03)" stroke="rgba(56,189,248,0.12)" stroke-width="1"/>
+                <text x="340" y="170" text-anchor="middle" fill="#94a3b8" font-size="9">智能体实时状态</text>
+                <!-- agent_0 -->
+                <circle cx="100" cy="185" r="8" id="sc-agent0-circle" fill="rgba(52,211,153,0.2)" stroke="#34d399" stroke-width="1.5"/>
+                <text x="100" y="189" text-anchor="middle" fill="#94a3b8" font-size="7" font-weight="600">a0</text>
+                <text id="sc-agent0-status" x="130" y="189" fill="#94a3b8" font-size="8">签名:0 合作:--</text>
+                <!-- agent_1 -->
+                <circle cx="270" cy="185" r="8" id="sc-agent1-circle" fill="rgba(56,189,248,0.2)" stroke="#38bdf8" stroke-width="1.5"/>
+                <text x="270" y="189" text-anchor="middle" fill="#94a3b8" font-size="7" font-weight="600">a1</text>
+                <text id="sc-agent1-status" x="300" y="189" fill="#94a3b8" font-size="8">签名:0 合作:--</text>
+                <!-- agent_2 -->
+                <circle cx="440" cy="185" r="8" id="sc-agent2-circle" fill="rgba(129,140,248,0.2)" stroke="#818cf8" stroke-width="1.5"/>
+                <text x="440" y="189" text-anchor="middle" fill="#94a3b8" font-size="7" font-weight="600">a2</text>
+                <text id="sc-agent2-status" x="470" y="189" fill="#94a3b8" font-size="8">签名:0 合作:--</text>
+                <!-- λ 标注 -->
+                <text id="sc-lambda-display" x="620" y="189" fill="#818cf8" font-size="9" font-weight="600">λ=0.10</text>
+            </svg>
+        </div>
+
+        <!-- v3.8: 子组件独立统计卡片 -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px;">
+            <!-- SigningService -->
+            <div class="stat-card-info" style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#34d399;font-weight:600;margin-bottom:4px;">SigningService</div>
+                <div style="font-size:0.65rem;color:#94a3b8;margin-bottom:8px;">ECDSA签名+安全校验</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;text-align:center;">
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">签名</div><div class="animated-num" id="sc-sign-count" style="font-size:1.0rem;font-weight:700;color:#34d399;">0</div></div>
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">验签</div><div class="animated-num" id="sc-verify-count" style="font-size:1.0rem;font-weight:700;color:#38bdf8;">0</div></div>
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">安全通过</div><div class="animated-num" id="sc-sec-pass" style="font-size:1.0rem;font-weight:700;color:#34d399;">0</div></div>
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">安全拒绝</div><div class="animated-num" id="sc-sec-fail" style="font-size:1.0rem;font-weight:700;color:#fbbf24;">0</div></div>
+                </div>
+            </div>
+            <!-- ActionRecorder -->
+            <div class="stat-card-info" style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#38bdf8;font-weight:600;margin-bottom:4px;">ActionRecorder</div>
+                <div style="font-size:0.65rem;color:#94a3b8;margin-bottom:8px;">行为缓冲→批量上链</div>
+                <div style="display:flex;justify-content:space-around;">
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">缓冲中</div><div class="animated-num" id="sc-pending" style="font-size:1.1rem;font-weight:700;color:#38bdf8;">0</div></div>
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">已上链</div><div class="animated-num" id="sc-tx-count" style="font-size:1.1rem;font-weight:700;color:#38bdf8;">0</div></div>
+                </div>
+            </div>
+            <!-- CooperationDetector -->
+            <div class="stat-card-info" style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#fbbf24;font-weight:600;margin-bottom:4px;">CooperationDetector</div>
+                <div style="font-size:0.65rem;color:#94a3b8;margin-bottom:8px;">合作/背叛检测+累积</div>
+                <div style="display:flex;justify-content:space-around;">
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">检测智能体</div><div class="animated-num" id="sc-coop-agents" style="font-size:1.1rem;font-weight:700;color:#fbbf24;">0</div></div>
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">合作率</div><div class="animated-num" id="sc-coop-rate" style="font-size:1.1rem;font-weight:700;color:#34d399;">--</div></div>
+                </div>
+            </div>
+            <!-- SettlementCoordinator -->
+            <div class="stat-card-info" style="background:rgba(129,140,248,0.06);border:1px solid rgba(129,140,248,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#818cf8;font-weight:600;margin-bottom:4px;">SettlementCoordinator</div>
+                <div style="font-size:0.65rem;color:#94a3b8;margin-bottom:8px;">贡献评分+激励结算+λ融合</div>
+                <div style="display:flex;justify-content:space-around;">
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">λ权重</div><div id="sc-lambda" style="font-size:1.1rem;font-weight:700;color:#818cf8;">0.10</div></div>
+                    <div><div style="font-size:0.6rem;color:#94a3b8;">奖励裁剪</div><div style="font-size:1.1rem;font-weight:700;color:#818cf8;">[-20,20]</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- v3.4: 流水线统计面板 -->
+        <div class="pipeline-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px;">
+            <div class="stat-card-info" style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">ECDSA 签名次数</div>
+                <div class="animated-num" id="pl-sign-count" style="font-size:1.6rem;font-weight:700;color:#34d399;">0</div>
+            </div>
+            <div class="stat-card-info" style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">ECDSA 验签次数</div>
+                <div class="animated-num" id="pl-verify-count" style="font-size:1.6rem;font-weight:700;color:#38bdf8;">0</div>
+            </div>
+            <div class="stat-card-info" style="background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">Security 通过次数</div>
+                <div class="animated-num" id="pl-sec-pass" style="font-size:1.6rem;font-weight:700;color:#34d399;">0</div>
+            </div>
+            <div class="stat-card-info" style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">Security 拒绝次数</div>
+                <div class="animated-num" id="pl-sec-fail" style="font-size:1.6rem;font-weight:700;color:#fbbf24;">0</div>
+            </div>
+            <div class="stat-card-info" style="background:rgba(129,140,248,0.06);border:1px solid rgba(129,140,248,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">区块链高度</div>
+                <div class="animated-num" id="pl-chain-height" style="font-size:1.6rem;font-weight:700;color:#818cf8;">0</div>
+            </div>
+            <div class="stat-card-info" style="background:rgba(129,140,248,0.06);border:1px solid rgba(129,140,248,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">总交易数</div>
+                <div class="animated-num" id="pl-total-tx" style="font-size:1.6rem;font-weight:700;color:#818cf8;">0</div>
+            </div>
+            <div class="stat-card-info" style="background:rgba(129,140,248,0.06);border:1px solid rgba(129,140,248,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">CW-PBFT PREPARE 投票数</div>
+                <div class="animated-num" id="pl-consensus-count" style="font-size:1.6rem;font-weight:700;color:#818cf8;">0</div>
+            </div>
+            <div class="stat-card-info" style="background:rgba(129,140,248,0.06);border:1px solid rgba(129,140,248,0.18);border-radius:12px;padding:14px;text-align:center;">
+                <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:6px;">投票权重</div>
+                <div class="animated-num" id="pl-weights" style="font-size:1.1rem;font-weight:700;color:#818cf8;">--</div>
+            </div>
+        </div>
+
+        <!-- CW-PBFT 共识三阶段 -->
+        <div class="consensus-flow">
+            <h3>CW-PBFT 贡献加权共识流程（三阶段动画）</h3>
+            <svg viewBox="0 0 680 160" xmlns="http://www.w3.org/2000/svg">
+                <!-- Phase 1: Pre-Prepare -->
+                <rect x="20" y="20" width="180" height="120" rx="12" fill="rgba(56,189,248,0.04)" stroke="rgba(56,189,248,0.2)" stroke-width="1"/>
+                <text x="110" y="42" text-anchor="middle" fill="#38bdf8" font-size="12" font-weight="700">① Pre-Prepare</text>
+                <text x="110" y="60" text-anchor="middle" fill="#94a3b8" font-size="9">主节点发起提案</text>
+                <!-- Animated broadcast -->
+                <circle cx="110" cy="75" r="8" fill="rgba(56,189,248,0.3)" stroke="#38bdf8" stroke-width="1">
+                    <animate attributeName="r" values="8;14;8" dur="2s" repeatCount="indefinite"/>
+                    <animate attributeName="fill-opacity" values="0.3;0.1;0.3" dur="2s" repeatCount="indefinite"/>
+                </circle>
+                <text x="110" y="78" text-anchor="middle" fill="#38bdf8" font-size="8" font-weight="700">P</text>
+                <!-- nodes -->
+                <circle cx="70" cy="105" r="6" fill="rgba(56,189,248,0.15)" stroke="rgba(56,189,248,0.4)"/>
+                <circle cx="110" cy="105" r="6" fill="rgba(56,189,248,0.15)" stroke="rgba(56,189,248,0.4)"/>
+                <circle cx="150" cy="105" r="6" fill="rgba(56,189,248,0.15)" stroke="rgba(56,189,248,0.4)"/>
+                <text x="70" y="118" text-anchor="middle" fill="#64748b" font-size="7">a0</text>
+                <text x="110" y="118" text-anchor="middle" fill="#64748b" font-size="7">a1</text>
+                <text x="150" y="118" text-anchor="middle" fill="#64748b" font-size="7">a2</text>
+
+                <!-- Arrow Phase 1→2 -->
+                <line x1="202" y1="80" x2="225" y2="80" stroke="rgba(52,211,153,0.5)" stroke-width="2" stroke-dasharray="5,3">
+                    <animate attributeName="stroke-dashoffset" from="8" to="0" dur="2s" repeatCount="indefinite"/>
+                </line>
+
+                <!-- Phase 2: Prepare -->
+                <rect x="228" y="20" width="180" height="120" rx="12" fill="rgba(52,211,153,0.04)" stroke="rgba(52,211,153,0.2)" stroke-width="1"/>
+                <text x="318" y="42" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">② Prepare</text>
+                <text x="318" y="60" text-anchor="middle" fill="#94a3b8" font-size="9">节点投票 + 贡献加权</text>
+                <!-- Animated voting -->
+                <circle cx="278" cy="82" r="10" fill="rgba(52,211,153,0.2)" stroke="#34d399" stroke-width="1.5">
+                    <animate attributeName="fill-opacity" values="0.2;0.5;0.2" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <text x="278" y="85" text-anchor="middle" fill="#34d399" font-size="7" font-weight="700">✓</text>
+                <circle cx="318" cy="82" r="10" fill="rgba(52,211,153,0.2)" stroke="#34d399" stroke-width="1.5">
+                    <animate attributeName="fill-opacity" values="0.2;0.5;0.2" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <text x="318" y="85" text-anchor="middle" fill="#34d399" font-size="7" font-weight="700">✓</text>
+                <circle cx="358" cy="82" r="10" fill="rgba(52,211,153,0.2)" stroke="#34d399" stroke-width="1.5">
+                    <animate attributeName="fill-opacity" values="0.2;0.5;0.2" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <text x="358" y="85" text-anchor="middle" fill="#34d399" font-size="7" font-weight="700">✓</text>
+                <!-- Weight labels -->
+                <text x="278" y="72" text-anchor="middle" fill="#94a3b8" font-size="7">w=0.38</text>
+                <text x="318" y="72" text-anchor="middle" fill="#94a3b8" font-size="7">w=0.33</text>
+                <text x="358" y="72" text-anchor="middle" fill="#94a3b8" font-size="7">w=0.29</text>
+                <!-- Weight bar -->
+                <rect x="255" y="100" width="120" height="8" rx="4" fill="rgba(255,255,255,0.03)"/>
+                <rect x="255" y="100" width="46" height="8" rx="4" fill="rgba(56,189,248,0.3)">
+                    <animate attributeName="width" values="0;46" dur="2s" fill="freeze"/>
+                </rect>
+                <rect x="301" y="100" width="40" height="8" rx="4" fill="rgba(52,211,153,0.3)">
+                    <animate attributeName="width" values="0;40" dur="2s" fill="freeze" begin="0.5s"/>
+                </rect>
+                <rect x="341" y="100" width="34" height="8" rx="4" fill="rgba(129,140,248,0.3)">
+                    <animate attributeName="width" values="0;34" dur="2s" fill="freeze" begin="1s"/>
+                </rect>
+                <text x="315" y="120" text-anchor="middle" fill="#34d399" font-size="8">≥ 2/3 权重 → 进入 Commit</text>
+
+                <!-- Arrow Phase 2→3 -->
+                <line x1="410" y1="80" x2="433" y2="80" stroke="rgba(129,140,248,0.5)" stroke-width="2" stroke-dasharray="5,3">
+                    <animate attributeName="stroke-dashoffset" from="8" to="0" dur="2s" repeatCount="indefinite"/>
+                </line>
+
+                <!-- Phase 3: Commit -->
+                <rect x="436" y="20" width="220" height="120" rx="12" fill="rgba(129,140,248,0.04)" stroke="rgba(129,140,248,0.2)" stroke-width="1"/>
+                <text x="546" y="42" text-anchor="middle" fill="#818cf8" font-size="12" font-weight="700">③ Commit</text>
+                <text x="546" y="60" text-anchor="middle" fill="#94a3b8" font-size="9">最终确认 + 区块上链</text>
+                <!-- Committed block -->
+                <rect x="470" y="75" width="150" height="40" rx="8" fill="rgba(129,140,248,0.08)" stroke="rgba(129,140,248,0.3)" stroke-width="1.5">
+                    <animate attributeName="stroke-opacity" values="0.3;0.7;0.3" dur="3s" repeatCount="indefinite"/>
+                </rect>
+                <text x="546" y="88" text-anchor="middle" fill="#818cf8" font-size="10" font-weight="600">区块 #N 已确认</text>
+                <text x="546" y="104" text-anchor="middle" fill="#94a3b8" font-size="7">ECDSA签名 · 行为记录 · 积分结算</text>
+                <text x="546" y="135" text-anchor="middle" fill="#34d399" font-size="9" font-weight="600">✅ 共识达成 → 信任锚定</text>
+            </svg>
+        </div>
+
+        <!-- 安全防护机制 -->
+        <div class="security-grid">
+            <div class="security-card">
+                <h3>ECDSA 安全防护机制</h3>
+                <div class="security-item">
+                    <div class="security-icon green">🔒</div>
+                    <div class="security-label">k值重用检测</div>
+                    <div class="security-value" id="sec-kreuse">0 告警</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon green">🛡</div>
+                    <div class="security-label">nonce防重放攻击</div>
+                    <div class="security-value" id="sec-nonce">单调递增 ✓</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon yellow">⏱</div>
+                    <div class="security-label">时间戳有效期</div>
+                    <div class="security-value">±30秒</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon blue">🔑</div>
+                    <div class="security-label">密钥曲线</div>
+                    <div class="security-value">secp256r1 (P-256)</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon green">✅</div>
+                    <div class="security-label">签名标准</div>
+                    <div class="security-value">FIPS 186-5 + RFC 6979</div>
+                </div>
+            </div>
+            <div class="security-card">
+                <h3>激励与惩罚机制</h3>
+                <div class="security-item">
+                    <div class="security-icon blue">📊</div>
+                    <div class="security-label">贡献量化维度</div>
+                    <div class="security-value">task 40% + coop 35%</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon green">🏆</div>
+                    <div class="security-label">基础奖励</div>
+                    <div class="security-value" id="sec-base-reward">10.0 / 回合</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon yellow">⚠</div>
+                    <div class="security-label">惩罚等级 1</div>
+                    <div class="security-value">警告（10分扣除）</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon yellow">⚠</div>
+                    <div class="security-label">惩罚等级 2</div>
+                    <div class="security-value">降权（30分扣除）</div>
+                </div>
+                <div class="security-item">
+                    <div class="security-icon red">⛔</div>
+                    <div class="security-label">惩罚等级 3</div>
+                    <div class="security-value">封禁（50分扣除）</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 积分趋势 -->
+        <div class="chart-grid">
+            <div class="chart-card full"><h3>智能体链上积分趋势</h3><canvas id="chart-bc-history"></canvas></div>
+        </div>
+        <div class="bottom-row">
+            <div class="data-card">
+                <h3>智能体身份信息</h3>
+                <table><thead><tr><th>ID</th><th>公钥指纹</th><th>签名算法</th><th>状态</th><th>注册回合</th></tr></thead>
+                <tbody id="bc-identity"></tbody></table>
+            </div>
+            <div class="data-card">
+                <h3>共识参数</h3>
+                <table><tbody id="bc-params"></tbody></table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════ 共识投票 ═══════ -->
+    <div class="tab-content" id="tab-consensus">
+        <div class="stats-row" id="consensus-stats">
+            <div class="stat-card"><div class="stat-label">共识算法</div><div class="stat-value" style="font-size:1.2rem">CW-PBFT</div><div class="stat-sub">贡献加权实用容错（PBFT 族，省略/崩溃故障）</div></div>
+            <div class="stat-card"><div class="stat-label">共识轮次</div><div class="stat-value" id="cs-rounds">--</div><div class="stat-sub">累计出块确认</div></div>
+            <div class="stat-card"><div class="stat-label">链上交易</div><div class="stat-value" id="cs-txs">--</div><div class="stat-sub">签名行为存证</div></div>
+            <div class="stat-card"><div class="stat-label">安全告警</div><div class="stat-value" id="cs-alerts">--</div><div class="stat-sub">SecurityGuard拦截</div></div>
+            <div class="stat-card"><div class="stat-label">权重展宽纪元</div><div class="stat-value" id="cs-broadening-epochs" style="color:#818cf8">--</div><div class="stat-sub" id="cs-broadening-sub">参与率驱动 · epoch=50/floor=0.25/max=1.5</div></div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h3>CW-PBFT 投票权重分布</h3>
+                <canvas id="chart-consensus-weights" height="200"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>贡献度组成 (Shapley风格)</h3>
+                <canvas id="chart-contribution-radar" height="200"></canvas>
+            </div>
+        </div>
+        <div id="consensus-empty" class="empty-state" style="display:none"><span class="es-icon">⬡</span>本模式未启用区块链 · 共识数据不可用</div>
+        <div class="chart-card full">
+            <h3>CW-PBFT 三阶段共识流程 <span style="font-size:0.75rem;color:#2563eb;margin-left:8px;" id="consensus-anim-status">▶ 动画演示中</span></h3>
+            <div id="consensus-phases" style="display:flex;gap:20px;flex-wrap:wrap;margin-top:15px;">
+                <div id="consensus-phase-1" class="consensus-phase" style="flex:1;min-width:200px;background:rgba(37,99,235,0.08);border:1px solid rgba(37,99,235,0.3);border-radius:8px;padding:15px;transition:all 0.5s;">
+                    <h4 style="color:#2563eb;">Phase 1: Pre-Prepare</h4>
+                    <p style="font-size:0.85rem;color:#aaa;">主节点广播提案区块，包含交易列表和状态根</p>
+                    <div style="margin-top:10px;font-size:0.8rem;color:#888;">阈值: 1 (仅主节点)</div>
+                </div>
+                <div id="consensus-phase-2" class="consensus-phase" style="flex:1;min-width:200px;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3);border-radius:8px;padding:15px;transition:all 0.5s;">
+                    <h4 style="color:#10b981;">Phase 2: Prepare</h4>
+                    <p style="font-size:0.85rem;color:#aaa;">各节点验证提案，按贡献权重广播准备投票</p>
+                    <div style="margin-top:10px;font-size:0.8rem;color:#888;">阈值: ≥ 2/3 总权重（权重口径；非节点数 2f+1）</div>
+                </div>
+                <div id="consensus-phase-3" class="consensus-phase" style="flex:1;min-width:200px;background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.3);border-radius:8px;padding:15px;transition:all 0.5s;">
+                    <h4 style="color:#f59e0b;">Phase 3: Commit</h4>
+                    <p style="font-size:0.85rem;color:#aaa;">收集到足够准备投票后，广播提交投票</p>
+                    <div style="margin-top:10px;font-size:0.8rem;color:#888;">阈值: ≥ 2/3 总权重（权重口径；非节点数 2f+1）</div>
+                </div>
+            </div>
+            <div style="margin-top:15px;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;">
+                <h4 style="font-size:0.9rem;margin-bottom:8px;">CW-PBFT vs 标准PBFT 对比</h4>
+                <table style="width:100%;font-size:0.85rem;">
+                    <tr style="color:#888;"><th style="text-align:left;padding:4px;">特性</th><th style="text-align:left;padding:4px;">标准PBFT</th><th style="text-align:left;padding:4px;">CW-PBFT</th></tr>
+                    <tr><td style="padding:4px;">投票权重</td><td style="padding:4px;">等权 1/n</td><td style="padding:4px;color:#10b981;">按贡献度动态加权</td></tr>
+                    <tr><td style="padding:4px;">容错（省略/崩溃故障）</td><td style="padding:4px;">n >= 2f+1</td><td style="padding:4px;color:#10b981;">权重增强下活性恢复（省略故障，n >= 2f+1）</td></tr>
+                    <tr><td style="padding:4px;">共识增益来源</td><td style="padding:4px;">—</td><td style="padding:4px;color:#10b981;">受控权重展宽（R≈15）下活性恢复；真实 MARL 权重（R≈1.01）下与标准 PBFT 等价，不宣称容错提升</td></tr>
+                    <tr><td style="padding:4px;">权重来源</td><td style="padding:4px;">N/A</td><td style="padding:4px;color:#2563eb;">κ_task=0.40 / κ_coop=0.35 / κ_compliance=0.25</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════ 区块浏览器 ═══════ -->
+    <div class="tab-content" id="tab-explorer">
+        <div class="stats-row" id="explorer-stats">
+            <div class="stat-card"><div class="stat-label">链高度</div><div class="stat-value" id="ex-height">--</div><div class="stat-sub">最新区块号</div></div>
+            <div class="stat-card"><div class="stat-label">总交易数</div><div class="stat-value" id="ex-txs">--</div><div class="stat-sub">链上行为存证</div></div>
+            <div class="stat-card"><div class="stat-label">ECDSA签名</div><div class="stat-value" id="ex-sigs">--</div><div class="stat-sub">签名/验签次数</div></div>
+            <div class="stat-card"><div class="stat-label">链数据结构</div><div class="stat-value" id="ex-valid" style="color:#94a3b8;">--</div><div class="stat-sub">示意数据（非真实链）</div></div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card full">
+                <h3>最新区块列表</h3>
+                <div style="max-height:400px;overflow-y:auto;">
+                    <table style="width:100%;font-size:0.85rem;" id="ex-block-table">
+                        <thead>
+                            <tr style="color:#888;border-bottom:1px solid rgba(0,0,0,0.08);">
+                                <th style="text-align:left;padding:8px;">区块#</th>
+                                <th style="text-align:left;padding:8px;">哈希</th>
+                                <th style="text-align:left;padding:8px;">前驱哈希</th>
+                                <th style="text-align:left;padding:8px;">出块者</th>
+                                <th style="text-align:right;padding:8px;">交易数</th>
+                                <th style="text-align:left;padding:8px;">共识</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ex-blocks-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h3>每块交易数趋势</h3>
+                <canvas id="chart-block-tx-trend" height="200"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>出块者分布</h3>
+                <canvas id="chart-proposer-dist" height="200"></canvas>
+            </div>
+        </div>
+        <div id="explorer-empty" class="empty-state" style="display:none"><span class="es-icon">⬡</span>本模式未启用区块链 · 链上数据不可用</div>
+    </div>
+
+    <!-- ═══════ 系统 ═══════ -->
+    <div class="tab-content" id="tab-system">
+        <div class="chart-grid">
+            <div class="chart-card full">
+                <h3>训练配置</h3>
+                <table><tbody id="sys-config"></tbody></table>
+            </div>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card"><h3>环境参数</h3><table><tbody id="sys-env"></tbody></table></div>
+            <div class="chart-card"><h3>算法参数</h3><table><tbody id="sys-algo"></tbody></table></div>
+        </div>
+    </div>
+
+<!--  P2P网络 -->
+<div class="tab-content" id="tab-p2p">
+    <div class="stats-row" id="p2p-stats">
+        <div class="stat-card"><div class="stat-label">P2P节点数</div><div class="stat-value" id="p2p-nnodes">3</div><div class="stat-sub">agent_0 ~ agent_2</div></div>
+        <div class="stat-card"><div class="stat-label">共识轮次</div><div class="stat-value" id="p2p-rounds">--</div><div class="stat-sub">CW-PBFT over TCP</div></div>
+        <div class="stat-card"><div class="stat-label">消息发送/接收</div><div class="stat-value" id="p2p-msgs">--</div><div class="stat-sub">全双工通信</div></div>
+        <div class="stat-card"><div class="stat-label">网络延迟</div><div class="stat-value" id="p2p-latency">--</div><div class="stat-sub">3节点共识耗时</div></div>
+    </div>
+    <div class="chart-grid">
+        <div class="chart-card full">
+            <div class="chart-title">P2P网络拓扑（实时）</div>
+            <div class="chart-body" style="height:400px; display:flex; align-items:center; justify-content:center;">
+                <canvas id="p2p-canvas" width="800" height="380" style="max-width:100%;"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="chart-grid">
+        <div class="chart-card">
+            <div class="chart-title">节点权重分布</div>
+            <div class="chart-body" style="height:400px;"><canvas id="p2p-weight-chart" width="400" height="380" style="max-width:100%;"></canvas></div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">节点角色说明</div>
+            <div class="chart-body" style="height:400px; overflow-y:auto; font-size:0.85rem; color:#5a6b7f; padding:4px 6px;" id="p2p-roles">
+                <div style="margin-bottom:10px;"><b style="color:#10b981;">● 主节点（Leader）</b><br>按贡献权重轮换选出，负责打包交易并广播 Pre-Prepare 提案。</div>
+                <div style="margin-bottom:10px;"><b style="color:#2563eb;">● 副本节点（Replica）</b><br>验证提案、按权重投 Prepare / Commit 票，权重 ≥ 2/3 总权重时区块上链。</div>
+                <div style="margin-bottom:10px;"><b style="color:#8a94a6;">· 连线</b><br>全双工 TCP 通道（JSON + 4 字节长度前缀 + SHA-256 去重）。</div>
+                <div style="margin-bottom:10px;"><b style="color:#f59e0b;">· 权重来源</b><br>CW-PBFT 贡献度加权：κ_task=0.40 / κ_coop=0.35 / κ_compliance=0.25；参与率驱动的纪元制展宽动态调整（详见设计报告 4.3）。</div>
+                <div style="color:#8a94a6;font-size:0.78rem;">提示：本页拓扑为演示布局（模拟数据模式）；运行 <code>python network_demo.py</code> 可启用实时网络视图。</div>
+            </div>
+        </div>
+    </div>
+    <div class="chart-grid">
+        <div class="chart-card full">
+            <div class="chart-title">共识消息流日志（最近20条）</div>
+            <div class="chart-body" style="max-height:300px; overflow-y:auto; font-family:monospace; font-size:12px; color:#a0b4c8;" id="p2p-log"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════ 攻防演示 ═══════ -->
+<div class="tab-content" id="tab-attack">
+    <div class="hero" style="padding:16px 24px;">
+        <h1 style="font-size:1.5rem;">区块链安全攻防演示</h1>
+        <p class="subtitle">一键注入攻击，实时对比「无区块链基线」与「MARL-ECDSA 区块链防护」的拦截效果</p>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;" id="attack-btn-row">
+        <button class="demo-btn" onclick="injectAttack('observation_forgery')" id="btn-att-obs">🎭 观测伪造攻击</button>
+        <button class="demo-btn" onclick="injectAttack('message_tampering')" id="btn-att-tamper">✂️ 消息篡改攻击</button>
+        <button class="demo-btn" onclick="injectAttack('replay_attack')" id="btn-att-replay">⏪ 重放攻击</button>
+        <button class="demo-btn" onclick="injectAttack('byzantine')" id="btn-att-byz">☠️ 主节点故障</button>
+        <button class="demo-btn" onclick="injectAttack('sybil_attack')" id="btn-att-sybil">👥 女巫/Sybil 攻击</button>
+        <button class="demo-btn" onclick="injectAttack('k_reuse_attack')" id="btn-att-kreuse">🔑 k 值重用攻击</button>
+        <button class="demo-btn" onclick="injectAttack('long_range_attack')" id="btn-att-longrange">🕰 长程攻击</button>
+        <button class="demo-btn" style="background:#f59e0b;color:#0f172a;" onclick="injectAttack('all')" id="btn-att-all">⚡ 一键注入全部攻击</button>
+    </div>
+    <div id="attack-status" style="margin:12px 0;font-size:0.9rem;color:#2563eb;min-height:20px;">点击上方按钮注入攻击，观察区块链安全机制如何拦截</div>
+    <div id="attack-results" style="display:flex;flex-direction:column;gap:16px;"></div>
+</div>
+</div>
+
+<div class="footer">
+    <span class="brand">MARL-ECDSA</span> CCF 第五届区块链竞赛 · 国赛演示平台
+    <span style="margin-left:12px;color:rgba(56,189,248,0.3)">快捷键：1-7 切标签 · P 演示 · E 导出</span>
+</div>
+
+<!-- 演示模式指示器 -->
+<div class="demo-indicator" id="demo-indicator">
+    <div class="dot"></div>
+    <span>演示模式 · 自动轮播中</span>
+</div>
+
+<!-- 导出报告模态 -->
+<div class="modal" id="export-modal">
+    <div class="modal-content">
+        <h3>导出实验报告</h3>
+        <div class="info">
+            将当前所有训练数据、对比结果和图表导出为可打印的 HTML 报告文件。
+            报告包含：实验概述、三模式对照数据、奖励曲线、统计分析。
+        </div>
+        <div class="modal-btns">
+            <button class="modal-btn primary" onclick="doExport()">生成报告</button>
+            <button class="modal-btn secondary" onclick="hideExportModal()">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

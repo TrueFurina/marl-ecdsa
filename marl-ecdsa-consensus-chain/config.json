@@ -1,0 +1,146 @@
+{
+  "_comment": "MARL-ECDSA共识链 配置文件",
+  "modes": {
+    "pure_marl": {
+      "description": "纯MARL模式：IQL + 局部奖励，每个智能体独立学习导航",
+      "n_agents": 3,
+      "n_landmarks": 3,
+      "n_episodes": 1000,
+      "max_steps": 25,
+      "hidden_dim": 128,
+      "lr": 0.001,
+      "gamma": 0.8,
+      "batch_size": 64,
+      "epsilon_decay": 5000,
+      "seed": 42,
+      "log_interval": 10,
+      "lambda_weight": 0.0
+    },
+    "bc_marl": {
+      "description": "MARL+区块链模式：IQL + 区块链激励融入局部奖励",
+      "n_agents": 3,
+      "n_landmarks": 3,
+      "n_episodes": 1000,
+      "max_steps": 25,
+      "hidden_dim": 128,
+      "lr": 0.001,
+      "gamma": 0.8,
+      "batch_size": 64,
+      "epsilon_decay": 5000,
+      "seed": 42,
+      "log_interval": 10,
+      "lambda_weight": 0.1,
+      "upload_interval": 10
+    },
+    "selfish": {
+      "description": "含自私智能体模式：测试区块链激励对背叛行为的抑制作用",
+      "n_agents": 3,
+      "n_landmarks": 3,
+      "n_episodes": 1000,
+      "max_steps": 25,
+      "hidden_dim": 128,
+      "lr": 0.001,
+      "gamma": 0.8,
+      "batch_size": 64,
+      "epsilon_decay": 5000,
+      "seed": 42,
+      "log_interval": 10,
+      "lambda_weight": 0.1,
+      "upload_interval": 10,
+      "selfish_ratio": 0.3,
+      "betrayal_prob": 0.3
+    }
+  },
+  "blockchain": {
+    "consensus": "CW-PBFT",
+    "consensus_mode": "cw_pbft",
+    "consensus_mode_description": "共识引擎模式：cw_pbft(贡献加权默认) / standard_pbft(等权PBFT对照) / fast(快速单轮确认)",
+    "consensus_description": "贡献加权拜占庭容错共识",
+    "fault_tolerance": "floor((n-1)/3)",
+    "block_interval": 10,
+    "token_economics": {
+      "base_reward": 10.0,
+      "betrayal_penalty_mult": 2.0,
+      "top_tier_ratio": 0.30,
+      "top_tier_bonus": 5.0
+    },
+    "contribution_weights": {
+      "task_score": 0.40,
+      "cooperation_score": 0.35,
+      "compliance_score": 0.25
+    },
+    "penalty_thresholds": {
+      "warning": 10,
+      "demotion": 30,
+      "ban": 50
+    },
+    "penalty_levels": {
+      "warning": { "threshold": 10, "description": "累计10次背叛，警告" },
+      "demoted": { "threshold": 30, "description": "累计30次背叛，积分权重降至0.3" },
+      "banned": { "threshold": 50, "description": "累计50次背叛，封禁并清退" }
+    },
+    "env_reward_normalization": {
+      "min": -1.5,
+      "max": 2.0
+    },
+    "bc_reward_clip": {
+      "min": -20.0,
+      "max": 20.0
+    }
+  },
+  "crypto": {
+    "curve": "NIST secp256r1 (P-256)",
+    "standard": "FIPS 186-5",
+    "hash": "SHA-256",
+    "signing": "ECDSA + RFC 6979 deterministic k",
+    "key_storage": "PEM files under ./keys/"
+  },
+  "network": {
+    "protocol": "JSON + 4-byte length prefix",
+    "transport": "TCP (asyncio)",
+    "heartbeat_interval": 5,
+    "max_message_cache": 10000,
+    "gossip": "flooding + dedup"
+  },
+  "marl": {
+    "algorithm": "IQL (Independent Q-learning, CTDE 框架)",
+    "value_decomposition": "IQL 独立TD-error（每智能体独立Q网络）",
+    "standard": "CTDE (Centralized Training, Decentralized Execution)",
+    "backup": "NumPy Q-table fallback (no PyTorch required)",
+    "env": "MPE simple_spread (NumPy self-implemented)"
+  },
+  "visualization": {
+    "dashboard_port": 9090,
+    "framework": "Flask + Chart.js",
+    "refresh_interval_ms": 3000
+  },
+  "experiments": {
+    "comparisons": [
+      "pure_marl vs bc_marl (效果验证)",
+      "selfish_ratio: 0% vs 20% vs 50% (抗背叛验证)",
+      "lambda_weight: 0.05 vs 0.1 vs 0.3 (超参数分析)",
+      "adaptive_lambda vs static_lambda (双向协同验证)"
+    ],
+    "adaptive_lambda": {
+      "enabled": true,
+      "lambda_base": 0.1,
+      "beta": 2.0,
+      "kappa_c": 0.4,
+      "kappa_k": 0.35,
+      "kappa_s": 0.25,
+      "threshold": 0.5,
+      "ema_alpha": 0.9,
+      "lambda_range": [0.05, 0.15]
+    },
+    "nash_verifier": {
+      "enabled": true,
+      "env_payoffs": {
+        "cc": 5.0,
+        "cd": 2.0,
+        "dc": 6.0,
+        "dd": 1.0
+      },
+      "env_betrayal_advantage": 2.0
+    }
+  }
+}

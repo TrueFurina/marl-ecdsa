@@ -1,0 +1,300 @@
+{
+ "schema_version": "1.0",
+ "note": "本文件由 scripts/gen_assurance_config.py 从工作区私有配置派生，**入库、供 CI 使用**；请勿手改，改私有配置后跑 `python -X utf8 scripts/gen_assurance_config.py` 刷新。身份串（真名/QQ/邮箱）与机器本地路径不在本文件，仅在仓库外私有配置中。 内含作废令牌清单与语义规则，是口径门禁的规则真源。",
+ "_generated_from": "deliverables/assurance/config/assurance_blacklist.json",
+ "_public_keys": [
+  "void_tokens",
+  "semantic_rules",
+  "citation_blacklist",
+  "citation_markers",
+  "context_markers"
+ ],
+ "_private_only_keys": [
+  "identity"
+ ],
+ "void_tokens": [
+  {
+   "token": "6026",
+   "kind": "numeric"
+  },
+  {
+   "token": "312",
+   "kind": "numeric",
+   "needs_review": true,
+   "downgrade_note": "该数字与 HTML 章节锚点（如 id=\"312\"=3.12 节）存在同数值碰撞，命中需人工确认。"
+  },
+  {
+   "token": "406",
+   "kind": "numeric",
+   "needs_review": true
+  },
+  {
+   "token": "6597",
+   "kind": "numeric"
+  },
+  {
+   "token": "53.1",
+   "kind": "numeric"
+  },
+  {
+   "token": "46.4",
+   "kind": "numeric"
+  },
+  {
+   "token": "40.6",
+   "kind": "numeric",
+   "needs_review": true
+  },
+  {
+   "token": "42.2",
+   "kind": "numeric"
+  },
+  {
+   "token": "40.4",
+   "kind": "numeric"
+  },
+  {
+   "token": "29.6",
+   "kind": "numeric"
+  },
+  {
+   "token": "650%",
+   "kind": "percent"
+  },
+  {
+   "token": "2.03",
+   "kind": "numeric"
+  },
+  {
+   "token": "0.068",
+   "kind": "numeric"
+  },
+  {
+   "token": "0.000001",
+   "kind": "numeric"
+  },
+  {
+   "token": "19.4",
+   "kind": "numeric"
+  },
+  {
+   "token": "435",
+   "kind": "numeric"
+  },
+  {
+   "token": "1575",
+   "kind": "numeric"
+  },
+  {
+   "token": "Tests-1575",
+   "kind": "literal"
+  },
+  {
+   "token": "-46.54",
+   "kind": "numeric"
+  },
+  {
+   "token": "-47.10",
+   "kind": "numeric"
+  },
+  {
+   "token": "83%",
+   "kind": "percent"
+  },
+  {
+   "token": "88%",
+   "kind": "percent",
+   "needs_review": true
+  },
+  {
+   "token": "40.7",
+   "kind": "numeric"
+  },
+  {
+   "token": "11.7",
+   "kind": "numeric"
+  },
+  {
+   "token": "1603",
+   "kind": "numeric"
+  },
+  {
+   "token": "1624",
+   "kind": "numeric"
+  },
+  {
+   "token": "1626",
+   "kind": "numeric"
+  },
+  {
+   "token": "1657",
+   "kind": "numeric"
+  },
+  {
+   "token": "29.2",
+   "kind": "numeric",
+   "needs_review": true,
+   "downgrade_note": "该数字属**已作废的 n=22 种子口径**（BC 提升 +29.2%）。现行权威为 NR-1 +28.17%（n=71/组，Welch p=0.009524，BH-FDR 显著 / Bonferroni 不显著）。若为历史标注/引用可保留；若为活声称须改写。"
+  },
+  {
+   "token": "0.126",
+   "kind": "numeric",
+   "needs_review": true,
+   "downgrade_note": "该数字属**已作废的 n=22 种子口径**（Welch p=0.126 不显著）。现行权威为 NR-1 p=0.009524（BH-FDR 显著 / Bonferroni 不显著），且须与 NR-2 p<1e-10 同报。"
+  },
+  {
+   "token": "n=22",
+   "kind": "literal",
+   "needs_review": true,
+   "downgrade_note": "该口径标记属**已作废的 n=22 种子/组**。现行权威为 n=71/组（NR-1 末 50 回合 / NR-2 全程，两口径必须同报）。"
+  }
+ ],
+ "semantic_rules": [
+  {
+   "id": "BYZ-40",
+   "pattern": "40%\\s*拜占庭",
+   "hint": "应改为「40% 省略故障（omission）」——G3/G5 红线，本实现中故障节点从不投恶意票、不做 equivocation"
+  },
+  {
+   "id": "DILITHIUM-PERF",
+   "pattern": "(签名|sign)[^。\\n]{0,16}0\\.15\\s*ms|(验签|verify)[^。\\n]{0,16}0\\.05\\s*ms",
+   "hint": "NR-17 作废：Dilithium 性能三元组为硬编码 NIST 估计值、非本机实测，且 Dilithium 未实现"
+  },
+  {
+   "id": "NR8-LAMBDA-OPT",
+   "pattern": "(λ|lambda)[^。\\n]{0,24}(内部最优|最优区间|最佳)",
+   "hint": "NR-8 作废：λ≈0.15 内部最优是 total-reward（含 BC）口径的算术假象"
+  },
+  {
+   "id": "NR14-HONEST-WEIGHT",
+   "pattern": "83%\\s*[~\\-—]\\s*88%",
+   "hint": "NR-14 作废：诚实方投票权占比为推算值、未实测，禁止作为实验结果申报"
+  },
+  {
+   "id": "TESTS-1575",
+   "pattern": "157(5|6)\\s*(passed|个测试|测试通过)",
+   "hint": "NR-19：作废令牌含 1575，正确为 1574 passed / 1 skipped"
+  },
+  {
+   "id": "DILITHIUM-PERF-v2",
+   "pattern": "(签名|sign|验签|verify|signing|verifying)[^。\\n]{0,16}(40\\.7|11\\.7)\\s*ms",
+   "hint": "NR-20 作废单点：Dilithium 时延应写双值(冷跑44.64/10.40、暖跑17.04/4.15ms)，禁止裸 40.7/11.7ms"
+  },
+  {
+   "id": "ECDSA-PERF",
+   "pattern": "(签名|sign|验签|verify)[^。\\n]{0,16}(0\\.12|0\\.08)\\s*ms",
+   "hint": "ECDSA 时延已定性为「亚毫秒级」，旧口径 0.12/0.08ms 禁用"
+  },
+  {
+   "id": "VOID-MAXW",
+   "pattern": "MAX_W(?:EIGHT)?\\s*=\\s*1\\.5[^。\\n]{0,12}封死|封死[^。\\n]{0,8}刷分",
+   "hint": "撤回句：权重硬上界中性表述，禁止写「封死刷分」"
+  },
+  {
+   "id": "VOID-HONEST-1-3",
+   "pattern": "远低于[^。\\n]{0,12}1/3|诚实方[^。\\n]{0,12}(低于|远低于)[^。\\n]{0,8}1/3",
+   "hint": "撤回句：诚实方占比各档保持在安全线以上，禁止写「远低于1/3安全线」(方向错误)"
+  },
+  {
+   "id": "VOID-5SEED",
+   "pattern": "5\\s*种子\\s*[×x]\\s*2000\\s*轮|5\\s*种子\\s*PoC",
+   "hint": "5 seed PoC 已降级为溯源档、禁引用，路线C权威为 10 seed × 2000轮全量"
+  },
+  {
+   "id": "VOID-146TESTS",
+   "pattern": "146\\s*个测试文件|146\\s*个测试",
+   "hint": "测试文件数实测 147(非146)；测试数 NR-19=1632 passed/1634 collected"
+  },
+  {
+   "id": "VOID-DEFEAT-PART",
+   "pattern": "已抵御参与型对手",
+   "hint": "参与型对手臂为「上界性质」(无 equivocation 语义)，禁止写「已抵御参与型对手」正面断言"
+  }
+ ],
+ "citation_blacklist": [
+  "freederia.com"
+ ],
+ "citation_markers": [
+  "SYNTHETIC_"
+ ],
+ "context_markers": {
+  "mention": [
+   "排除",
+   "未使用",
+   "未引用",
+   "禁用",
+   "禁止",
+   "作废",
+   "黑名单",
+   "预警",
+   "应改为",
+   "所谓",
+   "改写",
+   "勘误",
+   "历史快照",
+   "待核",
+   "待补",
+   "不代补",
+   "SYNTHETIC_",
+   "令牌",
+   "已删除",
+   "不再使用",
+   "旧口径",
+   "口径混用",
+   "推算",
+   "未实测",
+   "待实测",
+   "不存在",
+   "已修正",
+   "绕开",
+   "规避",
+   "不使用",
+   "严禁",
+   "不得写成",
+   "已降级为溯源档",
+   "降级为溯源档",
+   "溯源档",
+   "未接线",
+   "未接入",
+   "→",
+   "不能据此推断",
+   "无法据此推断",
+   "不能推断",
+   "无法推断",
+   "不意味着",
+   "并不意味着",
+   "并未",
+   "不表示",
+   "并不是",
+   "并非",
+   "不能据此",
+   "早期",
+   "口径错误",
+   "曾写作",
+   "原写作",
+   "早期文档",
+   "当时口径",
+   "含 BC 激励",
+   "includes the BC incentive",
+   "含激励",
+   "系统性放大",
+   "已被取代",
+   "取代",
+   "作废值",
+   "小样本估计",
+   "无出处",
+   "非全量",
+   "不得声称",
+   "不得表述为",
+   "不可表述为",
+   "不得宣称",
+   "不据此宣称",
+   "不写「",
+   "不以「",
+   "✗",
+   "禁止写"
+  ],
+  "code_line_ref": "[\\.\\w/\\\\-]+\\.(py|md|json|txt|yml|yaml|toml|cfg|ini|sh|bat)\\s*:\\s*$",
+  "code_line_ref_line": "[\\.\\w/\\\\-]+\\.(py|md|json|txt|yml|yaml|toml|cfg|ini|sh|bat)\\s*:\\s*\\d"
+ }
+}
