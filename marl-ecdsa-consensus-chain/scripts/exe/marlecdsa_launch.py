@@ -12,6 +12,14 @@ import sys
 import threading
 import webbrowser
 
+# Windows 控制台默认 cp1252/GBK，中文横幅会触发 UnicodeEncodeError → 统一 UTF-8
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # PyInstaller onefile：资源解包目录
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 os.chdir(BASE)
