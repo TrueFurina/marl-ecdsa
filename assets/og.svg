@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#101c36"/>
+    </linearGradient>
+    <linearGradient id="hex" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/><stop offset="0.55" stop-color="#6366f1"/><stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.8" cy="0.1" r="0.9">
+      <stop offset="0" stop-color="#2563eb" stop-opacity="0.22"/><stop offset="1" stop-color="#2563eb" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#halo)"/>
+  <g transform="translate(940,315)" fill="none" stroke="url(#hex)" stroke-width="9" opacity="0.95">
+    <polygon points="0,-132 114,-66 114,66 0,132 -114,66 -114,-66"/>
+    <circle cx="0" cy="-132" r="16" fill="#e2f0ff" stroke="none"/>
+    <circle cx="114" cy="-66" r="16" fill="#e2f0ff" stroke="none"/>
+    <circle cx="114" cy="66" r="16" fill="#e2f0ff" stroke="none"/>
+    <circle cx="0" cy="132" r="16" fill="#e2f0ff" stroke="none"/>
+    <circle cx="-114" cy="66" r="16" fill="#e2f0ff" stroke="none"/>
+    <circle cx="-114" cy="-66" r="16" fill="#e2f0ff" stroke="none"/>
+  </g>
+  <text x="72" y="240" font-family="Segoe UI,Microsoft YaHei,sans-serif" font-size="64" font-weight="800" fill="#f1f5f9">MARL-ECDSA 共识链</text>
+  <text x="72" y="308" font-family="Segoe UI,Microsoft YaHei,sans-serif" font-size="30" fill="#94a3b8">面向协作多智能体的可信共识与激励机制</text>
+  <text x="72" y="412" font-family="Consolas,monospace" font-size="26" fill="#7dd3fc">+28.17% (n=71, p=0.0095) · 6/6 attacks blocked</text>
+  <text x="72" y="458" font-family="Consolas,monospace" font-size="26" fill="#6ee7b7">CW-PBFT 0→97.3% · 1600+ tests passed</text>
+  <text x="72" y="548" font-family="Segoe UI,sans-serif" font-size="22" fill="#475569">ECDSA 存证 · CW-PBFT · 链上激励 · 诚实负结果</text>
+</svg>
