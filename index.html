@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MARL-ECDSA 共识链 — 面向协作多智能体的可信共识与激励机制</title>
+<meta name="description" content="ECDSA 签名存证 + CW-PBFT 贡献加权共识 + 链上激励融合 MARL 奖励。主口径 +28.17%（n=71，p=0.0095），六类签名攻击 100% 拦截，1600+ 测试全通过，诚实负结果完整披露。">
+<meta property="og:title" content="MARL-ECDSA 共识链">
+<meta property="og:description" content="面向协作多智能体的可信共识与激励机制 — ECDSA 存证 · CW-PBFT · 链上激励 · 诚实负结果">
+<meta property="og:image" content="assets/og.png">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<style>
+:root{
+  --bg:#0b1220;--bg2:#101c36;--card:#0f1a2e;--border:#1e2c4a;
+  --text:#e2e8f0;--dim:#94a3b8;--faint:#64748b;
+  --blue:#38bdf8;--indigo:#818cf8;--green:#34d399;--amber:#fbbf24;--red:#f87171;
+  --mono:Consolas,'Cascadia Code',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;line-height:1.75;-webkit-font-smoothing:antialiased}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+/* ── 顶栏 ── */
+header{position:sticky;top:0;z-index:50;background:rgba(11,18,32,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.nav{display:flex;align-items:center;gap:18px;height:60px}
+.nav .logo{display:flex;align-items:center;gap:9px;font-weight:700;color:#fff;white-space:nowrap}
+.nav .logo img{width:26px;height:26px;border-radius:6px}
+.nav .links{display:flex;gap:4px;margin-left:auto;overflow-x:auto}
+.nav .links a{color:var(--dim);font-size:.86rem;padding:6px 11px;border-radius:7px;white-space:nowrap}
+.nav .links a:hover{color:#fff;background:rgba(255,255,255,.07);text-decoration:none}
+.nav .dl{background:linear-gradient(135deg,#2563eb,#6366f1);color:#fff!important;font-weight:600;border-radius:8px;padding:7px 14px!important}
+/* ── Hero ── */
+.hero{padding:84px 0 60px;background:radial-gradient(700px 300px at 85% -10%,rgba(37,99,235,.18),transparent 60%),radial-gradient(500px 260px at 5% 110%,rgba(52,211,153,.10),transparent 60%)}
+.hero h1{font-size:clamp(1.9rem,4.5vw,3rem);font-weight:800;letter-spacing:-.01em;line-height:1.2}
+.hero h1 .g{background:linear-gradient(90deg,var(--blue),var(--indigo),var(--green));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .tag{font-size:1.05rem;color:var(--dim);margin:14px 0 26px;max-width:760px}
+.hero .btns{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:30px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:11px;font-weight:600;font-size:.95rem}
+.btn.primary{background:linear-gradient(135deg,#2563eb,#6366f1);color:#fff}
+.btn.primary:hover{filter:brightness(1.12);text-decoration:none}
+.btn.ghost{border:1px solid var(--border-strong,#2c3d63);color:var(--text)}
+.btn.ghost:hover{background:rgba(255,255,255,.05);text-decoration:none}
+.chips{display:flex;flex-wrap:wrap;gap:10px}
+.chip{font-family:var(--mono);font-size:.82rem;padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:var(--card);color:var(--dim)}
+.chip b{color:#7dd3fc;font-weight:600}
+.chip.g b{color:var(--green)}
+/* ── 区块 ── */
+section{padding:64px 0;border-top:1px solid var(--border)}
+.sec-tag{font-family:var(--mono);font-size:.78rem;color:var(--faint);letter-spacing:.12em}
+section h2{font-size:1.65rem;font-weight:800;margin:6px 0 26px}
+.grid{display:grid;gap:16px}
+.g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px 24px;transition:.22s}
+.card:hover{border-color:#2f4470;transform:translateY(-2px)}
+.card h3{font-size:1.02rem;margin-bottom:8px}
+.card p{font-size:.9rem;color:var(--dim)}
+.card .em{color:#7dd3fc;font-weight:600}
+/* 架构 ASCII */
+pre.arch{font-family:var(--mono);font-size:.8rem;line-height:1.5;color:#9fb6d9;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;overflow-x:auto}
+pre.arch b{color:#7dd3fc}
+pre.arch .g{color:var(--green)}
+/* 证据表 */
+table.ev{width:100%;border-collapse:collapse;font-size:.88rem}
+table.ev th,table.ev td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+table.ev th{color:var(--faint);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase}
+table.ev td.num{font-family:var(--mono);color:#7dd3fc;white-space:nowrap}
+table.ev td.src{font-family:var(--mono);color:var(--faint);font-size:.76rem;white-space:nowrap}
+.neg{border-left:3px solid var(--green);padding:12px 18px;background:rgba(52,211,153,.05);border-radius:0 10px 10px 0;margin-top:14px;font-size:.88rem;color:var(--dim)}
+/* 下载 */
+.dlbox{display:grid;gap:14px}
+.dlrow{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 20px;flex-wrap:wrap}
+.dlrow .os{font-size:1.4rem}
+.dlrow .meta{flex:1;min-width:220px}
+.dlrow .meta b{display:block}
+.dlrow .meta span{font-size:.8rem;color:var(--faint);font-family:var(--mono)}
+code{font-family:var(--mono);font-size:.82rem;background:#0a1526;border:1px solid var(--border);border-radius:7px;padding:3px 9px;color:#7dd3fc}
+.warn{display:flex;gap:9px;font-size:.82rem;color:var(--amber);margin-top:10px}
+/* notice */
+.notice{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+footer{padding:36px 0 48px;border-top:1px solid var(--border);text-align:center;color:var(--faint);font-size:.82rem}
+footer .brand{color:var(--blue);font-weight:700}
+@media(max-width:720px){.nav .links a{padding:6px 8px}.hero{padding:60px 0 44px}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <div class="logo"><img src="assets/icon-192.png" alt="MARL-ECDSA">MARL-ECDSA</div>
+    <nav class="links">
+      <a href="#about">关于</a>
+      <a href="#arch">架构</a>
+      <a href="#innovation">创新</a>
+      <a href="#evidence">实测证据</a>
+      <a href="#download" class="dl">⬇ 下载 v1.0.0</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero wrap">
+  <h1>MARL-ECDSA <span class="g">可信共识链</span><br>让多智能体协作可验证、可激励</h1>
+  <p class="tag">把 ECDSA 签名存证、CW-PBFT 贡献加权共识与链上激励，融合进多智能体强化学习的奖励回路——并用<b style="color:var(--text)">完整披露的诚实负结果</b>告诉你这套机制的边界在哪里。</p>
+  <div class="btns">
+    <a class="btn primary" href="#download">⬇ 下载 Dashboard（Windows）</a>
+    <a class="btn ghost" href="https://github.com/TrueFurina/marl-ecdsa">GitHub 仓库</a>
+  </div>
+  <div class="chips">
+    <span class="chip"><b>+28.17%</b> env_reward（n=71）</span>
+    <span class="chip"><b>6/6</b> 签名攻击族拦截</span>
+    <span class="chip g"><b>0→97.3%</b> 容错活性恢复</span>
+    <span class="chip"><b>1600+</b> 测试 · 0 失败</span>
+    <span class="chip"><b>88</b> 条登记数字全部可复算</span>
+  </div>
+</div>
+
+<section id="about">
+  <div class="wrap">
+    <div class="sec-tag">01 · ABOUT</div>
+    <h2>多智能体协作，缺的不是算法，是信任基础设施</h2>
+    <div class="grid g3">
+      <div class="card"><h3>🪪 行为可验证</h3><p>每个智能体动作以 <span class="em">ECDSA（RFC6979 确定性 k）</span>签名上链，身份去中心化锚定、无 CA；时间戳回拨 / Nonce 重放 / K 值重用由 SecurityGuard 三阶防护拦截。</p></div>
+      <div class="card"><h3>⚖️ 贡献可计量</h3><p>基于 MARL 行为流导出<span class="em">贡献度权重</span>，注入 CW-PBFT 投票权重与链上激励结算；安全条件 <span class="em">b &lt; n/(2R+1)</span> 给出可判定的设计边界。</p></div>
+      <div class="card"><h3>📜 结论可复算</h3><p>全部对外数字登记在单一真值表（88 条），每条附数据源与分析口径；<span class="em">142 次原始运行随包发布</span>，Welch 检验 / Cohen's d 可独立复算。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="arch">
+  <div class="wrap">
+    <div class="sec-tag">02 · ARCHITECTURE</div>
+    <h2>四层解耦 · 决策与可信双向闭环</h2>
+    <pre class="arch">
+<b>┌────────────────────────────────────────────────────────────────┐</b>
+<b>│</b>  <span class="g">区块链激励层</span>   CW-PBFT 贡献加权共识 · 智能合约激励结算 · 账本   <b>│</b>
+<b>│</b>        ▲ 行为上链 / 贡献度反馈                  │ 链上激励 λ     <b>│</b>
+<b>│</b>  <b>┌──────┴───────────────────────────────────────▼───────────┐</b>  <b>│</b>
+<b>│</b>  <b>│</b>  <span class="g">Bridge 编排器（4 子组件流水线）</span>                            <b>│</b>  <b>│</b>
+<b>│</b>  <b>│</b>  SigningService → ActionRecorder → CooperationDetector    <b>│</b>  <b>│</b>
+<b>│</b>  <b>│</b>  → SettlementCoordinator                                  <b>│</b>  <b>│</b>
+<b>│</b>  <b>└──────┬───────────────────────────────────────▲───────────┘</b>  <b>│</b>
+<b>│</b>        │ 环境奖励 + λ·链上激励                  │ 观测 / 签名    <b>│</b>
+<b>│</b>  <span class="g">MARL 决策层</span>   IQL / VDN / QMIX / MAPPO（CTDE）· SimpleSpread   <b>│</b>
+<b>└────────────────────────────────────────────────────────────────┘</b>
+          SecurityGuard 三阶防护：观测校验 → ECDSA 验签 → 重放检测</pre>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><h3>链 → MARL</h3><p>链上激励 λ 融合进环境奖励，塑形长期协作行为；贡献度权重随行为流动态更新。</p></div>
+      <div class="card"><h3>MARL → 链</h3><p>每个动作 ECDSA 签名上链形成不可否认账本，行为序列驱动贡献度量化与共识投票。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="innovation">
+  <div class="wrap">
+    <div class="sec-tag">03 · INNOVATION</div>
+    <h2>三个可辩护的创新点</h2>
+    <div class="grid g3">
+      <div class="card"><h3>🔐 密码学攻击面实证</h3><p>与"统计合谋检测"路线不同：对观测伪造 / 消息篡改 / 重放 / 女巫 / K 值重用 / 长程攻击共 <span class="em">6 类 × 50 次 = 300 次</span>攻击批量实证，全部被链上层拦截（每类 Wilson 95%CI 下界 ≥92.9%）。</p></div>
+      <div class="card"><h3>⚖️ 贡献加权的诚实刻画</h3><p>给出 CW-PBFT 安全条件 <span class="em">b &lt; n/(2R+1)</span>；实测真实 MARL 权重 R≈1.007 时与标准 PBFT 等价——<span class="em">把这个等价性本身作为设计准则</span>报告，而非回避。</p></div>
+      <div class="card"><h3>📊 登记簿式数字治理</h3><p>88 条登记数字全部程序化取自原始数据、门禁自动复算；作废口径令牌化拦截。<span class="em">文档永远追不上事实的问题，用机器管。</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section id="evidence">
+  <div class="wrap">
+    <div class="sec-tag">04 · EVIDENCE</div>
+    <h2>实测证据（全部可独立复算）</h2>
+    <table class="ev">
+      <tr><th>维度</th><th>结果</th><th>真值源</th></tr>
+      <tr><td>主结局（末 50 回合 env_reward，不含 BC 激励）</td><td class="num">+28.17%，n=71/组，p=0.0095，d=0.44（BH-FDR 显著 / Bonferroni 不显著）</td><td class="src">NR-1</td></tr>
+      <tr><td>同数据全程口径（必须与主口径同报）</td><td class="num">+7.92%，p&lt;1e-10，d=1.20，检验力≈1.0</td><td class="src">NR-2</td></tr>
+      <tr><td>全程平均合作率</td><td class="num">+1.95%，p&lt;1e-10</td><td class="src">NR-3</td></tr>
+      <tr><td>跨算法等样本量对照（各 n=30）</td><td class="num">仅 QMIX 显著（+5.23，p=0.015，d=0.648）；IQL/VDN/MAPPO 不显著</td><td class="src">NR-63~66</td></tr>
+      <tr><td>签名层攻击（6 类 × 50 次）</td><td class="num">100% 拦截，每类 Wilson 下界 ≥92.9%</td><td class="src">NR-30</td></tr>
+      <tr><td>容错（40% 省略故障，n=16）</td><td class="num">共识成功率 0 → 97.3%（活性恢复，非任意对手安全界）</td><td class="src">NR-38</td></tr>
+      <tr><td>签名开销（每步真实 ECDSA）</td><td class="num">签名 0.036ms / 验签 0.079ms；端到端 1.527×（上界口径）</td><td class="src">NR-89~93</td></tr>
+      <tr><td>真实 TCP 部署</td><td class="num">单机回环 3/4/5 节点全通过；跨 2 物理主机 4 节点 + TLS 通过</td><td class="src">NR-94/95</td></tr>
+      <tr><td>工程规模</td><td class="num">1600+ 项测试全部通过（0 失败，下限式）</td><td class="src">NR-19</td></tr>
+    </table>
+    <div class="neg">
+      <b style="color:var(--green)">诚实负结果（同样登记在册）：</b>
+      ① 真实贡献度权重下 CW-PBFT 与标准 PBFT 等价（R≈1.007，安全条件数学必然）；
+      ② 激励效果<b style="color:var(--text)">强依赖底层算法</b>——同批等样本量四算法对照中仅 QMIX 显著，不宣称通用加速器；
+      ③ CARS 共识感知塑形在极小剂量即触发剂量无关崩溃，给出"何时有害"的可证伪判据；
+      ④ 差异化场景预注册探索为干净 NULL（p=0.925），已作局限性留档。
+      每条都有登记编号与原始数据，欢迎复算。
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <div class="sec-tag">05 · DOWNLOAD</div>
+    <h2>下载部署：三步在本机跑起来</h2>
+    <div class="dlbox">
+      <div class="dlrow">
+        <div class="os">🪟</div>
+        <div class="meta"><b>Windows Dashboard（推荐）</b><span>marlecdsa-dashboard.exe · 内置 Flask 服务与全部演示数据 · 约 20 MB</span></div>
+        <a class="btn primary" href="https://github.com/TrueFurina/marl-ecdsa/releases/download/v1.0.0/marlecdsa-dashboard.exe">下载 exe</a>
+      </div>
+      <div class="dlrow">
+        <div class="os">🧰</div>
+        <div class="meta"><b>从源码运行（跨平台）</b><span>Python 3.10+ · pip install flask · 仓库 marl-ecdsa-consensus-chain/</span></div>
+        <a class="btn ghost" href="https://github.com/TrueFurina/marl-ecdsa">克隆仓库</a>
+      </div>
+    </div>
+    <p style="margin-top:18px;font-size:.9rem;color:var(--dim)">运行：</p>
+    <p style="margin-top:8px"><code>marlecdsa-dashboard.exe</code> → 自动打开 <code>http://127.0.0.1:9090</code>（10 个标签页：总览 / 训练监控 / 对比分析 / 区块链 / 共识投票 / 区块浏览器 / 攻防演示 / P2P 网络…，按 <code>P</code> 进入演示模式）</p>
+    <div class="warn"><span>⚠</span><span>Windows SmartScreen 可能拦截未签名 exe：点「更多信息 → 仍要运行」；SHA-256 校验值见 <a href="https://github.com/TrueFurina/marl-ecdsa/releases">Releases</a>。</span></div>
+  </div>
+</section>
+
+<section id="notice">
+  <div class="wrap">
+    <div class="sec-tag">06 · NOTICE</div>
+    <h2>授权与边界声明</h2>
+    <div class="notice">
+      <div class="card"><h3>📋 使用边界</h3><p>本项目为科研与教学演示用途；共识机制为演示级实现（自签名 ECDSA，未接 CA/PKI），实验环境为 SimpleSpread 基准与受控部署场景，<b style="color:var(--text)">不构成生产区块链系统的安全承诺</b>。</p></div>
+      <div class="card"><h3>🤝 数据口径</h3><p>页面所列全部数字来自随源码发布的 <b style="color:var(--text)">number_registry.json</b>（88 条登记，含数据源、统计口径与复算脚本）；原始运行数据 142 次 JSON 随包发布。</p></div>
+      <div class="card"><h3>🏅 赛事</h3><p>CCF 区块链大赛 · 参赛方向：区块链创新应用。本页为项目公开介绍页，评审材料以官方提交件为准。</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span class="brand">MARL-ECDSA</span> · 面向协作多智能体的可信共识与激励机制<br>
+    诚实披露每一个正结果与负结果 · © 2026 · 仅用于科研与教学演示
+  </div>
+</footer>
+
+</body>
+</html>
