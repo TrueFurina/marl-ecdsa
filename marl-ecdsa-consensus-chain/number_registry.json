@@ -1,10 +1,10 @@
 {
   "_mirror_of": "deliverables/number_registry.json",
   "_mirror_note": "只读镜像，供版本库内离线查阅与文档引用。**唯一权威源在工作区 deliverables/number_registry.json**（代码经 assurance_common.REGISTRY_PATH 读取该份）。由 scripts/check_registry_mirror.py --sync 生成，勿手改。",
-  "_mirror_sha256": "sha256:1734e3be26952d2f",
+  "_mirror_sha256": "sha256:b0e67e96deb2de71",
   "_mirror_generated_by": "scripts/check_registry_mirror.py --sync",
   "schema_version": "1.0",
-  "generated_at": "2026-09-30T19:12:47",
+  "generated_at": "2026-10-08T11:05:25",
   "primary_metric": "summary.avg_env_reward_last_50",
   "secondary_metric": "summary.avg_env_reward",
   "forbidden_metric_cross_compare": "summary.avg_reward_last_50",
@@ -5032,7 +5032,194 @@
       "status": "PASS",
       "pre_registered": false,
       "evidence_kind": "deployment",
-      "notes": "2026-09-30 跨物理主机实测。本机(172.27.4.71) agent_0/agent_1 + 服务器(172.16.222.99) agent_2/agent_3，两台真实物理主机经真实跨主机 TCP(TLS 默认开启) 建立全连接拓扑，CW-PBFT 三阶段共识 5/5 达成，服务器端累计收到 98 条跨主机消息。数字由 scripts/network_demo_distributed.py 两端日志程序化解析落入 deployment_distributed_flat.json （deliverables/_parse_distributed_evidence_20260930.py）。与 NR-94 区分：NR-94 是单机多进程回环 TCP （6.9/10.8ms 延迟），本条是跨物理主机可行性/正确性证据，延迟含固定 sleep(0.3)+sleep(0.1) 不作性能结论，二者禁混比。跨主机 secure（签名注册+签名投票）需全网共享 key_dir，未做。"
+      "notes": "2026-09-30 跨物理主机实测。本机(172.27.4.71) agent_0/agent_1 + 服务器(172.16.222.99) agent_2/agent_3，两台真实物理主机经真实跨主机 TCP(TLS 默认开启) 建立全连接拓扑，CW-PBFT 三阶段共识 5/5 达成，服务器端累计收到 98 条跨主机消息。数字由 scripts/network_demo_distributed.py 两端日志程序化解析落入 deployment_distributed_flat.json （deliverables/_parse_distributed_evidence_20260930.py）。与 NR-94 区分：NR-94 是单机多进程回环 TCP （6.9/10.8ms 延迟），本条是跨物理主机可行性/正确性证据，延迟含固定 sleep(0.3)+sleep(0.1) 不作性能结论，二者禁混比。跨主机 secure（签名注册+签名投票）已于 2026-10-08 完成 —— 全网共享同一 key_dir （agent_0..agent_3 密钥两端预分发，**存于两端临时目录，不入仓库/不入提交包**），跨主机 ECDSA 签名注册 + 签名投票全程通过，见 NR-101。"
+    },
+    {
+      "id": "NR-96",
+      "claim": "Tian2025 评估协议对齐 · Social Welfare（团队 env_reward）：IQL 主口径 n=71 收敛数据 + 六臂 500ep 批次（3 seeds）",
+      "allowed_wording": "按 Tian et al. (2025) 评估协议以团队 env_reward 计算 Social Welfare。**主口径（3000 回合收敛，n=71/组）**：iql_bc_marl -32.557±2.279，iql_pure_marl -35.358±2.402。**500ep 批次（3 seeds）六臂**：iql_bc_marl -56.298、iql_pure_marl -55.423、qmix_bc_marl -62.99、qmix_pure_marl -60.188、vdn_bc_marl -62.731、vdn_pure_marl -62.0。口径说明：Tian 的 Social Welfare 定义为全部 agent 累计回报均值；本项目为团队级 env_reward，单智能体分解在 IQL 设定下不可得（数据字典声明）。**仅声明同一评估协议下口径可比，不得宣称与 Tian 逐值可比**。",
+      "analysis": "benchmark",
+      "sources": [
+        {
+          "file": "evaluation_protocol/evaluation_protocol_flat.json",
+          "field": "n71_iql_bc_mean,n71_iql_bc_std,n71_iql_pure_mean,n71_iql_pure_std,ac3_iql_bc_marl,ac3_iql_pure_marl,ac3_qmix_bc_marl,ac3_qmix_pure_marl,ac3_vdn_bc_marl,ac3_vdn_pure_marl"
+        }
+      ],
+      "n_expected": 71,
+      "statistic": [
+        "mean",
+        "std"
+      ],
+      "declared": {
+        "n71_iql_bc_mean": -32.557,
+        "n71_iql_bc_std": 2.279,
+        "n71_iql_pure_mean": -35.358,
+        "n71_iql_pure_std": 2.402,
+        "ac3_iql_bc_marl": -56.298,
+        "ac3_iql_pure_marl": -55.423,
+        "ac3_qmix_bc_marl": -62.99,
+        "ac3_qmix_pure_marl": -60.188,
+        "ac3_vdn_bc_marl": -62.731,
+        "ac3_vdn_pure_marl": -62.0
+      },
+      "tolerance": {
+        "abs": 0.01,
+        "p_abs": 0.001
+      },
+      "status": "PASS",
+      "pre_registered": false,
+      "evidence_kind": "benchmark",
+      "notes": "2026-10-04 任务书①（evaluate_protocol.py 程序化计算）。500ep 批次 3 seeds 为评估协议对齐专用（algorithm_comparison 数据），与 n=71 收敛主口径并存、两口径均已声明。"
+    },
+    {
+      "id": "NR-97",
+      "claim": "Tian2025 评估协议对齐 · Collusion Rate（|Pearson|>0.90 的 agent 对占比）：bc 三算法臂 3 seeds 均为 0.0（诚实 null）",
+      "allowed_wording": "行为向量取逐回合链上积分增量（签名验证后的链上数据），|Pearson r|>0.90 计为高关联对。iql/qmix/vdn 三算法 bc 臂各 3 seeds × 3 对，共 27 对，检出高关联对 **0 对**（率 0.0）——**诚实 null：可信底座下未检出统计合谋**，是检测器在真实数据上的阴性结论，非缺数据。pure 臂无链上账本 → N/A 如实标注。threshold=0.90 与 Tian 一致。",
+      "analysis": "benchmark",
+      "sources": [
+        {
+          "file": "evaluation_protocol/evaluation_protocol_flat.json",
+          "field": "collusion_iql_bc_marl,collusion_qmix_bc_marl,collusion_vdn_bc_marl,collusion_n_pairs_total"
+        }
+      ],
+      "n_expected": 3,
+      "statistic": [],
+      "declared": {
+        "collusion_iql_bc_marl": 0.0,
+        "collusion_qmix_bc_marl": 0.0,
+        "collusion_vdn_bc_marl": 0.0,
+        "collusion_n_pairs_total": 27
+      },
+      "tolerance": {
+        "abs": 0.001,
+        "p_abs": 0.001
+      },
+      "status": "PASS",
+      "pre_registered": false,
+      "evidence_kind": "benchmark",
+      "notes": "2026-10-04 任务书①。null 结果按预注册惯例如实登记（防选择性报告）；检测输入为链上账本数据（签名层产出），双通道增强见 NR-100。"
+    },
+    {
+      "id": "NR-98",
+      "claim": "Tian2025 评估协议对齐 · Incentive Compatibility Index（横截面 corr(贡献权重_i, 链上积分_i)，3 seeds 均值）",
+      "allowed_wording": "IC 指数：iql -0.0364、qmix 0.3154、vdn 0.60（各 3 seeds，n_agents=3）。**本项目口径**：与 Tian 的 IC 定义仅协议同构（其含诚实策略收益优势辅助口径，本项目未实现），**不得宣称与 Tian 逐值可比**。三算法方向不一致（iql 近零 / qmix 弱正 / vdn 正），如实报告，不做解释性拔高；n=3 小样本不构成统计结论，仅作口径演示与方向性参考。",
+      "analysis": "benchmark",
+      "sources": [
+        {
+          "file": "evaluation_protocol/evaluation_protocol_flat.json",
+          "field": "ic_iql_bc_marl,ic_qmix_bc_marl,ic_vdn_bc_marl"
+        }
+      ],
+      "n_expected": 3,
+      "statistic": [],
+      "declared": {
+        "ic_iql_bc_marl": -0.0364,
+        "ic_qmix_bc_marl": 0.3154,
+        "ic_vdn_bc_marl": 0.6
+      },
+      "tolerance": {
+        "abs": 0.01,
+        "p_abs": 0.001
+      },
+      "status": "PASS",
+      "pre_registered": false,
+      "evidence_kind": "benchmark",
+      "notes": "2026-10-04 任务书①。方向不一致为诚实披露项，设计报告引用时必须带小样本+口径声明。"
+    },
+    {
+      "id": "NR-99",
+      "claim": "Tian2025 评估协议对齐 · 奖励噪声鲁棒性（σ=0.3 高斯注入）回报保持率 keep_rate=0.9753（冒烟级）",
+      "allowed_wording": "奖励注入 σ=0.3 高斯噪声后回报保持率 0.9753（无噪 3 seeds × 有噪 3 seeds，1500ep，seeds 2000-2002，train.py --reward-noise-sigma）。**冒烟级，非正式 A/B**——仅作噪声鲁棒性方向性证据，不得写进主结论链、不得与主口径实验混比。",
+      "analysis": "benchmark",
+      "sources": [
+        {
+          "file": "evaluation_protocol/evaluation_protocol_flat.json",
+          "field": "noise_keep_rate,noise_n_clean,noise_n_noisy"
+        }
+      ],
+      "n_expected": 3,
+      "statistic": [],
+      "declared": {
+        "noise_keep_rate": 0.9753,
+        "noise_n_clean": 3,
+        "noise_n_noisy": 3
+      },
+      "tolerance": {
+        "abs": 0.01,
+        "p_abs": 0.001
+      },
+      "status": "PASS",
+      "pre_registered": false,
+      "evidence_kind": "benchmark",
+      "notes": "2026-10-05 冒烟补跑（任务书①收尾）；--reward-noise-sigma 默认 0=零行为影响（f1a0ca0）。原始 6 JSON 随包 other/测试数据/evaluation_protocol/noise/。"
+    },
+    {
+      "id": "NR-100",
+      "claim": "合谋检测双通道 2×2 实验（任务书②）：{正常,伪造注入}×{单通道,双通道(ECDSA 验签门)}，3 seeds",
+      "allowed_wording": "底料为真实链上积分增量；伪造=攻击者私钥签名的顶名 agent_0 包（流=agent_1×0.9+噪声）。Collusion Rate：正常×单通道 0.0｜正常×双通道 0.0｜伪造×单通道 **0.3333（统计被投毒）**｜伪造×双通道 **0.0（验签门拒收 1497 个伪造包后回到基线）**。结论：统计检测的**输入**经 ECDSA 验签后获得密码学不可抵赖性——检测输入可信性实证。n=3 seeds 冒烟级，如实呈现；与 NR-30（6 类攻击拦截）互补：NR-30 验证签名层拦截，本条验证检测层受益。",
+      "analysis": "benchmark",
+      "sources": [
+        {
+          "file": "evaluation_protocol/evaluation_protocol_flat.json",
+          "field": "dual_normal_single,dual_normal_dual,dual_forged_single,dual_forged_dual,dual_forged_rejected_total"
+        }
+      ],
+      "n_expected": 3,
+      "statistic": [],
+      "declared": {
+        "dual_normal_single": 0.0,
+        "dual_normal_dual": 0.0,
+        "dual_forged_single": 0.3333,
+        "dual_forged_dual": 0.0,
+        "dual_forged_rejected_total": 1497
+      },
+      "tolerance": {
+        "abs": 0.001,
+        "p_abs": 0.001
+      },
+      "status": "PASS",
+      "pre_registered": false,
+      "evidence_kind": "experiment",
+      "notes": "2026-10-05 任务书②（collusion_dual_channel_experiment.py，81aedee）。阈值 0.90 与 Tian/NR-97 一致；底料为真实训练数据非合成。"
+    },
+    {
+      "id": "NR-101",
+      "claim": "跨物理主机（Windows 本机 + Linux 服务器）真实 TCP 全连接 P2P 共识验证——secure 模式（ECDSA 签名注册 + 签名投票）",
+      "allowed_wording": "在 Windows 本机（172.27.4.71）+ Linux 服务器（172.16.222.99，Ubuntu）两台真实物理主机上，对真实跨主机 TCP 全连接 P2P 网络启用 **secure 模式**（全网共享同一 key_dir，ECDSA 签名注册 + 签名投票）完成 4 节点（本机 agent_0/agent_1 + 服务器 agent_2/agent_3）5 轮 CW-PBFT 共识：**5/5 全成功（100%）**；服务器端观测到 5 次「新节点注册(签名验证通过)」，含本机两节点 agent_0/agent_1（跨主机签名验证确实生效）。**环境限定（不可省略）**：这是**跨主机 TCP 可行性 + 签名认证链路正确性**证据，**非延迟/吞吐性能基准**——每轮 run_consensus 含固定 sleep(0.3)+sleep(0.1)，与 NR-94 的单机回环 6.9/10.8 ms **不可混比**；签名采用演示级自签名密钥与公开默认口令，**不构成生产级密钥保护**。",
+      "analysis": "benchmark",
+      "sources": [
+        {
+          "file": "deployment/deployment_distributed_secure/deployment_distributed_secure_flat.json",
+          "field": "n4_secure_rounds_total,n4_secure_rounds_success,local_msgs_sent,local_msgs_received,server_sig_verified_registrations,server_sig_verified_local_agents,server_cwpbft_consensus_reached"
+        }
+      ],
+      "n_expected": null,
+      "statistic": [
+        "n4_secure_rounds_total",
+        "n4_secure_rounds_success",
+        "local_msgs_sent",
+        "local_msgs_received",
+        "server_sig_verified_registrations",
+        "server_sig_verified_local_agents",
+        "server_cwpbft_consensus_reached"
+      ],
+      "declared": {
+        "n4_secure_rounds_total": 5,
+        "n4_secure_rounds_success": 5,
+        "local_msgs_sent": 35,
+        "local_msgs_received": 82,
+        "server_sig_verified_registrations": 5,
+        "server_sig_verified_local_agents": 2,
+        "server_cwpbft_consensus_reached": 10
+      },
+      "tolerance": {
+        "abs": 0.05,
+        "p_abs": 0.001
+      },
+      "status": "PASS",
+      "pre_registered": false,
+      "evidence_kind": "deployment",
+      "notes": "2026-10-08 跨物理主机 secure 实测，闭环 NR-95 notes 里「跨主机 secure 未做」的待办。拓扑与 NR-95 一致：本机(172.27.4.71) agent_0/agent_1 + 服务器(172.16.222.99) agent_2/agent_3，经真实跨主机 TCP（TLS 传输加密）建全连接拓扑；本轮在此基础上追加 secure：两端预分发同一 key_dir，P2PConsensusNetwork 以 key_manager 接管节点注册与投票签名，allow_insecure_register/vote 均置 False。读数由 scripts/network_demo_distributed.py 两端日志程序化解析落入 deployment_distributed_secure_flat.json（deliverables/_parse_distributed_secure_evidence_20261008.py）。与 NR-95 区分：NR-95 仅 TLS 传输加密（无签名注册/签名投票，本机发34/收87、服务器收98）；本条为签名认证版（本机发35/收82、服务器 10 次 CW-PBFT 达成）。与 NR-94 区分：NR-94 是单机多进程回环 TCP 的延迟基准（6.9/10.8 ms），本条不作性能结论。⛔ 禁写「生产级密钥保护」——密钥为演示级自签名 + 公开默认口令（MARL_ECDSA_KEY_PASSPHRASE 未设置时回退），该局限已在答辩披露预案中登记。"
     }
   ]
 }

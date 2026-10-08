@@ -23,14 +23,19 @@ jobs:
             name: linux-amd64
             sep: ':'
             ext: ''
+            icon: ''
           - os: macos-14
             name: macos-arm64
             sep: ':'
             ext: ''
+            # macOS 的 PyInstaller --icon 需要 .icns（本仓库未提供），故留空
+            icon: ''
           - os: windows-2022
             name: windows-x64
             sep: ';'
             ext: '.exe'
+            # 仅 Windows 生效：用官网同一套资产的 .ico（16/32/48/256）
+            icon: 'assets/favicon.ico'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +54,11 @@ jobs:
         run: |
           NAME="marlecdsa-dashboard-${{ matrix.name }}"
           SRC="marl-ecdsa-consensus-chain"
-          pyinstaller --onefile --noconfirm --clean \
+          # 程序图标：仅 Windows 走 --icon（PyInstaller 在 macOS 需 .icns、Linux 忽略该参数）
+          ICON_ARG=""
+          if [ -n "${{ matrix.icon }}" ]; then ICON_ARG="--icon=${{ matrix.icon }}"; fi
+          echo "icon arg: [$ICON_ARG]"
+          pyinstaller --onefile --noconfirm --clean $ICON_ARG \
             --name "$NAME" \
             --paths "$SRC" \
             --add-data "$SRC/templates${SEP}templates" \
@@ -89,11 +98,18 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Regenerate SHA256SUMS
+        run: |
+          ls -la dist
+          cd dist
+          sha256sum marlecdsa-dashboard-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Attach binaries to release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
         run: |
-          ls -la dist
-          gh release upload "$TAG" dist/marlecdsa-dashboard-* --repo "$GITHUB_REPOSITORY" --clobber
+          cd dist
+          gh release upload "$TAG" marlecdsa-dashboard-* SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
           echo "attached to $TAG"

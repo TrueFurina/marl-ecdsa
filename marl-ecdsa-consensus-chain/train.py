@@ -88,6 +88,8 @@ class TrainingConfig:
         # ── Tier1 新增：共识感知奖励塑形 (CARS) ──
         self.consensus_shaping: bool = kwargs.get('consensus_shaping', False)  # 默认关闭，需显式启用
         self.shaping_eta: float = kwargs.get('shaping_eta', 0.05)
+        # ── 评估协议冒烟：奖励噪声注入（σ=0 关闭，零行为影响） ──
+        self.reward_noise_sigma: float = kwargs.get('reward_noise_sigma', 0.0)
 
 
 class TrainingStats:
@@ -463,6 +465,15 @@ class MARLBlockchainTrainer:
             next_observations, global_rewards, local_rewards, done, info = self.env.step(actions)
             episode_states.append(self.env.get_state())
 
+            # 2.5 奖励噪声注入（评估协议冒烟实验专用；σ=0 时零行为影响）
+            if getattr(config, "reward_noise_sigma", 0.0) > 0:
+                if not hasattr(self, "_noise_rng"):
+                    self._noise_rng = np.random.default_rng(config.seed)
+                local_rewards = [
+                    r + float(self._noise_rng.normal(0.0, config.reward_noise_sigma))
+                    for r in local_rewards
+                ]
+
             # 3. 区块链桥接 / 纯MARL
             if self.bridge is not None:
                 total_rewards, coop_status, step_betray_flags = self._step_bc_bridge(
@@ -762,6 +773,9 @@ def parse_args():
                         help='启用共识感知奖励塑形CARS（每步注入共识反馈信号）')
     parser.add_argument('--shaping-eta', type=float, default=0.05,
                         help='CARS塑形强度系数eta (默认0.05)')
+    parser.add_argument('--reward-noise-sigma', type=float, default=0.0,
+                        help='训练期对每步局部奖励注入高斯噪声 σ（0=关闭；评估协议冒烟实验专用，'
+                             '默认不影响任何既有口径）')
     args = parser.parse_args()
 
     # P2-A: 当指定了不同于默认的模式时，重新从config.json加载该模式参数
@@ -809,6 +823,7 @@ def main():
         algorithm=args.algorithm,                       # Tier1: iql/vdn/qmix
         consensus_shaping=args.consensus_shaping,       # Tier1: CARS共识感知塑形
         shaping_eta=args.shaping_eta,                   # Tier1: CARS塑形强度
+        reward_noise_sigma=args.reward_noise_sigma,     # 评估协议冒烟：奖励噪声注入（默认0=关闭）
     )
 
     # ── 优雅停机：SIGINT → 保存状态 → 导出 JSON → 退出 ──
