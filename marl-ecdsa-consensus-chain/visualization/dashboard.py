@@ -173,6 +173,15 @@ def _route_index():
 def _route_healthz():
     return jsonify({'status': 'ok', 'service': 'marl-ecdsa-dashboard', 'version': 'v3.9'})
 
+def _route_favicon():
+    """站点图标。
+
+    Flask 的 static 路由只响应 /static/favicon.ico；浏览器（以及部分抓取器）
+    仍会直接探测根路径 /favicon.ico —— 不显式处理就会 404（实测 exe 日志里出现过）。
+    这里直接回静态目录里的同一份文件，避免 404 与重复拷贝。
+    """
+    return send_from_directory(str(_BASE_DIR / 'static'), 'favicon.ico')
+
 def _route_api_status():
     data = dict(_dashboard_data)
     data['comparison_baseline'] = 'env_reward (不含BC激励，公平口径)'
@@ -489,6 +498,7 @@ def _create_app():
     # 注册路由
     flask_app.add_url_rule('/', 'index', _route_index)
     flask_app.add_url_rule('/healthz', 'healthz', _route_healthz)
+    flask_app.add_url_rule('/favicon.ico', 'favicon', _route_favicon)
     flask_app.add_url_rule('/api/status', 'api_status', _route_api_status)
     flask_app.add_url_rule('/api/data', 'api_data', _route_api_data)
     flask_app.add_url_rule('/api/p2p_stats', 'api_p2p_stats', _route_p2p_stats)

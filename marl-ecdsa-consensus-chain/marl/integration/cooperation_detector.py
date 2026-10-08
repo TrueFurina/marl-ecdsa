@@ -25,12 +25,21 @@ class CooperationDetector:
     - 可训练 sklearn 分类器（train_classifier），并用 predict_ml 做补充判定
     """
 
-    def __init__(self, n_agents: int = 3, n_landmarks: int = 3):
+    def __init__(self, n_agents: int = 3, n_landmarks: int = 3, verify_gate=None):
         self.n_agents = n_agents
         self.n_landmarks = n_landmarks
         # 增量创新 #4: 可选 ML 分类器（默认 None = 纯规则基）
         self._ml_clf = None
         self._ml_available = False
+
+        # ── 任务书结合点②：合谋检测双通道（2026-10-04）──
+        # verify_gate: Optional[Callable[[Dict], bool]]
+        #   输入一条 sign_action() 格式的签名包，返回 True=验签通过（进入统计通道）。
+        #   None = 单通道（不验签，旧行为，完全向后兼容）。
+        #   双通道语义：统计检测的输入必须先通过 ECDSA 验签门——
+        #   "可信输入下的统计检测"（伪造/顶名包在进统计前被拒收）。
+        self.verify_gate = verify_gate
+        self.verify_stats: Dict[str, int] = {'received': 0, 'verified': 0, 'rejected': 0}
 
         # 回合内合作状态累积 {agent_id: {'coop': count, 'betray': count, 'total': count}}
         self._episode_coop: Dict[str, Dict[str, int]] = {}
@@ -269,3 +278,46 @@ class CooperationDetector:
             if aid in preds and int(preds[aid]) == int(lbl)
         )
         return round(correct / max(1, len(labels)), 4)
+
+    # ----------------------------------------------------------------------
+    # 任务书结合点②：合谋检测双通道 —— 验签门（2026-10-04）
+    # 单通道 = verify_gate 为 None（不验签，旧行为）；双通道 = 注入验签门后，
+    # 统计检测的输入仅收 ECDSA 验签通过的行为记录包（复用 ecdsa_utils，真签名）。
+    # ----------------------------------------------------------------------
+
+    def set_verify_gate(self, gate) -> None:
+        """注入/切换验签门（Callable[[Dict], bool]）；传 None 退回单通道。"""
+        self.verify_gate = gate
+
+    def filter_verified_packages(self, packages: List[Dict], public_keys: Dict[str, Any]):
+        """验签门：过滤未通过 ECDSA 验签的行为记录包。
+
+        :param packages: [sign_action() 格式的签名包]（含伪造/顶名包）
+        :param public_keys: {agent_id: 公钥}（链上注册公钥——伪造包即使签名"有效"，
+                            也无法匹配被顶名 agent 的注册公钥）
+        :return: (verified_packages, rejected_packages)
+        """
+        from blockchain.crypto.ecdsa_utils import ECDSAUtils  # 惰性导入，保持模块依赖图不变
+
+        verified, rejected = [], []
+        for pkg in packages:
+            self.verify_stats['received'] += 1
+            aid = pkg.get('agent_id')
+            pub = (public_keys or {}).get(aid)
+            ok = False
+            if pub is not None:
+                try:
+                    ok = bool(ECDSAUtils.verify_action_package(pkg, pub))
+                except Exception as e:
+                    logger.warning(f"[CooperationDetector] 验签门异常 {aid}: {e}")
+            if ok and (self.verify_gate is None or self.verify_gate(pkg)):
+                self.verify_stats['verified'] += 1
+                verified.append(pkg)
+            else:
+                self.verify_stats['rejected'] += 1
+                rejected.append(pkg)
+        return verified, rejected
+
+    def get_verify_stats(self) -> Dict[str, int]:
+        """验签门统计（received/verified/rejected）"""
+        return dict(self.verify_stats)
