@@ -28,8 +28,9 @@ jobs:
             name: macos-arm64
             sep: ':'
             ext: ''
-            # macOS 的 PyInstaller --icon 需要 .icns（本仓库未提供），故留空
-            icon: ''
+            # macOS 的 PyInstaller --icon 需要 .icns；由 deliverables/_gen_icns.py 从
+            # assets/icon.svg 渲染 16/32/64/128/256/512/1024 后打包（含 11 个 PNG 条目）
+            icon: 'assets/icon.icns'
           - os: windows-2022
             name: windows-x64
             sep: ';'
