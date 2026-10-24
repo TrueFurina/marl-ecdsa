@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MARL-ECDSA 共识链 — 面向协作多智能体的可信共识与激励机制</title>
-<meta name="description" content="ECDSA 签名存证 + CW-PBFT 贡献加权共识 + 链上激励融合 MARL 奖励。主口径 +28.17%（n=71，p=0.0095），六类签名攻击 100% 拦截，1600+ 测试全通过，诚实负结果完整披露。">
+<meta name="description" content="ECDSA 签名存证 + CW-PBFT 贡献加权共识 + 链上激励融合 MARL 奖励。基线口径 +28.17%（n=71，p=0.0095），六类签名攻击 100% 拦截，1600+ 测试全通过，诚实负结果完整披露。">
 <meta property="og:title" content="MARL-ECDSA 共识链">
 <meta property="og:description" content="面向协作多智能体的可信共识与激励机制 — ECDSA 存证 · CW-PBFT · 链上激励 · 诚实负结果">
 <meta property="og:image" content="assets/og.png">
@@ -113,7 +113,7 @@ footer .brand{color:var(--blue);font-weight:700}
     <a class="btn ghost" href="https://github.com/TrueFurina/marl-ecdsa">GitHub 仓库</a>
   </div>
   <div class="chips">
-    <span class="chip"><b>+28.17%</b> env_reward（n=71）</span>
+    <span class="chip"><b>+28.17%</b> env_reward（n=71 基线）</span>
     <span class="chip"><b>6/6</b> 签名攻击族拦截</span>
     <span class="chip g"><b>0→97.3%</b> 容错活性恢复</span>
     <span class="chip"><b>1600+</b> 测试 · 0 失败</span>
@@ -234,7 +234,7 @@ footer .brand{color:var(--blue);font-weight:700}
     <h2>授权与边界声明</h2>
     <div class="notice">
       <div class="card"><h3>📋 使用边界</h3><p>本项目为科研与教学演示用途；共识机制为演示级实现（自签名 ECDSA，未接 CA/PKI），实验环境为 SimpleSpread 基准与受控部署场景，<b style="color:var(--text)">不构成生产区块链系统的安全承诺</b>。</p></div>
-      <div class="card"><h3>🤝 数据口径</h3><p>页面所列全部数字来自随源码发布的 <b style="color:var(--text)">number_registry.json</b>（含数据源、统计口径与复算脚本；条数以文件为准）；原始运行数据 142 次 JSON 随包发布。</p></div>
+      <div class="card"><h3>🤝 数据口径</h3><p>页面所列全部数字来自随源码发布的 <b style="color:var(--text)">number_registry.json</b>（含数据源、统计口径与复算脚本；条数以文件为准）；原始运行数据 142 次 JSON 随包发布。本页展示的是 <b style="color:var(--text)">n=71 基线口径</b>（NR-1 / NR-2），后续扩种口径以登记簿为准。</p></div>
       <div class="card"><h3>🏅 赛事</h3><p>CCF 区块链大赛 · 参赛方向：区块链数据安全。本页为项目公开介绍页，评审材料以官方提交件为准。</p></div>
     </div>
   </div>
