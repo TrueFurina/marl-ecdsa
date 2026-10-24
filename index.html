@@ -128,7 +128,7 @@ footer .brand{color:var(--blue);font-weight:700}
     <div class="grid g3">
       <div class="card"><h3>🪪 行为可验证</h3><p>每个智能体动作以 <span class="em">ECDSA（RFC6979 确定性 k）</span>签名上链，身份去中心化锚定、无 CA；时间戳回拨 / Nonce 重放 / K 值重用由 SecurityGuard 三阶防护拦截。</p></div>
       <div class="card"><h3>⚖️ 贡献可计量</h3><p>基于 MARL 行为流导出<span class="em">贡献度权重</span>，注入 CW-PBFT 投票权重与链上激励结算；安全条件 <span class="em">b &lt; n/(2R+1)</span> 给出可判定的设计边界。</p></div>
-      <div class="card"><h3>📜 结论可复算</h3><p>全部对外数字登记在单一真值表（88 条），每条附数据源与分析口径；<span class="em">142 次原始运行随包发布</span>，Welch 检验 / Cohen's d 可独立复算。</p></div>
+      <div class="card"><h3>📜 结论可复算</h3><p>全部对外数字登记在单一真值表（条数以仓内 number_registry.json 为准），每条附数据源与分析口径；<span class="em">142 次原始运行随包发布</span>，Welch 检验 / Cohen's d 可独立复算。</p></div>
     </div>
   </div>
 </section>
@@ -164,7 +164,7 @@ footer .brand{color:var(--blue);font-weight:700}
     <div class="grid g3">
       <div class="card"><h3>🔐 密码学攻击面实证</h3><p>与"统计合谋检测"路线不同：对观测伪造 / 消息篡改 / 重放 / 女巫 / K 值重用 / 长程攻击共 <span class="em">6 类 × 50 次 = 300 次</span>攻击批量实证，全部被链上层拦截（每类 Wilson 95%CI 下界 ≥92.9%）。</p></div>
       <div class="card"><h3>⚖️ 贡献加权的诚实刻画</h3><p>给出 CW-PBFT 安全条件 <span class="em">b &lt; n/(2R+1)</span>；实测真实 MARL 权重 R≈1.007 时与标准 PBFT 等价——<span class="em">把这个等价性本身作为设计准则</span>报告，而非回避。</p></div>
-      <div class="card"><h3>📊 登记簿式数字治理</h3><p>88 条登记数字全部程序化取自原始数据、门禁自动复算；作废口径令牌化拦截。<span class="em">文档永远追不上事实的问题，用机器管。</span></p></div>
+      <div class="card"><h3>📊 登记簿式数字治理</h3><p>全部登记数字程序化取自原始数据、门禁自动复算；作废口径令牌化拦截。<span class="em">文档永远追不上事实的问题，用机器管。</span></p></div>
     </div>
   </div>
 </section>
@@ -234,7 +234,7 @@ footer .brand{color:var(--blue);font-weight:700}
     <h2>授权与边界声明</h2>
     <div class="notice">
       <div class="card"><h3>📋 使用边界</h3><p>本项目为科研与教学演示用途；共识机制为演示级实现（自签名 ECDSA，未接 CA/PKI），实验环境为 SimpleSpread 基准与受控部署场景，<b style="color:var(--text)">不构成生产区块链系统的安全承诺</b>。</p></div>
-      <div class="card"><h3>🤝 数据口径</h3><p>页面所列全部数字来自随源码发布的 <b style="color:var(--text)">number_registry.json</b>（88 条登记，含数据源、统计口径与复算脚本）；原始运行数据 142 次 JSON 随包发布。</p></div>
+      <div class="card"><h3>🤝 数据口径</h3><p>页面所列全部数字来自随源码发布的 <b style="color:var(--text)">number_registry.json</b>（含数据源、统计口径与复算脚本；条数以文件为准）；原始运行数据 142 次 JSON 随包发布。</p></div>
       <div class="card"><h3>🏅 赛事</h3><p>CCF 区块链大赛 · 参赛方向：区块链数据安全。本页为项目公开介绍页，评审材料以官方提交件为准。</p></div>
     </div>
   </div>
