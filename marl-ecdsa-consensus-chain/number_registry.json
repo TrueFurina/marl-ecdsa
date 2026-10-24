@@ -1,6 +1,6 @@
 {
  "_mirror_of": "deliverables/number_registry.json",
- "_mirror_note": "只读镜像，供版本库内离线查阅与文档引用。**唯一权威源在工作区 deliverables/number_registry.json**（代码经 assurance_common.REGISTRY_PATH 读取该份）。由 scripts/check_registry_mirror.py --sync 生成，勿手改。",
+ "_mirror_note": "只读镜像，供版本库内离线查阅与文档引用。**唯一权威源在工作区 deliverables/number_registry.json**（代码经 assurance_common.REGISTRY_PATH 读取该份）。由 scripts/check_registry_mirror.py --sync 生成，勿手改。（2026-10-24 安全清洗：内网 IP 已替换为「实验服务器 / 本机」，故本文件与未清洗的权威副本存在文字差异；权威侧请用同一脚本清洗后再 --sync）",
  "_mirror_sha256": "sha256:2aa885c37ea58add",
  "_mirror_generated_by": "scripts/check_registry_mirror.py --sync",
  "schema_version": "1.0",
@@ -5095,7 +5095,7 @@
    "id": "NR-95",
    "evidence_level": "observed",
    "claim": "跨物理主机（Windows 本机 + Linux 服务器）真实 TCP 全连接 P2P 分布式部署验证",
-   "allowed_wording": "在 Windows 本机（172.27.4.71）+ Linux 服务器（172.16.222.99，Ubuntu 24.04）两台真实物理主机上，对真实 TCP 全连接 P2P 网络（TLS 传输加密默认开启）完成跨主机分布式部署验证：4 节点（本机 agent_0/agent_1 + 服务器 agent_2/agent_3）5 轮 CW-PBFT 共识 5/5 全成功（100%），服务器端累计收到 98 条跨主机共识消息。**环境限定（不可省略）**：验证的是跨主机 TCP 传输正确性与共识协议可行性，**非延迟性能基准**——每轮 run_consensus 总耗时约 0.4s 含固定 sleep(0.3)+sleep(0.1)，与 NR-94 的 6.9/10.8 ms 回环延迟不可混比。",
+   "allowed_wording": "在 Windows 本机 + Linux 服务器（Ubuntu 24.04）两台真实物理主机上，对真实 TCP 全连接 P2P 网络（TLS 传输加密默认开启）完成跨主机分布式部署验证：4 节点（本机 agent_0/agent_1 + 服务器 agent_2/agent_3）5 轮 CW-PBFT 共识 5/5 全成功（100%），服务器端累计收到 98 条跨主机共识消息。**环境限定（不可省略）**：验证的是跨主机 TCP 传输正确性与共识协议可行性，**非延迟性能基准**——每轮 run_consensus 总耗时约 0.4s 含固定 sleep(0.3)+sleep(0.1)，与 NR-94 的 6.9/10.8 ms 回环延迟不可混比。",
    "analysis": "benchmark",
    "sources": [
     {
@@ -5125,7 +5125,7 @@
    "status": "PASS",
    "pre_registered": false,
    "evidence_kind": "deployment",
-   "notes": "2026-09-30 跨物理主机实测。本机(172.27.4.71) agent_0/agent_1 + 服务器(172.16.222.99) agent_2/agent_3，两台真实物理主机经真实跨主机 TCP(TLS 默认开启) 建立全连接拓扑，CW-PBFT 三阶段共识 5/5 达成，服务器端累计收到 98 条跨主机消息。数字由 scripts/network_demo_distributed.py 两端日志程序化解析落入 deployment_distributed_flat.json （deliverables/_parse_distributed_evidence_20260930.py）。与 NR-94 区分：NR-94 是单机多进程回环 TCP （6.9/10.8ms 延迟），本条是跨物理主机可行性/正确性证据，延迟含固定 sleep(0.3)+sleep(0.1) 不作性能结论，二者禁混比。跨主机 secure（签名注册+签名投票）已于 2026-10-08 完成 —— 全网共享同一 key_dir （agent_0..agent_3 密钥两端预分发，**存于两端临时目录，不入仓库/不入提交包**），跨主机 ECDSA 签名注册 + 签名投票全程通过，见 NR-101。"
+   "notes": "2026-09-30 跨物理主机实测。本机 agent_0/agent_1 + 服务器 agent_2/agent_3，两台真实物理主机经真实跨主机 TCP(TLS 默认开启) 建立全连接拓扑，CW-PBFT 三阶段共识 5/5 达成，服务器端累计收到 98 条跨主机消息。数字由 scripts/network_demo_distributed.py 两端日志程序化解析落入 deployment_distributed_flat.json （deliverables/_parse_distributed_evidence_20260930.py）。与 NR-94 区分：NR-94 是单机多进程回环 TCP （6.9/10.8ms 延迟），本条是跨物理主机可行性/正确性证据，延迟含固定 sleep(0.3)+sleep(0.1) 不作性能结论，二者禁混比。跨主机 secure（签名注册+签名投票）已于 2026-10-08 完成 —— 全网共享同一 key_dir （agent_0..agent_3 密钥两端预分发，**存于两端临时目录，不入仓库/不入提交包**），跨主机 ECDSA 签名注册 + 签名投票全程通过，见 NR-101。"
   },
   {
    "id": "NR-96",
@@ -5284,7 +5284,7 @@
    "id": "NR-101",
    "evidence_level": "observed",
    "claim": "跨物理主机（Windows 本机 + Linux 服务器）真实 TCP 全连接 P2P 共识验证——secure 模式（ECDSA 签名注册 + 签名投票）",
-   "allowed_wording": "在 Windows 本机（172.27.4.71）+ Linux 服务器（172.16.222.99，Ubuntu）两台真实物理主机上，对真实跨主机 TCP 全连接 P2P 网络启用 **secure 模式**（全网共享同一 key_dir，ECDSA 签名注册 + 签名投票）完成 4 节点（本机 agent_0/agent_1 + 服务器 agent_2/agent_3）5 轮 CW-PBFT 共识：**5/5 全成功（100%）**；服务器端观测到 5 次「新节点注册(签名验证通过)」，含本机两节点 agent_0/agent_1（跨主机签名验证确实生效）。**环境限定（不可省略）**：这是**跨主机 TCP 可行性 + 签名认证链路正确性**证据，**非延迟/吞吐性能基准**——每轮 run_consensus 含固定 sleep(0.3)+sleep(0.1)，与 NR-94 的单机回环 6.9/10.8 ms **不可混比**；签名采用演示级自签名密钥与公开默认口令，**不构成生产级密钥保护**。",
+   "allowed_wording": "在 Windows 本机 + Linux 服务器（Ubuntu）两台真实物理主机上，对真实跨主机 TCP 全连接 P2P 网络启用 **secure 模式**（全网共享同一 key_dir，ECDSA 签名注册 + 签名投票）完成 4 节点（本机 agent_0/agent_1 + 服务器 agent_2/agent_3）5 轮 CW-PBFT 共识：**5/5 全成功（100%）**；服务器端观测到 5 次「新节点注册(签名验证通过)」，含本机两节点 agent_0/agent_1（跨主机签名验证确实生效）。**环境限定（不可省略）**：这是**跨主机 TCP 可行性 + 签名认证链路正确性**证据，**非延迟/吞吐性能基准**——每轮 run_consensus 含固定 sleep(0.3)+sleep(0.1)，与 NR-94 的单机回环 6.9/10.8 ms **不可混比**；签名采用演示级自签名密钥与公开默认口令，**不构成生产级密钥保护**。",
    "analysis": "benchmark",
    "sources": [
     {
@@ -5318,7 +5318,7 @@
    "status": "PASS",
    "pre_registered": false,
    "evidence_kind": "deployment",
-   "notes": "2026-10-08 跨物理主机 secure 实测，闭环 NR-95 notes 里「跨主机 secure 未做」的待办。拓扑与 NR-95 一致：本机(172.27.4.71) agent_0/agent_1 + 服务器(172.16.222.99) agent_2/agent_3，经真实跨主机 TCP（TLS 传输加密）建全连接拓扑；本轮在此基础上追加 secure：两端预分发同一 key_dir，P2PConsensusNetwork 以 key_manager 接管节点注册与投票签名，allow_insecure_register/vote 均置 False。读数由 scripts/network_demo_distributed.py 两端日志程序化解析落入 deployment_distributed_secure_flat.json（deliverables/_parse_distributed_secure_evidence_20261008.py）。与 NR-95 区分：NR-95 仅 TLS 传输加密（无签名注册/签名投票，本机发34/收87、服务器收98）；本条为签名认证版（本机发35/收82、服务器 10 次 CW-PBFT 达成）。与 NR-94 区分：NR-94 是单机多进程回环 TCP 的延迟基准（6.9/10.8 ms），本条不作性能结论。⛔ 禁写「生产级密钥保护」——密钥为演示级自签名 + 公开默认口令（MARL_ECDSA_KEY_PASSPHRASE 未设置时回退），该局限已在答辩披露预案中登记。"
+   "notes": "2026-10-08 跨物理主机 secure 实测，闭环 NR-95 notes 里「跨主机 secure 未做」的待办。拓扑与 NR-95 一致：本机 agent_0/agent_1 + 服务器 agent_2/agent_3，经真实跨主机 TCP（TLS 传输加密）建全连接拓扑；本轮在此基础上追加 secure：两端预分发同一 key_dir，P2PConsensusNetwork 以 key_manager 接管节点注册与投票签名，allow_insecure_register/vote 均置 False。读数由 scripts/network_demo_distributed.py 两端日志程序化解析落入 deployment_distributed_secure_flat.json（deliverables/_parse_distributed_secure_evidence_20261008.py）。与 NR-95 区分：NR-95 仅 TLS 传输加密（无签名注册/签名投票，本机发34/收87、服务器收98）；本条为签名认证版（本机发35/收82、服务器 10 次 CW-PBFT 达成）。与 NR-94 区分：NR-94 是单机多进程回环 TCP 的延迟基准（6.9/10.8 ms），本条不作性能结论。⛔ 禁写「生产级密钥保护」——密钥为演示级自签名 + 公开默认口令（MARL_ECDSA_KEY_PASSPHRASE 未设置时回退），该局限已在答辩披露预案中登记。"
   },
   {
    "id": "NR-102",
@@ -5554,7 +5554,7 @@
    "status": "PASS",
    "pre_registered": true,
    "requires": [],
-   "allowed_wording": "E16 自私比例梯度（4 档 × 2 臂 × 10 种子，seed1001-1010；n_agents=10 / n_landmarks=10 / 500 回合 / λ=0.1 / greedy_step=0.05，共 80 run，2026-10-09 于远程服务器 172.16.222.99 执行）。**greedy 臂（n=10/档）**：env_reward 10%=−99.08±3.77、30%=−37.82±4.92、50%=+26.46±3.64、70%=+88.86±2.10；last50 依次 −73.98±13.09 / −18.51±4.46 / +41.77±7.69 / +94.36±9.34；合作率 84.4% / 86.7% / 89.2% / 91.7%；实测背叛率=名义比例（10.0% / 30.0% / 50.0% / 70.0%）。Welch（各档 vs 10%）：Δ=+61.27 / +125.55 / +187.94，p 均 <0.0001。⛔ 与 E13（NR-55/56/57，n=3 智能体、20/50% 两档）**不可混比**（智能体数与档位均不同）；⛔ 本环境未提供官方要求的「任务完成率」指标，不得声称该指标；⛔ 不得表述为「自私比例越高越好」「已抵御参与型对手」或「激励机制能对抗自私」。",
+   "allowed_wording": "E16 自私比例梯度（4 档 × 2 臂 × 10 种子，seed1001-1010；n_agents=10 / n_landmarks=10 / 500 回合 / λ=0.1 / greedy_step=0.05，共 80 run，2026-10-09 于远程服务器执行）。**greedy 臂（n=10/档）**：env_reward 10%=−99.08±3.77、30%=−37.82±4.92、50%=+26.46±3.64、70%=+88.86±2.10；last50 依次 −73.98±13.09 / −18.51±4.46 / +41.77±7.69 / +94.36±9.34；合作率 84.4% / 86.7% / 89.2% / 91.7%；实测背叛率=名义比例（10.0% / 30.0% / 50.0% / 70.0%）。Welch（各档 vs 10%）：Δ=+61.27 / +125.55 / +187.94，p 均 <0.0001。⛔ 与 E13（NR-55/56/57，n=3 智能体、20/50% 两档）**不可混比**（智能体数与档位均不同）；⛔ 本环境未提供官方要求的「任务完成率」指标，不得声称该指标；⛔ 不得表述为「自私比例越高越好」「已抵御参与型对手」或「激励机制能对抗自私」。",
    "notes": "新增实验（非事后补登记），预注册 pre_registered=true，预注册文件 deliverables/PREREG_E16自私比例梯度_20261009.md；对标官方 B03「③ 效果测试：不同自私智能体比例 10%/30%/50%/70%」。固定样本量、一次性跑完，无 optional stopping。5 独立种子 × 2 臂 × 4 档 = 80 run；数值由 results/e16_selfish_gradient/*.json 程序化复算（ddof=1 / scipy Welch），非手抄。",
    "evidence_kind": "experiment"
   },
@@ -5620,7 +5620,7 @@
    "status": "PASS",
    "pre_registered": true,
    "requires": [],
-   "allowed_wording": "E16 自私比例梯度（4 档 × 2 臂 × 10 种子，seed1001-1010；n_agents=10 / n_landmarks=10 / 500 回合 / λ=0.1 / greedy_step=0.05，共 80 run，2026-10-09 于远程服务器 172.16.222.99 执行）。**random 臂（n=10/档）**：env_reward 10%=−130.06±2.85、30%=−131.45±4.78、50%=−132.28±1.91、70%=−130.39±2.31；last50 依次 −105.92±8.34 / −107.70±5.98 / −105.07±9.83 / −108.38±9.40；合作率 83.5% / 83.3% / 82.8% / 83.0%；实测背叛率 3.0% / 9.0% / 15.0% / 21.0%（低于名义比例，因 betrayal_prob=0.3 为每步概率）。Welch（各档 vs 10%）：Δ=−1.39 / −2.23 / −0.33，p=0.4424 / 0.0571 / 0.7790。⛔ 与 E13（NR-55/56/57，n=3 智能体、20/50% 两档）**不可混比**（智能体数与档位均不同）；⛔ 本环境未提供官方要求的「任务完成率」指标，不得声称该指标；⛔ 不得表述为「自私比例越高越好」「已抵御参与型对手」或「激励机制能对抗自私」。",
+   "allowed_wording": "E16 自私比例梯度（4 档 × 2 臂 × 10 种子，seed1001-1010；n_agents=10 / n_landmarks=10 / 500 回合 / λ=0.1 / greedy_step=0.05，共 80 run，2026-10-09 于远程服务器执行）。**random 臂（n=10/档）**：env_reward 10%=−130.06±2.85、30%=−131.45±4.78、50%=−132.28±1.91、70%=−130.39±2.31；last50 依次 −105.92±8.34 / −107.70±5.98 / −105.07±9.83 / −108.38±9.40；合作率 83.5% / 83.3% / 82.8% / 83.0%；实测背叛率 3.0% / 9.0% / 15.0% / 21.0%（低于名义比例，因 betrayal_prob=0.3 为每步概率）。Welch（各档 vs 10%）：Δ=−1.39 / −2.23 / −0.33，p=0.4424 / 0.0571 / 0.7790。⛔ 与 E13（NR-55/56/57，n=3 智能体、20/50% 两档）**不可混比**（智能体数与档位均不同）；⛔ 本环境未提供官方要求的「任务完成率」指标，不得声称该指标；⛔ 不得表述为「自私比例越高越好」「已抵御参与型对手」或「激励机制能对抗自私」。",
    "notes": "新增实验（非事后补登记），预注册 pre_registered=true，预注册文件 deliverables/PREREG_E16自私比例梯度_20261009.md；对标官方 B03「③ 效果测试：不同自私智能体比例 10%/30%/50%/70%」。固定样本量、一次性跑完，无 optional stopping。5 独立种子 × 2 臂 × 4 档 = 80 run；数值由 results/e16_selfish_gradient/*.json 程序化复算（ddof=1 / scipy Welch），非手抄。",
    "evidence_kind": "experiment"
   },
@@ -5703,7 +5703,7 @@
    "status": "PASS",
    "pre_registered": true,
    "requires": [],
-   "allowed_wording": "E17 规模与拓扑扩展对照（2 配置 × 2 臂 × 10 种子 seed1001-1010，500 回合，IQL；共 40 run，2026-10-09 于远程服务器 172.16.222.99 执行）。**【3 机器人 / 3 目标点】**：pure_marl env_reward=−56.77±2.36、bc_marl=−57.19±1.39（Δ=−0.42，p=0.6314 不显著）；末50 −50.88±5.64 vs −51.60±4.01（Δ=−0.72，p=0.7461 不显著）；合作率 47.9% vs 47.8%。**【10 机器人 / 5 目标点】**（官方自定义场景的 simple_spread 参数化）：pure_marl=−177.81±3.69、bc_marl=−176.01±3.43（Δ=+1.80，p=0.2737 不显著）；末50 −161.45±11.22 vs −154.44±6.13（Δ=+7.01，p=0.1050 不显著、方向为正）；合作率 63.1% vs 63.2%。⛔ 边界：本场景是 **simple_spread 的 10/5 参数化（仓储调度的拓扑映射）**，**不是完整仓储仿真器**（无货架搬运/任务队列/充电动力学）；⛔ 两配置的绝对奖励**不可互相比较**（任务规模不同，10/5 目标更稀疏）；⛔ 与 NR-1（n=71、3000 回合、3/3）**不可混比**；⛔ 本环境**未提供**「任务完成率」指标，不得声称。",
+   "allowed_wording": "E17 规模与拓扑扩展对照（2 配置 × 2 臂 × 10 种子 seed1001-1010，500 回合，IQL；共 40 run，2026-10-09 于远程服务器执行）。**【3 机器人 / 3 目标点】**：pure_marl env_reward=−56.77±2.36、bc_marl=−57.19±1.39（Δ=−0.42，p=0.6314 不显著）；末50 −50.88±5.64 vs −51.60±4.01（Δ=−0.72，p=0.7461 不显著）；合作率 47.9% vs 47.8%。**【10 机器人 / 5 目标点】**（官方自定义场景的 simple_spread 参数化）：pure_marl=−177.81±3.69、bc_marl=−176.01±3.43（Δ=+1.80，p=0.2737 不显著）；末50 −161.45±11.22 vs −154.44±6.13（Δ=+7.01，p=0.1050 不显著、方向为正）；合作率 63.1% vs 63.2%。⛔ 边界：本场景是 **simple_spread 的 10/5 参数化（仓储调度的拓扑映射）**，**不是完整仓储仿真器**（无货架搬运/任务队列/充电动力学）；⛔ 两配置的绝对奖励**不可互相比较**（任务规模不同，10/5 目标更稀疏）；⛔ 与 NR-1（n=71、3000 回合、3/3）**不可混比**；⛔ 本环境**未提供**「任务完成率」指标，不得声称。",
    "notes": "新增实验（pre_registered=true），预注册文件 deliverables/PREREG_E17规模扩展对照_20261009.md；对标官方 B03「自定义测试场景：10 个机器人、5 个货架」与「测试拓扑：3/10/20 个智能体」。固定样本量、一次性跑完，无 optional stopping。数值由 results/e17_scale/*.json 程序化复算（ddof=1 / scipy Welch / Cohen d），非手抄。",
    "evidence_kind": "experiment"
   },
@@ -6051,7 +6051,7 @@
    "status": "PASS",
    "pre_registered": false,
    "requires": [],
-   "notes": "2026-10-13 服务器(172.16.222.99, 128C/118GB) 单主机回环实测。8 节点首跑 15/15 成功（avg 428.6ms, msgs 475, max 435ms）；16 节点首跑因残留进程占用 8002 端口失败，清理后重跑 15/15 成功（avg 553.7ms, msgs 1631）。4 节点 09-30 network_demo 日志（ready 534ms, 每轮约 410ms 全 PASS）；5 节点 09-30 日志 success 100% msgs_sent 149。消息量 4→5→8→16 呈近 O(n^2) 全连接广播增长（149→475→1631）。",
+   "notes": "2026-10-13 服务器(128C/118GB) 单主机回环实测。8 节点首跑 15/15 成功（avg 428.6ms, msgs 475, max 435ms）；16 节点首跑因残留进程占用 8002 端口失败，清理后重跑 15/15 成功（avg 553.7ms, msgs 1631）。4 节点 09-30 network_demo 日志（ready 534ms, 每轮约 410ms 全 PASS）；5 节点 09-30 日志 success 100% msgs_sent 149。消息量 4→5→8→16 呈近 O(n^2) 全连接广播增长（149→475→1631）。",
    "evidence_kind": "engineering"
   },
   {
@@ -8135,7 +8135,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器 172.16.222.99 实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。⚠️ λ=0.1 在 1000ep 短预算下三口径不显著——必须披露的边界；主证据（3000ep/λ=0.1，NR-129 p=0.0034）不受影响，但两预算不可互推。"
+   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。⚠️ λ=0.1 在 1000ep 短预算下三口径不显著——必须披露的边界；主证据（3000ep/λ=0.1，NR-129 p=0.0034）不受影响，但两预算不可互推。"
   },
   {
    "id": "NR-137",
@@ -8264,7 +8264,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器 172.16.222.99 实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。"
+   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。"
   },
   {
    "id": "NR-138",
@@ -8393,7 +8393,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器 172.16.222.99 实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。"
+   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。"
   },
   {
    "id": "NR-139",
@@ -8522,7 +8522,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器 172.16.222.99 实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。"
+   "notes": "E35 λ×三口径敏感性（2026-10-14 服务器实测；8 分片并行，100 场全完成，单场 34-37s）。预注册 docs/PREREG_e35_lambda_sensitivity.md；数据 results/e35_lambda_sensitivity/（100 个瘦身 json，保留 config+标量）。"
   },
   {
    "id": "NR-140",
@@ -8651,7 +8651,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E36（2026-10-14 服务器 172.16.222.99 实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
+   "notes": "E36（2026-10-14 服务器实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
   },
   {
    "id": "NR-141",
@@ -8780,7 +8780,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E36（2026-10-14 服务器 172.16.222.99 实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
+   "notes": "E36（2026-10-14 服务器实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
   },
   {
    "id": "NR-142",
@@ -8909,7 +8909,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E36（2026-10-14 服务器 172.16.222.99 实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
+   "notes": "E36（2026-10-14 服务器实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
   },
   {
    "id": "NR-143",
@@ -9038,7 +9038,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E36（2026-10-14 服务器 172.16.222.99 实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
+   "notes": "E36（2026-10-14 服务器实测，8 分片并行）。预注册 docs/PREREG_e36_lambda_3000ep.md。数据 results/e36_lambda_3000ep/（瘦身 json，保留 config+标量）。⚠️ 末50 口径本批种子下不显著（点估计为负），与 NR-129（n=101 另一批种子，末50 +25.7%）**方向相反**——种子间方差大，两批不可混、必须并列披露。"
   },
   {
    "id": "NR-144",
@@ -9167,7 +9167,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E37（2026-10-14 服务器 172.16.222.99 实测，8 分片并行）。预注册 docs/PREREG_e37_lambda_fine.md。数据 results/e37_lambda_fine/（瘦身 json，保留 config+标量）。⚠️ 与 E35 的 λ=0.1（同批种子，末50 p=0.302 不显著）构成 λ 阈值证据：λ≥0.15 起末50 转为显著。 【诚实性修正 2026-10-18（data-auditor GAP-1/W2）】① 本实验为 E35 结果揭示 λ=0.1 不显著后的**探索性补充档位**（0.15/0.2/0.25 依据 E35 结果设计），无独立预注册文件——首版 pre_registered:true 系登记错误，改 false；② pure 基线为同种子标签独立重跑（pure 为同种子标签独立重跑、非 E35 同一实现；数据文件名与内部 marker 已于 2026-10-18 统一为 e37_ 前缀，E35 pure 末50 -44.71 vs E37 -47.51），「与 E35 同批可比」表述过强——λ≥0.15 转显著的阈值叙事横跨两个不同基线，仅供趋势参考，须同基线内补 λ=0.1 复测后才能宣称。"
+   "notes": "E37（2026-10-14 服务器实测，8 分片并行）。预注册 docs/PREREG_e37_lambda_fine.md。数据 results/e37_lambda_fine/（瘦身 json，保留 config+标量）。⚠️ 与 E35 的 λ=0.1（同批种子，末50 p=0.302 不显著）构成 λ 阈值证据：λ≥0.15 起末50 转为显著。 【诚实性修正 2026-10-18（data-auditor GAP-1/W2）】① 本实验为 E35 结果揭示 λ=0.1 不显著后的**探索性补充档位**（0.15/0.2/0.25 依据 E35 结果设计），无独立预注册文件——首版 pre_registered:true 系登记错误，改 false；② pure 基线为同种子标签独立重跑（pure 为同种子标签独立重跑、非 E35 同一实现；数据文件名与内部 marker 已于 2026-10-18 统一为 e37_ 前缀，E35 pure 末50 -44.71 vs E37 -47.51），「与 E35 同批可比」表述过强——λ≥0.15 转显著的阈值叙事横跨两个不同基线，仅供趋势参考，须同基线内补 λ=0.1 复测后才能宣称。"
   },
   {
    "id": "NR-145",
@@ -9296,7 +9296,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E37（2026-10-14 服务器 172.16.222.99 实测，8 分片并行）。预注册 docs/PREREG_e37_lambda_fine.md。数据 results/e37_lambda_fine/（瘦身 json，保留 config+标量）。⚠️ 与 E35 的 λ=0.1（同批种子，末50 p=0.302 不显著）构成 λ 阈值证据：λ≥0.15 起末50 转为显著。 【诚实性修正 2026-10-18（data-auditor GAP-1/W2）】① 本实验为 E35 结果揭示 λ=0.1 不显著后的**探索性补充档位**（0.15/0.2/0.25 依据 E35 结果设计），无独立预注册文件——首版 pre_registered:true 系登记错误，改 false；② pure 基线为同种子标签独立重跑（pure 为同种子标签独立重跑、非 E35 同一实现；数据文件名与内部 marker 已于 2026-10-18 统一为 e37_ 前缀，E35 pure 末50 -44.71 vs E37 -47.51），「与 E35 同批可比」表述过强——λ≥0.15 转显著的阈值叙事横跨两个不同基线，仅供趋势参考，须同基线内补 λ=0.1 复测后才能宣称。"
+   "notes": "E37（2026-10-14 服务器实测，8 分片并行）。预注册 docs/PREREG_e37_lambda_fine.md。数据 results/e37_lambda_fine/（瘦身 json，保留 config+标量）。⚠️ 与 E35 的 λ=0.1（同批种子，末50 p=0.302 不显著）构成 λ 阈值证据：λ≥0.15 起末50 转为显著。 【诚实性修正 2026-10-18（data-auditor GAP-1/W2）】① 本实验为 E35 结果揭示 λ=0.1 不显著后的**探索性补充档位**（0.15/0.2/0.25 依据 E35 结果设计），无独立预注册文件——首版 pre_registered:true 系登记错误，改 false；② pure 基线为同种子标签独立重跑（pure 为同种子标签独立重跑、非 E35 同一实现；数据文件名与内部 marker 已于 2026-10-18 统一为 e37_ 前缀，E35 pure 末50 -44.71 vs E37 -47.51），「与 E35 同批可比」表述过强——λ≥0.15 转显著的阈值叙事横跨两个不同基线，仅供趋势参考，须同基线内补 λ=0.1 复测后才能宣称。"
   },
   {
    "id": "NR-146",
@@ -9425,7 +9425,7 @@
     "NR-135"
    ],
    "evidence_kind": "experiment",
-   "notes": "E37（2026-10-14 服务器 172.16.222.99 实测，8 分片并行）。预注册 docs/PREREG_e37_lambda_fine.md。数据 results/e37_lambda_fine/（瘦身 json，保留 config+标量）。⚠️ 与 E35 的 λ=0.1（同批种子，末50 p=0.302 不显著）构成 λ 阈值证据：λ≥0.15 起末50 转为显著。 【诚实性修正 2026-10-18（data-auditor GAP-1/W2）】① 本实验为 E35 结果揭示 λ=0.1 不显著后的**探索性补充档位**（0.15/0.2/0.25 依据 E35 结果设计），无独立预注册文件——首版 pre_registered:true 系登记错误，改 false；② pure 基线为同种子标签独立重跑（pure 为同种子标签独立重跑、非 E35 同一实现；数据文件名与内部 marker 已于 2026-10-18 统一为 e37_ 前缀，E35 pure 末50 -44.71 vs E37 -47.51），「与 E35 同批可比」表述过强——λ≥0.15 转显著的阈值叙事横跨两个不同基线，仅供趋势参考，须同基线内补 λ=0.1 复测后才能宣称。"
+   "notes": "E37（2026-10-14 服务器实测，8 分片并行）。预注册 docs/PREREG_e37_lambda_fine.md。数据 results/e37_lambda_fine/（瘦身 json，保留 config+标量）。⚠️ 与 E35 的 λ=0.1（同批种子，末50 p=0.302 不显著）构成 λ 阈值证据：λ≥0.15 起末50 转为显著。 【诚实性修正 2026-10-18（data-auditor GAP-1/W2）】① 本实验为 E35 结果揭示 λ=0.1 不显著后的**探索性补充档位**（0.15/0.2/0.25 依据 E35 结果设计），无独立预注册文件——首版 pre_registered:true 系登记错误，改 false；② pure 基线为同种子标签独立重跑（pure 为同种子标签独立重跑、非 E35 同一实现；数据文件名与内部 marker 已于 2026-10-18 统一为 e37_ 前缀，E35 pure 末50 -44.71 vs E37 -47.51），「与 E35 同批可比」表述过强——λ≥0.15 转显著的阈值叙事横跨两个不同基线，仅供趋势参考，须同基线内补 λ=0.1 复测后才能宣称。"
   },
   {
    "id": "NR-147",
@@ -11319,7 +11319,7 @@
    "status": "PASS",
    "pre_registered": false,
    "requires": [],
-   "notes": "E41（2026-10-16，服务器 172.16.222.99 实测）。divergences 是 list，按契约**不进 declared**（verify 对 「declared 是 list 而 computed 无对应 key」直接判 FAIL），一致性结论由 n_divergence_checks == 0 表达。实验执行与登记同日，按铁律显式标 pre_registered=false。 | 2026-10-17 全量复算实测 PASS（verify_numbers total=172 PASS=166 FAIL=0，exit 0），文件态 status 由 PENDING 更正为 PASS——登记当日即已验证，仅补翻文件态。",
+   "notes": "E41（2026-10-16，服务器实测）。divergences 是 list，按契约**不进 declared**（verify 对 「declared 是 list 而 computed 无对应 key」直接判 FAIL），一致性结论由 n_divergence_checks == 0 表达。实验执行与登记同日，按铁律显式标 pre_registered=false。 | 2026-10-17 全量复算实测 PASS（verify_numbers total=172 PASS=166 FAIL=0，exit 0），文件态 status 由 PENDING 更正为 PASS——登记当日即已验证，仅补翻文件态。",
    "evidence_kind": "experiment"
   },
   {
