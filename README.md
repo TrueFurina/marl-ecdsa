@@ -5,5 +5,6 @@
 - 🌐 项目主页：https://truefurina.github.io/marl-ecdsa/
 - ⬇ 下载 Dashboard：见 Releases
 - 📊 全部对外数字登记于 number_registry.json（含数据源与复算口径；条数以文件为准），原始运行数据 142 次随包发布
+- 📐 本页展示的是 **n=71 基线口径**（NR-1 / NR-2）；后续扩种口径以登记簿为准
 
 仅用于科研与教学演示。
