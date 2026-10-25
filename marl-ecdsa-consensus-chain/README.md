@@ -43,7 +43,7 @@
 - **Parameter-boundary derivation & numerical verification of strict-dominant-strategy Nash (NOT machine-checked formal proof)**: strict proof with parameter bounds and 50% safety margin; **post-quantum ML-DSA-44 (CRYSTALS-Dilithium2) adapter IMPLEMENTED** via `dilithium-py` — real keygen/sign/verify (pure-Python backend, no native acceleration); signature 2420 B / public key 1312 B / private key 2560 B; cold-mean sign 44.64 ms (SD 32.40) / verify 10.40 ms, warm-median sign 17.04 ms / verify 4.15 ms — jitter is large, cite only intervals or dual values, never a single point; ~2 orders of magnitude slower than ECDSA; **adapter ready but NOT wired into main chain (P2, independent module) — default signing path still ECDSA**, so the system as a whole is not yet quantum-resistant.
 - **Self-built Gossip discovery**: asyncio-based dynamic peer discovery tuned for MARL scenarios.
 - **Full-chain cryptographic auditability**: sign → Guard → Tx → Block → consensus.
-- **Rigorous experiments**: ablation matrix, λ-sensitivity and multi-seed statistics, reported under an honest caliber (headline: n=71 seeds, p=0.0095 — **BH-FDR significant / Bonferroni non-significant**, Cohen d=0.441; see [Experiments & Results](#-experiments--results)).
+- **Rigorous experiments**: ablation matrix, λ-sensitivity and multi-seed statistics, reported under an honest caliber (**current headline: n=101 seeds/group — NR-129 / NR-134 / NR-135, significant under Bonferroni, BH-FDR and Holm**; the registered n=71 baseline — p=0.0095, BH-FDR significant / Bonferroni non-significant, d=0.441 — is retained below for traceability; see [Experiments & Results](#-experiments--results)).
 
 ---
 
@@ -107,6 +107,10 @@ pip install -r requirements.txt
 export MARL_ECDSA_KEY_PASSPHRASE="replace-with-a-strong-secret"
 
 # 2. Run full test suite (1600+ 项自动化测试全部通过（0 失败）)
+# ⚠️ Windows 用户请先启用 UTF-8 模式（默认 GBK 下 13 个编码相关用例会失败，
+#    均为环境问题非逻辑缺陷；Linux/macOS CI 无此问题）:
+# PowerShell: $env:PYTHONUTF8 = "1"
+export PYTHONUTF8=1
 python -m pytest tests/ -q
 
 # 3. Run a training experiment (pure vs bc vs selfish)
@@ -132,7 +136,10 @@ Set `consensus_mode` in `config.json`: `cw_pbft` (default) / `standard_pbft` / `
 
 ## Experiments & Results
 
-**Headline metric.** After **3000-episode** full convergence, BC-MARL improves the **pure environment reward (`env_reward`, excluding the BC incentive)** by **+28.17%** over Pure-MARL. This is based on **n = 71 independent random seeds per group**; Welch **p = 0.0095 (BH-FDR significant / Bonferroni non-significant)**, Cohen's **d = 0.441** (small-to-medium effect), 95% CI [0.648, 4.576] (excludes 0), post-hoc power = 0.74.
+> ⚠️ **Caliber note**: the block below is the **registered n=71 baseline** (NR-1 / NR-2). The current headline caliber is **n=101/group** — last-50 `env_reward` **+25.7%** (Welch p=0.0034, d=0.42; NR-129), whole-run **+7.70%** (p=1.1e-14; NR-134), cooperation rate **+1.92%** (p=1.5e-14; NR-135); all three remain significant under Bonferroni / BH-FDR / Holm.
+> **Must be reported alongside** (mandated by NR-129): the 30 new seed pairs alone are **not significant** (Welch p=0.169, point estimate +20.5%, n=30, post-hoc power≈0.42). Do not report last-50 +25.7% alone. The n=71 figures below are kept verbatim for traceability.
+
+**Baseline metric (n=71).** After **3000-episode** full convergence, BC-MARL improves the **pure environment reward (`env_reward`, excluding the BC incentive)** by **+28.17%** over Pure-MARL. This is based on **n = 71 independent random seeds per group**; Welch **p = 0.0095 (BH-FDR significant / Bonferroni non-significant)**, Cohen's **d = 0.441** (small-to-medium effect), 95% CI [0.648, 4.576] (excludes 0), post-hoc power = 0.74.
 
 | Mode | env_reward last-50 (mean ± std) | Whole-run coop. rate (mean ± std) | Seeds | Welch p |
 |---|---|---|---|---|
