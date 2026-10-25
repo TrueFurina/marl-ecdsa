@@ -159,7 +159,7 @@
                 <!-- Bottom: Results -->
                 <rect x="190" y="200" width="300" height="50" rx="10" fill="rgba(255,255,255,0.02)" stroke="rgba(0,0,0,0.06)" stroke-width="1"/>
                 <text x="340" y="220" text-anchor="middle" fill="#e2e8f0" font-size="12" font-weight="600">实验验证：pure_marl vs bc_marl vs selfish</text>
-                <text x="340" y="240" text-anchor="middle" fill="#64748b" font-size="10">主口径 n=71/组：末50回合 env_reward +28.2% (p=0.0095，BH-FDR 显著/Bonferroni 不显著) · 全程 +7.9% (p&lt;1e-10)</text>
+                <text x="340" y="240" text-anchor="middle" fill="#64748b" font-size="10">主口径 n=71/组（已登记基线；现行权威 n=101/组）：末50回合 env_reward +28.2% (p=0.0095，BH-FDR 显著/Bonferroni 不显著) · 全程 +7.9% (p&lt;1e-10)</text>
 
                 <!-- labels -->
                 <text x="110" y="72" text-anchor="middle" fill="#64748b" font-size="9">决策 + 学习</text>
@@ -288,7 +288,7 @@
                 <tr><td style="color:var(--text-dim)">实验组 B</td><td>BC-MARL — IQL + 区块链激励融合奖励 (λ=0.1) <span class="note-tag">合作率由阈值检测动态计算</span></td></tr>
                 <tr><td style="color:var(--text-dim)">实验组 C</td><td>Selfish — 含 30% 自私智能体，验证区块链抑制背叛能力</td></tr>
                 <tr><td style="color:var(--text-dim)">控制变量</td><td>相同环境 (SimpleSpread)、相同超参、相同种子</td></tr>
-                <tr><td style="color:var(--text-dim)">核心结论</td><td style="color:var(--accent3);font-weight:600">BC-MARL vs Pure MARL（主口径 n=71/组，env_reward，λ=0.1）：末50回合 +28.2%（Welch p=0.0095，d=0.44；BH-FDR 显著 / Bonferroni 不显著）；全程 +7.9%（p&lt;1e-10，d=1.20）。两口径必须同报；效果强依赖底层算法（IQL/VDN/QMIX/MAPPO 方向不一致）</td></tr>
+                <tr><td style="color:var(--text-dim)">核心结论</td><td style="color:var(--accent3);font-weight:600">BC-MARL vs Pure MARL（主口径 n=71/组（已登记基线；现行权威 n=101/组），env_reward，λ=0.1）：末50回合 +28.2%（Welch p=0.0095，d=0.44；BH-FDR 显著 / Bonferroni 不显著）；全程 +7.9%（p&lt;1e-10，d=1.20）。两口径必须同报；效果强依赖底层算法（IQL/VDN/QMIX/MAPPO 方向不一致）</td></tr>
             </tbody></table>
         </div>
     </div>
