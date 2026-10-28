@@ -7,8 +7,6 @@
 - 📊 全部对外数字登记于 [`marl-ecdsa-consensus-chain/number_registry.json`](marl-ecdsa-consensus-chain/number_registry.json)（含数据源与复算口径；条数以文件为准），原始运行数据 142 次随包发布
 - 📐 本页展示的是 **n=71 基线口径**（NR-1 / NR-2）；后续扩种口径以登记簿为准
 
-仅用于科研与教学演示。
-
 ## 仓库结构 / Where to look
 
 | 路径 | 内容 |
@@ -20,3 +18,6 @@
 
 > 只想跑实验：直接进 [`marl-ecdsa-consensus-chain/README.md` 的 Quick Start](marl-ecdsa-consensus-chain/README.md#quick-start)。
 
+---
+
+仅用于科研与教学演示。
