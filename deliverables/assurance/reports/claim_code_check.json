@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-01T11:33:59",
+  "registry_ref": "marl-ecdsa-consensus-chain/number_registry.json",
+  "data_root": "marl-ecdsa-consensus-chain/results",
+  "mirror_root": "backup/pkg_old_src_20260917/results",
+  "commit": "e06109a",
+  "primary_metric": "summary.avg_env_reward_last_50",
+  "summary": {
+    "total": 2,
+    "pass": 1,
+    "fail": 0,
+    "pending": 0,
+    "invalid": 0,
+    "planned": 0,
+    "data_missing": 1
+  },
+  "mirror_consistent": null,
+  "mirror": null,
+  "entries": [
+    {
+      "id": "NR-15",
+      "status": "DATA_MISSING",
+      "analysis": "code_check",
+      "computed": {},
+      "declared": {
+        "min_weight": 0.1,
+        "initial_weight": 0.3,
+        "has_max_weight": true,
+        "max_final_weight": 1.6
+      },
+      "deltas": {},
+      "files_scanned": 0,
+      "n_expected": null,
+      "reason": "数据源缺失（FileNotFoundError）：本数据包不含该条目所需文件",
+      "notes": "「按投票权计算」不自动强于「按节点数」，须显式写明；MAX_WEIGHT=1.5 为配置依赖的硬上界，对应路线C 实测 R_final≈15 的饱和态，须如实披露上限来自配置。"
+    },
+    {
+      "id": "NR-18",
+      "status": "PASS",
+      "analysis": "code_check",
+      "computed": {
+        "dilithium_available": true
+      },
+      "declared": {
+        "dilithium_available": true
+      },
+      "deltas": {
+        "dilithium_available": null
+      },
+      "files_scanned": 0,
+      "n_expected": null,
+      "reason": "",
+      "notes": "2026-09-18 由空壳改为真实现（commit 0aa6036）。适配器层已实现、默认链路仍为 ECDSA；详见 NR-20 实测。取代原『未实现』表述。2026-10-15：真实后端 dilithium-py 已 vendored 入仓库与提交包（离线自包含），确认 DILITHIUM_AVAILABLE 运行时为 True（此前仅靠常量/测试，本次确认真实可加载，非静默回落）；SigningService 新增 opt-in hybrid 后端（signature_backend='hybrid'，默认 ecdsa，AND 双签、Dilithium 公钥随包携带、后端缺失 fail-closed），默认主链路仍为 ECDSA、不接主链路。"
+    }
+  ]
+}
