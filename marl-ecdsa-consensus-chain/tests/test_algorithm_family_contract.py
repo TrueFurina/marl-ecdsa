@@ -22,7 +22,16 @@ import random
 import numpy as np
 import pytest
 
-from marl.algorithms.qmix import QMIXMixer, QMIXTrainer, VDNMixer
+from marl.algorithms.qmix import HAS_TORCH, QMIXMixer, QMIXTrainer
+
+# VDNMixer 仅存在于 PyTorch 分支（qmix.py 的 `if HAS_TORCH:` 块）。
+# 无 torch 时它不存在，直接 import 会让整个文件在**收集期**失败，
+# 报 ImportError 看着像代码缺陷，实际是环境缺依赖。按 HAS_TORCH 守卫，
+# 与 tests/test_mappo_r1.py 一致。
+pytestmark = pytest.mark.skipif(
+    not HAS_TORCH, reason="VDN/QMIX 值分解契约需 PyTorch 实现分支")
+if HAS_TORCH:
+    from marl.algorithms.qmix import VDNMixer
 
 
 N_AGENTS, OBS_DIM, STATE_DIM, N_ACTIONS = 3, 8, 12, 4
@@ -58,10 +67,14 @@ class TestMixerWiring:
 
     @pytest.mark.parametrize("algo,expected", [
         ("iql", None),
-        ("vdn", VDNMixer),
-        ("qmix", QMIXMixer),
+        # 用字符串而非类对象：本文件在无 torch 环境下是模块级 skip，
+        # 但 parametrize 的默认值在**导入期**就求值，写 VDNMixer 会 NameError。
+        ("vdn", "VDNMixer"),
+        ("qmix", "QMIXMixer"),
     ])
     def test_mixer_type_matches_algorithm(self, algo, expected):
+        if isinstance(expected, str):
+            expected = {"VDNMixer": VDNMixer, "QMIXMixer": QMIXMixer}[expected]
         t = _make_trainer(algo)
         if expected is None:
             assert t.mixer is None, f"{algo} 不应有 mixer（独立 Q 学习）"
