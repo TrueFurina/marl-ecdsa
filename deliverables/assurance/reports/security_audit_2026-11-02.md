@@ -3,7 +3,7 @@
 - 生成时间：2026-11-02T23:15+08:00
 - 审计范围：`blockchain/crypto`、`blockchain/consensus`、`blockchain/network`、`blockchain/ledger`、`blockchain/contracts`、`marl/algorithms`、`marl/analysis`
 - 方法：**源码审读 + 定向差分/性质测试**（经典博弈已知均衡、跨进程确定性、形状不变量），不依赖随机 fuzz
-- 结论：发现 **7 处缺陷**，全部已修复并带回归；全量 `1799 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
+- 结论：发现 **8 处缺陷**，全部已修复并带回归；全量 `1807 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
 
 ## 汇总
 
@@ -16,6 +16,7 @@
 | 5 | 高（训练正确性） | `marl/algorithms/mappo.py` | Critic 回归目标与 `v_pred` 错位 | `9878a69` |
 | 6 | **严重（安全）** | `blockchain/crypto/ecdsa_utils.py` | 签名与载荷解绑：复用公开历史签名可伪造任意交易 | `597cabe` |
 | 7 | 高（共识安全） | `blockchain/consensus/standard_pbft.py` | 等权基线缺女巫门控：伪造 voter_id 即可凑够 Quorum | `4760fa9` |
+| 8 | 中（指标失真） | `blockchain/consensus/cw_pbft_failover.py` | 心跳缺省值 0 被判「纪元 0 发过」→ 每轮虚假视图切换 | `7caa0d8` |
 
 ---
 
@@ -137,6 +138,35 @@ CW-PBFT     : 达成共识=False  prepare池=[]
 
 **边界（诚实说明）**：网络层 `_on_prepare` / `_on_commit` 已有 `_verify_vote_signature`（要求 `voter_id` 与注册公钥绑定，无 `key_manager` 时 fail-closed），因此**走网络**的伪造身份本就被挡住。本次修的是**引擎边界**：`receive_vote` 是对外公开 API，`simulated_consensus` 与离线实验都直接驱动它。更彻底的方案是抽公共基类把门控下沉，但那是较大重构，本次按「两个实现行为对齐」做最小修复。
 
+## 8. 中：心跳缺省值导致每轮虚假视图切换（failover 统计失真）
+
+**根因**：`_last_heartbeat` 是空 dict，`check_primary_health` 用 `self._last_heartbeat.get(primary_id, 0)` 取缺省值。`0` 被当成「纪元 0 发过心跳」，于是 `now_ms - 0 > HEARTBEAT_TIMEOUT_MS` 恒真 —— **从未发过心跳的节点一律被判超时**。
+
+**证据**：模块自带的自测第一段写着「1. Normal consensus (no Byzantine)...」，而它打出的第一行日志是：
+
+```
+View change: node_0(primary_timeout) → node_1 (view=1)
+```
+
+全新引擎、完全健康的主节点，第一轮就被判超时并切换。
+
+**影响**：故障切换统计与真实拜占庭事件**完全脱钩**，而这正是论文用来量化 failover 有效性的数据。实测 `simulate_byzantine_primary_attack(n_rounds=20)`（只在 r=5/10/15 注入拜占庭）：
+
+```
+修复前：byzantine_events=3, successful_failovers=20  → 20/20 = 100%
+修复后：byzantine_events=3, successful_failovers=15  → 15/20 =  75%
+```
+
+修复前那条 100% 是纯噪声（每轮都切）。**修复后剩下的 15 次不是缺陷**：拜占庭标记一旦打上就永久生效，而出块轮转每 10 块才换一次主，所以一个被标记的主节点会在后续多轮里持续触发切换——这是设计取舍，已在下方「剩余风险」登记。
+
+**修复**：
+
+- 心跳表在 `__init__` 与 `reset_failover_state` 中按节点以当前时刻初始化；
+- `check_primary_health` 把「从未收到心跳」解释为**监控刚开始**：记为当前时刻并按健康处理，给一个 `HEARTBEAT_TIMEOUT_MS` 宽限期，宽限期后仍无心跳才判超时；
+- 未纳入监控的节点（运行期新加入）走同一路径，不再直接判死。
+
+**验证**：`tests/test_failover_heartbeat_semantics.py` 8 条 —— 全新引擎不误判超时、正常轮不产生 failover 记录、显式补心跳同样不触发、心跳过旧仍判超时（防误放）、注入拜占庭仍触发切换（防漏报）、重置后不退回到「一律超时」；failover 相关 **14 passed**。
+
 ---
 
 ## 验证口径
@@ -149,7 +179,8 @@ pytest tests/test_qmix_state_index_determinism.py                    # 2 passed
 pytest tests/test_mappo_critic_targets.py                            # 3 passed
 pytest tests/test_signature_payload_binding.py                       # 9 passed
 pytest tests/test_standard_pbft_sybil_gate.py                        # 8 passed
-pytest tests/ -q                                                     # 1799 passed / 48 skipped
+pytest tests/test_failover_heartbeat_semantics.py                    # 8 passed
+pytest tests/ -q                                                     # 1807 passed / 48 skipped
 ```
 
 ## 剩余风险（诚实说明）
@@ -157,5 +188,6 @@ pytest tests/ -q                                                     # 1799 pass
 - 本次审计是**定向**的（读源码 + 构造判据），不是全量形式化验证；未覆盖的路径不能据此认为安全。
 - `network_consensus` 的签名验证依赖 `key_manager` 配置；未配置时默认 fail-closed（拒绝），但**纯连通性测试模式**（`_allow_insecure_vote`）不真验签，仅用于非生产场景。
 - MAPPO 的 PyTorch 路径在本机缺 `torch`，相关训练测试在 CI 才完整执行；本次对 Critic 目标的修复用纯 numpy 不变量做了离线回归。
+- 第 8 项修复后，`simulate_byzantine_primary_attack` 仍有 15/20 轮触发切换：拜占庭标记一旦打上就永久生效，没有「节点恢复后重新准入」的路径，而出块轮转每 10 块才换主。这是设计取舍（悲观地把作恶节点永久排除），不是缺陷；但如果论文要报「failover 次数」，应同时给出 `byzantine_events`，否则 15 这个数会被误读成 15 次拜占庭。
 - 第 6 项的绑定校验只覆盖「package 携带四个字段」的路径。若将来新增调用方只传 `message_hex + signature_hex`（纯字节验签），绑定校验不会生效——**账本与签名服务路径必须继续传全字段**，这一点已写进函数 docstring。
 - 绑定校验**没有**引入「低 s 归一化」，因此 ECDSA 可塑性（`(r, s)` 与 `(r, n-s)` 都合法）仍然存在。当前不影响本链的授权语义（tx_id 由 `agent_id/action_hash/timestamp/nonce/tx_type` 计算，不含签名），但若将来把签名纳入 tx_id，必须同时做低 s 归一化，否则会出现 txid 可变。
