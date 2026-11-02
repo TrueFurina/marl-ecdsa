@@ -3,7 +3,7 @@
 - 生成时间：2026-11-02T23:15+08:00
 - 审计范围：`blockchain/crypto`、`blockchain/consensus`、`blockchain/network`、`blockchain/ledger`、`blockchain/contracts`、`marl/algorithms`、`marl/analysis`
 - 方法：**源码审读 + 定向差分/性质测试**（经典博弈已知均衡、跨进程确定性、形状不变量），不依赖随机 fuzz
-- 结论：发现 **6 处缺陷**，全部已修复并带回归；全量 `1791 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
+- 结论：发现 **7 处缺陷**，全部已修复并带回归；全量 `1799 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
 
 ## 汇总
 
@@ -15,6 +15,7 @@
 | 4 | 中（可复现性） | `marl/algorithms/qmix.py` | NumPy 回退用内建 `hash()`，受 `PYTHONHASHSEED` 影响 | `2ba2a52` |
 | 5 | 高（训练正确性） | `marl/algorithms/mappo.py` | Critic 回归目标与 `v_pred` 错位 | `9878a69` |
 | 6 | **严重（安全）** | `blockchain/crypto/ecdsa_utils.py` | 签名与载荷解绑：复用公开历史签名可伪造任意交易 | `597cabe` |
+| 7 | 高（共识安全） | `blockchain/consensus/standard_pbft.py` | 等权基线缺女巫门控：伪造 voter_id 即可凑够 Quorum | `4760fa9` |
 
 ---
 
@@ -112,6 +113,30 @@ Blockchain._validate_new_block(block) = True  →  False
 
 **验证**：`tests/test_signature_payload_binding.py` 9 条——正常签名包仍通过、换 `action`/`nonce`/`timestamp`/`agent_id` 复用签名全部拒绝、区块层端到端拒绝伪造交易且接受真实交易、旧式纯字节包语义不变、`int`/`float` 时间戳不误杀；相关子系统 **642 passed**。
 
+## 7. 高：等权基线缺女巫门控（伪造 voter_id 即可凑够 Quorum）
+
+**根因**：`StandardPBFTConsensus.receive_vote` 不校验投票者是否在共识成员集合内，而 `_check_vote_threshold` 按 `len(self._votes[phase])`（投票者**个数**）计数。于是任何调用方塞进任意伪造 `voter_id`，就能凭空凑够 `ceil(2n/3)`。
+
+CW-PBFT 在 09-28（全检 #2）就加了「非共识成员身份一律拒收」，**等权基线漏了同一个门控** —— 同一套接口、同一个 `factory`，安全属性却不一样。
+
+**影响**：
+
+1. **共识安全性**：单节点可在无任何真实对等节点的情况下宣布共识达成。
+2. **对比实验可信度**：等权基线正是论文对照组的实现（`factory` 以 `mode='standard_pbft'` 创建），它的安全属性不应弱于被对照的对象。
+
+**复现**（n=4，阈值 `ceil(8/3)=3`，单个节点、零个真实对等节点）：
+
+```
+StandardPBFT: 达成共识=True   prepare池=['ghost_1','ghost_2','ghost_3']
+CW-PBFT     : 达成共识=False  prepare池=[]
+```
+
+**修复**：与 CW-PBFT 对齐 —— 非成员投票一律拒收（不写 `_votes`、不计入 Quorum）；自报 `weight` 覆盖为权威值 `1.0`（存副本，不改写入参），杜绝第二个可信通道。
+
+**验证**：`tests/test_standard_pbft_sybil_gate.py` 8 条 —— 非成员拒收、伪造凑不出阈值、端到端幻影共识失败、自报权重纠偏、入参不被就地改写、真实投票仍能达成共识（防误杀）、真伪混投只计真实票、两引擎行为一致；共识相关 **69 passed**。
+
+**边界（诚实说明）**：网络层 `_on_prepare` / `_on_commit` 已有 `_verify_vote_signature`（要求 `voter_id` 与注册公钥绑定，无 `key_manager` 时 fail-closed），因此**走网络**的伪造身份本就被挡住。本次修的是**引擎边界**：`receive_vote` 是对外公开 API，`simulated_consensus` 与离线实验都直接驱动它。更彻底的方案是抽公共基类把门控下沉，但那是较大重构，本次按「两个实现行为对齐」做最小修复。
+
 ---
 
 ## 验证口径
@@ -123,7 +148,8 @@ pytest tests/test_nash_verifier_canonical.py tests/test_nash_verifier*.py  # 34 
 pytest tests/test_qmix_state_index_determinism.py                    # 2 passed
 pytest tests/test_mappo_critic_targets.py                            # 3 passed
 pytest tests/test_signature_payload_binding.py                       # 9 passed
-pytest tests/ -q                                                     # 1791 passed / 48 skipped
+pytest tests/test_standard_pbft_sybil_gate.py                        # 8 passed
+pytest tests/ -q                                                     # 1799 passed / 48 skipped
 ```
 
 ## 剩余风险（诚实说明）
