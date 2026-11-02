@@ -6,6 +6,7 @@ QMIX 算法实现（轻量版）
 import numpy as np
 import random
 import logging
+import hashlib
 from collections import deque
 from typing import List, Tuple, Optional, Dict
 
@@ -591,17 +592,28 @@ else:
         def init_hidden(self):
             return np.zeros(self.hidden_dim)
 
+        def _state_index(self, obs) -> int:
+            """确定性状态离散化（sha256），**不用**内建 hash()。
+
+            内建 hash() 对字符串按 PYTHONHASHSEED 随机加盐：同一观测在不同进程
+            会落到不同 Q 表行 —— 同一 seed/config 复跑结果不一致，与项目"可复现"
+            的口径冲突（dashboard 的 _demo_hash 已因同款问题改掉 hash()）。
+            """
+            payload = repr(obs.tolist() if hasattr(obs, "tolist") else obs)
+            digest = hashlib.sha256(payload.encode("utf-8")).digest()
+            return int.from_bytes(digest[:8], "big") % self.hidden_dim
+
         def get_action(self, obs, hidden=None, epsilon: float = 0.1):
             if random.random() < epsilon:
                 return random.randint(0, self.n_actions - 1), hidden
             # 简易Q表查表策略（比纯随机略好）
-            state_idx = int(abs(hash(str(obs.tolist() if hasattr(obs, 'tolist') else obs))) % self.hidden_dim)
+            state_idx = self._state_index(obs)
             return int(np.argmax(self._q_table[state_idx])), hidden
 
         def train(self, obs, action, reward, next_obs, done, lr=0.01, gamma=0.8):
             """简易Q-learning更新（单步更新）"""
-            state_idx = int(abs(hash(str(obs.tolist() if hasattr(obs, 'tolist') else obs))) % self.hidden_dim)
-            next_state_idx = int(abs(hash(str(next_obs.tolist() if hasattr(next_obs, 'tolist') else next_obs))) % self.hidden_dim)
+            state_idx = self._state_index(obs)
+            next_state_idx = self._state_index(next_obs)
             td_target = reward + (0 if done else gamma * np.max(self._q_table[next_state_idx]))
             td_error = td_target - self._q_table[state_idx, action]
             self._q_table[state_idx, action] += lr * td_error
