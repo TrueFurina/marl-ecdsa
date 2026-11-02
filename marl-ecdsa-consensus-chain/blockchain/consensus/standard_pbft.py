@@ -13,6 +13,7 @@ Standard Practical Byzantine Fault Tolerance
 """
 import logging
 import time
+from dataclasses import replace
 from typing import Dict, List, Optional, Set
 
 from .cw_pbft import ConsensusState, ConsensusVote
@@ -90,9 +91,36 @@ class StandardPBFTConsensus:
         if vote.block_hash != self._current_block_hash:
             return None
 
+        # 11-03 修复：把 CW-PBFT 早已具备的「女巫门控」同步到等权基线。
+        #
+        # CW-PBFT 在 09-28（全检 #2）就加了「非共识成员身份一律拒收」，但等权
+        # 基线漏了同一个门控。而 `_check_vote_threshold` 是按
+        # `len(self._votes[phase])`（投票者个数）计数的 —— 只要塞进任意伪造的
+        # voter_id，就能凭空凑够 ceil(2n/3)。
+        #
+        # 已实测：n=4（阈值 3）时，单个节点在**零个真实对等节点**参与的情况下，
+        # 用 ghost_1/ghost_2/ghost_3 三个捏造身份即可跑完 PREPARE→COMMIT 并宣布
+        # 共识达成；同一组伪造投票在 CW-PBFT 下被全部拒收。等权基线是对比实验
+        # 的对照组（factory 用 `mode='standard_pbft'` 创建），它的共识安全属性
+        # 不应弱于被对照的对象。
+        if vote.voter_id not in self._weights:
+            logger.warning(
+                f"[PBFT] 拒收非成员投票（女巫门控）: voter={vote.voter_id}"
+            )
+            return None
+
+        # 自报 weight 不作为第二个可信通道：等权模式下权威值恒为 1.0。
+        # 存副本而非就地改写入参，避免对调用方持有的对象产生隐式副作用。
+        stored = vote if vote.weight == 1.0 else replace(vote, weight=1.0)
+        if stored.weight != vote.weight:
+            logger.warning(
+                f"[PBFT] 投票权重纠偏（等权）: voter={vote.voter_id} "
+                f"自报={vote.weight:.4f} → 权威=1.0000"
+            )
+
         phase = vote.phase
         if phase in self._votes:
-            self._votes[phase][vote.voter_id] = vote
+            self._votes[phase][vote.voter_id] = stored
 
         if phase == 'prepare' and self._state == ConsensusState.PREPARE:
             if self._check_vote_threshold('prepare'):
