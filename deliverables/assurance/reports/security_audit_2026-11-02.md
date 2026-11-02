@@ -3,7 +3,7 @@
 - 生成时间：2026-11-02T23:15+08:00
 - 审计范围：`blockchain/crypto`、`blockchain/consensus`、`blockchain/network`、`blockchain/ledger`、`blockchain/contracts`、`marl/algorithms`、`marl/analysis`
 - 方法：**源码审读 + 定向差分/性质测试**（经典博弈已知均衡、跨进程确定性、形状不变量），不依赖随机 fuzz
-- 结论：发现 **5 处缺陷**，全部已修复并带回归；全量 `1782 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
+- 结论：发现 **6 处缺陷**，全部已修复并带回归；全量 `1791 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
 
 ## 汇总
 
@@ -14,6 +14,7 @@
 | 3 | 中（正确性） | `marl/analysis/nash_verifier.py` | 混合策略纳什均衡被漏报 | `c0ba7ab` |
 | 4 | 中（可复现性） | `marl/algorithms/qmix.py` | NumPy 回退用内建 `hash()`，受 `PYTHONHASHSEED` 影响 | `2ba2a52` |
 | 5 | 高（训练正确性） | `marl/algorithms/mappo.py` | Critic 回归目标与 `v_pred` 错位 | `9878a69` |
+| 6 | **严重（安全）** | `blockchain/crypto/ecdsa_utils.py` | 签名与载荷解绑：复用公开历史签名可伪造任意交易 | `597cabe` |
 
 ---
 
@@ -82,6 +83,35 @@ r='123' (str)    -> (True, 'OK')   # 同一个 r，字符串形式
 
 **验证**：`tests/test_mappo_critic_targets.py`（纯 numpy，无需 torch）3 条。
 
+## 6. 严重：签名与载荷解绑（复用公开签名即可伪造任意交易）
+
+**根因**：`verify_action_package` 只对 `package['message_hex']` 里的字节验签，而 `message_hex` 是**交易自带字段**。`Blockchain._validate_new_block` 虽然把 `tx.agent_id / action / timestamp / nonce` 拼成 package 传了进去，该函数却**完全不看**这些字段——于是「签名覆盖的字节」与「交易声称的载荷」之间没有任何绑定。
+
+更糟的是，`message_hex` 就存在链上 `tx.extra['message_hex']` 里，**每个 agent 的历史签名消息都是公开的**。
+
+**影响**：任何人拿到 agent_A 一条无害行为的签名，就能以 agent_A 的名义写入任意行为：
+
+1. 从链上取 agent_A 对 `{"type":"idle"}` 的签名 + 消息体；
+2. 伪造一笔 agent_A 的 `{"type":"transfer","amount":999999}`；
+3. 把旧 `message_hex` / `signature_hex` 原样贴上，`nonce` 换新（重放防护不触发）。
+
+验签通过、区块校验通过。签名机制形同虚设——它证明「某人签过某段字节」，却被当成「某人授权了这笔交易」。
+
+**复现**（修复前 → 修复后）：
+
+```
+受害者签 {"type": "idle"}（nonce=1）
+攻击者构造 agent_A / {"type":"transfer","amount":999999} / nonce=99999
+        + 受害者的 message_hex + signature_hex
+Blockchain._validate_new_block(block) = True  →  False
+```
+
+**修复**：`verify_action_package` 增加载荷绑定校验——package 若携带 `agent_id / action / timestamp / nonce`，就解析 `message_hex` 中真正被签的内容，逐项比对 `agent_id` / `nonce` / `timestamp` / `action_hash`（`action_hash` 由 `action` 重算）。不一致即拒绝。
+
+收口点选在 `verify_action_package` 而非 `blockchain.py`：账本（`blockchain.py`）、签名服务（`signing_service.py`）、合谋检测验签门（`cooperation_detector.py`）三个调用方都走这里，一处修全覆盖。
+
+**验证**：`tests/test_signature_payload_binding.py` 9 条——正常签名包仍通过、换 `action`/`nonce`/`timestamp`/`agent_id` 复用签名全部拒绝、区块层端到端拒绝伪造交易且接受真实交易、旧式纯字节包语义不变、`int`/`float` 时间戳不误杀；相关子系统 **642 passed**。
+
 ---
 
 ## 验证口径
@@ -92,7 +122,8 @@ pytest tests/test_security_guard_type_confusion.py \
 pytest tests/test_nash_verifier_canonical.py tests/test_nash_verifier*.py  # 34 passed
 pytest tests/test_qmix_state_index_determinism.py                    # 2 passed
 pytest tests/test_mappo_critic_targets.py                            # 3 passed
-pytest tests/ -q                                                     # 1782 passed / 48 skipped
+pytest tests/test_signature_payload_binding.py                       # 9 passed
+pytest tests/ -q                                                     # 1791 passed / 48 skipped
 ```
 
 ## 剩余风险（诚实说明）
@@ -100,3 +131,5 @@ pytest tests/ -q                                                     # 1782 pass
 - 本次审计是**定向**的（读源码 + 构造判据），不是全量形式化验证；未覆盖的路径不能据此认为安全。
 - `network_consensus` 的签名验证依赖 `key_manager` 配置；未配置时默认 fail-closed（拒绝），但**纯连通性测试模式**（`_allow_insecure_vote`）不真验签，仅用于非生产场景。
 - MAPPO 的 PyTorch 路径在本机缺 `torch`，相关训练测试在 CI 才完整执行；本次对 Critic 目标的修复用纯 numpy 不变量做了离线回归。
+- 第 6 项的绑定校验只覆盖「package 携带四个字段」的路径。若将来新增调用方只传 `message_hex + signature_hex`（纯字节验签），绑定校验不会生效——**账本与签名服务路径必须继续传全字段**，这一点已写进函数 docstring。
+- 绑定校验**没有**引入「低 s 归一化」，因此 ECDSA 可塑性（`(r, s)` 与 `(r, n-s)` 都合法）仍然存在。当前不影响本链的授权语义（tx_id 由 `agent_id/action_hash/timestamp/nonce/tx_type` 计算，不含签名），但若将来把签名纳入 tx_id，必须同时做低 s 归一化，否则会出现 txid 可变。
