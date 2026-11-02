@@ -196,9 +196,29 @@ footer .brand{color:var(--blue);font-weight:700}
   </div>
 </section>
 
+
+<section id="methodology">
+  <div class="wrap">
+    <div class="sec-tag">05 · METHODOLOGY</div>
+    <h2>诚实不是口号，是一个能 <code>exit 1</code> 的 CI 门禁</h2>
+    <p class="tag" style="color:var(--dim);margin:10px 0 18px">本项目把"诚实披露"做成了静态扫描基础设施，四条规则全部可审计、可复现，源自源码研究沉淀为独立方法论仓。</p>
+    <img src="assets/banners/honesty-four-patterns.png" alt="诚实基础设施四巧思横幅" style="width:100%;border-radius:10px;margin:6px 0 22px;opacity:.92">
+    <div class="grid g3">
+      <div class="card"><h3>🚫 Block Known Patterns</h3><p>放弃语义理解，用静态拒绝列表<code>FORBIDDEN_PHRASES</code> 只拦已知回潮："approximately"、"TODO"、"??%" 等。<code>exit 1</code> 即阻断，不靠 LLM，确定性无歧义。</p></div>
+      <div class="card"><h3>💬 Mention ≠ Use</h3><p>用<code>_QUOTE_RE</code> 先剥内联代码、代码块和引用标记再匹配，避免"说明性引用坏模式"触发误报——能解释规则的文档，不应被规则误伤。</p></div>
+      <div class="card"><h3>📋 Void, Don't Delete</h3><p>推翻数字不删除，打<code>[SUPERSEDED:date]</code> / <code>[VOIDED:reason]</code> 标记（<code>EXEMPT_MARKERS</code> 30+ 词），作废留痕进 Git 历史，为未来贡献者保留审计线索。</p></div>
+    </div>
+    <div class="grid g3" style="margin-top:14px">
+      <div class="card"><h3>📖 Registry First</h3><p><code>number_registry.json</code> 是预写日志：任何要进 README/figure/主页的数字，必须先在登记簿里登记来源、复算公式与日期；没登记的数字在 PR 阶段被 <code>exit 1</code> 拦下。</p></div>
+      <div class="card"><h3>🔗 为什么能落地</h3><p>静态门禁 = 零 LLM、零外部依赖，作为 GitHub Actions step 或 pre-commit hook 即可生效。规则即代码，任何人可审计、可拒绝、可改进。</p></div>
+      <div class="card" style="display:flex;align-items:center;justify-content:center"><a class="btn primary" href="https://github.com/TrueFurina/honesty-ci-patterns" target="_blank">🔍 honesty-ci-patterns<br><span style="font-size:.82rem;color:var(--dim)">方法论文全文 + 英文版 README</span></a></div>
+    </div>
+  </div>
+</section>
+
 <section id="download">
   <div class="wrap">
-    <div class="sec-tag">05 · DOWNLOAD</div>
+    <div class="sec-tag">06 · DOWNLOAD</div>
     <h2>下载部署：三平台 + 免安装在线版</h2>
     <div class="dlbox">
       <div class="dlrow">
@@ -230,7 +250,7 @@ footer .brand{color:var(--blue);font-weight:700}
 
 <section id="notice">
   <div class="wrap">
-    <div class="sec-tag">06 · NOTICE</div>
+    <div class="sec-tag">07 · NOTICE</div>
     <h2>授权与边界声明</h2>
     <div class="notice">
       <div class="card"><h3>📋 使用边界</h3><p>本项目为科研与教学演示用途；共识机制为演示级实现（自签名 ECDSA，未接 CA/PKI），实验环境为 SimpleSpread 基准与受控部署场景，<b style="color:var(--text)">不构成生产区块链系统的安全承诺</b>。</p></div>
