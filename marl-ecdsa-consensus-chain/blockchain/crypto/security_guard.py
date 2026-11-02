@@ -14,6 +14,26 @@ from typing import Dict, Set, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _coerce_int(v) -> Optional[int]:
+    """把字段归一成整数：接受 int 与数字字符串，其余（float/bool/None/其它）一律 None。
+
+    为什么要归一（2026-11-02 实测的两个洞）：
+
+    1. **`r` 直接当 dict 键用**：`123` 与 `"123"` 是两个不同的键。攻击者只要把同一个
+       r 换成字符串形式重发，就能绕过 k 重用检测——而 k 重用可直接推导私钥。
+    2. **时间戳/nonce 非整数会让比较抛 TypeError**：`timestamp="x"` 直接把守卫打成
+       未捕获异常（DoS），而不是"拒绝这个包"。
+
+    归一后非整数一律 fail-closed（返回 None，由调用方拒绝）。
+    """
+    if isinstance(v, bool) or not isinstance(v, (int, str)):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 class SecurityGuard:
     """
     ECDSA安全防护守卫
@@ -82,6 +102,9 @@ class SecurityGuard:
         ts = package.get('timestamp')
         if ts is None:
             return False, "缺少时间戳字段"
+        ts = _coerce_int(ts)
+        if ts is None:
+            return False, "时间戳字段不是整数（无法判定有效期，按不合规包拒绝）"
         now_ms = int(time.time() * 1000)
         delta = abs(now_ms - ts)
         if delta > self.TIMESTAMP_TOLERANCE_MS:
@@ -97,6 +120,9 @@ class SecurityGuard:
         nonce = package.get('nonce')
         if nonce is None:
             return False, "缺少nonce字段"
+        nonce = _coerce_int(nonce)
+        if nonce is None:
+            return False, "nonce字段不是整数（无法判定单调性，按不合规包拒绝）"
 
         last_nonce = self._nonce_registry.get(agent_id)
         if last_nonce is not None and nonce <= last_nonce:
@@ -149,6 +175,13 @@ class SecurityGuard:
                     "签名包缺少r字段（有 signature_hex/s 却无 r）——"
                     "无法执行k值重用检测，按不合规包拒绝")
             return True, 'OK'
+
+        # 归一成整数：`123` 与 `"123"` 必须是同一个 r，否则字符串形式可绕过检测。
+        r = _coerce_int(r)
+        if r is None:
+            return False, (
+                "r 字段不是整数——无法执行k值重用检测，按不合规包拒绝"
+                "（同一个 r 用字符串/浮点形式重发会绕过检测，k 重用可直接推导私钥）")
 
         known_rs = self._r_registry[agent_id]
         if r in known_rs:
