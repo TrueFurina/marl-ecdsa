@@ -8,6 +8,7 @@
 - ⬇ 下载 Dashboard：见 Releases
 - 📊 全部对外数字登记于 [`number_registry.json`](marl-ecdsa-consensus-chain/number_registry.json)（含数据源与复算口径；条数以文件为准），原始运行数据 142 次随包发布
 - 📐 本页展示的是 **n=71 基线口径**（NR-1 / NR-2）；后续扩种口径以登记簿为准
+- 🔍 诚实性基础设施方法论：[`honesty-ci-patterns`](https://github.com/TrueFurina/honesty-ci-patterns) —— 把「诚实」做成能 exit 1 的 CI 门禁（源自本项目源码研究）
 
 ## 这个交叉点是什么
 
