@@ -3,7 +3,7 @@
 - 生成时间：2026-11-02T23:15+08:00
 - 审计范围：`blockchain/crypto`、`blockchain/consensus`、`blockchain/network`、`blockchain/ledger`、`blockchain/contracts`、`marl/algorithms`、`marl/analysis`
 - 方法：**源码审读 + 定向差分/性质测试**（经典博弈已知均衡、跨进程确定性、形状不变量），不依赖随机 fuzz
-- 结论：发现 **8 处缺陷**，全部已修复并带回归；全量 `1807 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
+- 结论：发现 **9 处缺陷**，全部已修复并带回归；全量 `1820 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
 
 ## 汇总
 
@@ -17,6 +17,7 @@
 | 6 | **严重（安全）** | `blockchain/crypto/ecdsa_utils.py` | 签名与载荷解绑：复用公开历史签名可伪造任意交易 | `597cabe` |
 | 7 | 高（共识安全） | `blockchain/consensus/standard_pbft.py` | 等权基线缺女巫门控：伪造 voter_id 即可凑够 Quorum | `4760fa9` |
 | 8 | 中（指标失真） | `blockchain/consensus/cw_pbft_failover.py` | 心跳缺省值 0 被判「纪元 0 发过」→ 每轮虚假视图切换 | `7caa0d8` |
+| 9 | 高（激励正确性） | `blockchain/contracts/incentive_contract.py` | NaN 奖励被钳成满分 → 算崩的智能体拿最高激励；NaN 还可永久污染账本 | `8ba090c` |
 
 ---
 
@@ -167,6 +168,36 @@ View change: node_0(primary_timeout) → node_1 (view=1)
 
 **验证**：`tests/test_failover_heartbeat_semantics.py` 8 条 —— 全新引擎不误判超时、正常轮不产生 failover 记录、显式补心跳同样不触发、心跳过旧仍判超时（防误放）、注入拜占庭仍触发切换（防漏报）、重置后不退回到「一律超时」；failover 相关 **14 passed**。
 
+## 9. 高：NaN 奖励被钳成满分（算崩的智能体反而拿最高激励）
+
+**根因**：奖励/贡献的钳位写成 `max(low, min(high, x))`。`min`/`max` 的比较对 NaN 恒为 False，NaN 会被原样「保留在上界」：
+
+```
+max(0.0, min(1.0, float('nan'))) == 1.0
+```
+
+**影响**：
+
+1. **逆向激励**：NaN 通常来自策略发散 / 除零 / env bug。把 NaN 记成满分，等于奖励「制造 NaN」；这条 delta 还会经 `total = env + λ·bc` 回流到策略奖励，形成闭环。
+2. **账本永久污染**：`WorldState.add_score` 不拦 NaN，一旦写进去 `NaN + x` 恒为 NaN，该智能体积分再也救不回来（实测：写入 NaN 后再加 5 仍是 NaN），并会污染 `cumulative_contribution` 与排行榜排序。
+
+**复现**（修复前）：
+
+```
+good   (env_reward=0.0) → task=0.4286, delta=17.71
+broken (env_reward=NaN) → task=1.0000, delta=20.00   ← 谁算崩了谁拿钱最多
+```
+
+**修复**：
+
+- 新增 `clamp_finite()`：非有限值（NaN/±inf）一律返回 `fallback=0.0`，并在带 `field` 时打 WARNING（可定位到具体智能体与字段）；
+- 收口五处：`compute_contribution` 的 `task_score`、`settle_rewards` 的 `weighted_score`、`compute_contribution_scores` 的奖励归一化、`compute_total_reward` 的 `bc_reward` 裁剪、`_simulate_settlement`；
+- `WorldState.add_score` 改为「非有限值即拒收」（fail-closed，不静默钳位），保证账本里不可能出现 NaN。
+
+选择「按 0 记」而非「抛异常」：训练循环里抛异常会中断长跑，而 0 的语义是「无有效贡献」，既不奖励垃圾也不掩盖问题（有 WARNING）。
+
+**验证**：`tests/test_incentive_nonfinite_guard.py` 13 条 —— NaN 不成为最高分、算崩的智能体不再比正常的高、账本拒收 NaN/inf 且不被污染、累计贡献不被污染、`bc_reward=NaN` 不静默送 `λ*20`、**正常值路径逐项不变**（防误伤）。
+
 ---
 
 ## 验证口径
@@ -180,7 +211,8 @@ pytest tests/test_mappo_critic_targets.py                            # 3 passed
 pytest tests/test_signature_payload_binding.py                       # 9 passed
 pytest tests/test_standard_pbft_sybil_gate.py                        # 8 passed
 pytest tests/test_failover_heartbeat_semantics.py                    # 8 passed
-pytest tests/ -q                                                     # 1807 passed / 48 skipped
+pytest tests/test_incentive_nonfinite_guard.py                       # 13 passed
+pytest tests/ -q                                                     # 1820 passed / 48 skipped
 ```
 
 ## 剩余风险（诚实说明）
@@ -188,6 +220,7 @@ pytest tests/ -q                                                     # 1807 pass
 - 本次审计是**定向**的（读源码 + 构造判据），不是全量形式化验证；未覆盖的路径不能据此认为安全。
 - `network_consensus` 的签名验证依赖 `key_manager` 配置；未配置时默认 fail-closed（拒绝），但**纯连通性测试模式**（`_allow_insecure_vote`）不真验签，仅用于非生产场景。
 - MAPPO 的 PyTorch 路径在本机缺 `torch`，相关训练测试在 CI 才完整执行；本次对 Critic 目标的修复用纯 numpy 不变量做了离线回归。
+- 第 9 项把非有限值统一按「无有效贡献」记 0，而不是抛异常——这是为了不打断长跑训练，代价是上游的 NaN 不会被当成致命错误。若将来接入生产结算，建议把 WARNING 升级为可选严格模式（类似 `MARL_ECDSA_REQUIRE_KEY_PASSPHRASE` 的开关）。
 - 第 8 项修复后，`simulate_byzantine_primary_attack` 仍有 15/20 轮触发切换：拜占庭标记一旦打上就永久生效，没有「节点恢复后重新准入」的路径，而出块轮转每 10 块才换主。这是设计取舍（悲观地把作恶节点永久排除），不是缺陷；但如果论文要报「failover 次数」，应同时给出 `byzantine_events`，否则 15 这个数会被误读成 15 次拜占庭。
 - 第 6 项的绑定校验只覆盖「package 携带四个字段」的路径。若将来新增调用方只传 `message_hex + signature_hex`（纯字节验签），绑定校验不会生效——**账本与签名服务路径必须继续传全字段**，这一点已写进函数 docstring。
 - 绑定校验**没有**引入「低 s 归一化」，因此 ECDSA 可塑性（`(r, s)` 与 `(r, n-s)` 都合法）仍然存在。当前不影响本链的授权语义（tx_id 由 `agent_id/action_hash/timestamp/nonce/tx_type` 计算，不含签名），但若将来把签名纳入 tx_id，必须同时做低 s 归一化，否则会出现 txid 可变。
