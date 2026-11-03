@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MARL-ECDSA 共识链 — 面向协作多智能体的可信共识与激励机制</title>
-<meta name="description" content="ECDSA 签名存证 + CW-PBFT 贡献加权共识 + 链上激励融合 MARL 奖励。主结局 +25.75%（末 50 回合 env_reward，n=101/组，Welch p=0.003348、Cohen d=0.42），六类签名攻击 100% 拦截，2183 项测试全通过，诚实负结果完整披露。">
+<meta name="description" content="ECDSA 签名存证 + CW-PBFT 贡献加权共识 + 链上激励融合 MARL 奖励。主结局 全程 env_reward +6.54%（n=101/组，Welch p=6.85e-11、Cohen d=0.971，λ 进梯度机制修复后同种子复现），六类签名攻击 100% 拦截，2183 项测试全通过，诚实负结果完整披露。">
 <meta property="og:title" content="MARL-ECDSA 共识链">
 <meta property="og:description" content="面向协作多智能体的可信共识与激励机制 — ECDSA 存证 · CW-PBFT · 链上激励 · 诚实负结果">
 <meta property="og:image" content="assets/og.png">
@@ -113,11 +113,11 @@ footer .brand{color:var(--blue);font-weight:700}
     <a class="btn ghost" href="https://github.com/TrueFurina/marl-ecdsa">GitHub 仓库</a>
   </div>
   <div class="chips">
-    <span class="chip"><b>+25.75%</b> env_reward（末 50 回合 · n=101/组）</span>
+    <span class="chip"><b>+6.54%</b> 全程 env_reward（n=101/组 · 修复后复现）</span>
     <span class="chip"><b>6/6</b> 签名攻击族拦截</span>
     <span class="chip g"><b>0→97.3%</b> 容错活性恢复</span>
     <span class="chip"><b>2183</b> 项测试 · 0 失败</span>
-    <span class="chip"><b>189</b> 条登记数字全部可复算</span>
+    <span class="chip"><b>191</b> 条登记数字全部可复算</span>
   </div>
 </div>
 
@@ -175,9 +175,9 @@ footer .brand{color:var(--blue);font-weight:700}
     <h2>实测证据（全部可独立复算）</h2>
     <table class="ev">
       <tr><th>维度</th><th>结果</th><th>真值源</th></tr>
-      <tr><td>主结局（末 50 回合 env_reward，不含 BC 激励）</td><td class="num">+25.75%，n=101/组，Welch p=0.003348，d=0.42，95%CI [0.8236, 4.08]（BH-FDR 显著 / Bonferroni 不显著）</td><td class="src">NR-1</td></tr>
-      <tr><td>同数据全程口径（必须与主口径同报）</td><td class="num">+7.7%，p=1.14e-14，d=1.17，检验力≈1.0</td><td class="src">NR-2</td></tr>
-      <tr><td>全程平均合作率</td><td class="num">+1.92%，p=1.50e-14，d=1.17</td><td class="src">NR-3 / NR-135</td></tr>
+      <tr><td>主结局（全程 env_reward，不含 BC 激励 · λ 进梯度机制修复后同种子复现）</td><td class="num">+6.54%，n=101/组，Welch p=6.85e-11，MW p=5.36e-10，d=0.971，95%CI [1.626, 2.906]（不含 0）</td><td class="src">NR-202</td></tr>
+      <tr><td>主口径稳健性：原初批 / 跨种子泛化（三批同报）</td><td class="num">+7.70%（p=1.14e-14，d=1.17）／+6.61%（p=8.2e-12，d=1.03），三批方向一致、稳健显著</td><td class="src">NR-2 / NR-203</td></tr><tr><td>末 50 回合 env_reward（机制修复后同种子复测）</td><td class="num">+3.24%，p=0.733，d=0.048，95%CI [-1.34, 1.93] 含 0 —— <b>不显著</b>；修复前 +25.75% 已撤回，不得作现行口径</td><td class="src">NR-201</td></tr>
+      <tr><td>全程平均合作率（<b>修复前批次</b>，修复后复测未登记）</td><td class="num">+1.92%，p=1.50e-14，d=1.17</td><td class="src">NR-3 / NR-135</td></tr>
       <tr><td>跨算法等样本量对照（各 n=30）</td><td class="num">仅 QMIX 显著（+5.23，p=0.015，d=0.648）；IQL/VDN/MAPPO 不显著</td><td class="src">NR-63~66</td></tr>
       <tr><td>签名层攻击（6 类 × 50 次）</td><td class="num">100% 拦截，每类 Wilson 下界 ≥92.9%</td><td class="src">NR-30</td></tr>
       <tr><td>容错（40% 省略故障，n=16）</td><td class="num">共识成功率 0 → 97.3%（活性恢复，非任意对手安全界）</td><td class="src">NR-38</td></tr>

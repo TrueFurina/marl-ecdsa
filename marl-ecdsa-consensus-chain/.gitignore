@@ -61,3 +61,7 @@ qa_run.log
 server_err.log
 _start_server_tmp.py
 _start_server_tmp.bat
+
+# 运行时实例数据（2026-11-03 追加）：含 session_secret / accounts.sqlite3 /
+# business.sqlite3 / training_logs，属本机运行产物与凭据，禁止入库。
+instance/

@@ -7,11 +7,14 @@
 
 **中文版**: [README.zh.md](README.zh.md)
 
-## 口径声明（Caliber Statement · 2026-10-18 起）
+## 口径声明（Caliber Statement · 以登记簿为准）
 
-> 📌 **现行主口径为 n=101 种子/组**（`number_registry.json` → NR-129 末 50 / NR-134 全程 / NR-135 合作率）：末 50 `env_reward` **+25.75%**（Welch p=0.003348，Cohen d=0.42）、全程 **+7.70%**（p=1.1×10⁻¹⁴）、合作率 **+1.92%**（p=1.5×10⁻¹⁴）。**三口径在 Bonferroni / BH-FDR / Holm 下均显著，必须同报**。
-> ⚠️ **必须同报的披露**：新增 30 对独立种子（2001-2030）**单独不显著**（Welch p=0.169，点估计 +20.5%，power≈0.42）；⛔ 禁只报末 50 +25.75%。
-> 🗂 **历史基线（仍登记、仍可引用，但不得作为「现行主口径」单独出现）**：n=71 口径 **+28.17% / +7.92%**（NR-1 / NR-2；p=0.0095 —— BH-FDR 显著 / Bonferroni 不显著）。
+> 📌 **现行主口径 = 全程协作增益**（`number_registry.json`，n=101/组，全程 `summary.avg_env_reward`，不含 BC 激励）：
+> · **NR-202 +6.54%**（Welch p=6.85×10⁻¹¹，Mann-Whitney p=5.36×10⁻¹⁰，Cohen d=0.971，95%CI [1.626, 2.906] 不含 0）—— **λ 真正进入训练梯度后同种子复现，主效应存活**；
+> · NR-2 **+7.70%**（原初批，p=1.1×10⁻¹⁴，d=1.17）；NR-203 **+6.61%**（跨种子 301–400 泛化，p=8.2×10⁻¹²，d=1.03）。
+> **三批方向一致、稳健显著**；机制修复后幅度较修复前（NR-134）略降，须并排引用两代读数并标注机制差异。
+> ⛔ **末 50 回合 +25.75%（NR-1/NR-129）属「λ 未进梯度」修复前读数，不得作为现行主口径引用。** 修复后同种子重跑（NR-201）末 50 为 **+3.24%，Welch p=0.733，d=0.048，95%CI [-1.34, 1.93] 含 0 —— 不显著**。
+> 🗂 **历史基线（仍登记、仅供追溯）**：n=71 口径 **+28.17% / +7.92%**（NR-1 / NR-2 原初批，p=0.0095 —— BH-FDR 显著 / Bonferroni 不显著）。
 
 ## 中文摘要（Chinese Summary）
 
@@ -49,7 +52,7 @@
 - **Parameter-boundary derivation & numerical verification of strict-dominant-strategy Nash (NOT machine-checked formal proof)**: strict proof with parameter bounds and 50% safety margin; **post-quantum ML-DSA-44 (CRYSTALS-Dilithium2) adapter IMPLEMENTED** via `dilithium-py` — real keygen/sign/verify (pure-Python backend, no native acceleration); signature 2420 B / public key 1312 B / private key 2560 B; cold-mean sign 44.64 ms (SD 32.40) / verify 10.40 ms, warm-median sign 17.04 ms / verify 4.15 ms — jitter is large, cite only intervals or dual values, never a single point; ~2 orders of magnitude slower than ECDSA; **adapter ready but NOT wired into main chain (P2, independent module) — default signing path still ECDSA**, so the system as a whole is not yet quantum-resistant.
 - **Self-built Gossip discovery**: asyncio-based dynamic peer discovery tuned for MARL scenarios.
 - **Full-chain cryptographic auditability**: sign → Guard → Tx → Block → consensus.
-- **Rigorous experiments**: ablation matrix, λ-sensitivity and multi-seed statistics, reported under an honest caliber (current headline: **n=101 seeds, +25.75%, p=0.003348, d=0.42 — significant under Bonferroni / BH-FDR / Holm**, with the 30 added pairs disclosed as non-significant on their own; historical n=71 baseline +28.17%, p=0.0095. See [Experiments & Results](#-experiments--results)).
+- **Rigorous experiments**: ablation matrix, λ-sensitivity and multi-seed statistics, reported under an honest caliber (current headline: **whole-run +6.54% at n=101 (NR-202, p=6.85×10⁻¹¹, d=0.971), robust to the F01 mechanism fix**; the pre-fix last-50 +25.75% is retracted (post-fix +3.24%, p=0.733, not significant); historical n=71 baseline +28.17%, p=0.0095. See [Experiments & Results](#-experiments--results)).
 
 ---
 
@@ -142,7 +145,9 @@ Set `consensus_mode` in `config.json`: `cw_pbft` (default) / `standard_pbft` / `
 
 ## Experiments & Results
 
-**Headline metric (current authoritative caliber, n=101/group).** After **3000-episode** full convergence, BC-MARL improves the **pure environment reward (`env_reward`, excluding the BC incentive)** by **+25.75%** over Pure-MARL on the last-50-episode caliber. This is based on **n = 101 independent seeds per group** (71 baseline + 30 added pairs, seeds 2001-2030); Welch **p = 0.003348**, Cohen's **d = 0.42** (small-to-medium effect), bootstrap 95% CI [0.8236, 4.08] (excludes 0). The effect is **significant under Bonferroni / BH-FDR / Holm** — but the **30 newly added pairs alone are NOT significant** (Welch p=0.169, point estimate +20.5%, power≈0.42), and this must always be co-reported. Do **not** quote the last-50 figure alone.
+**Headline metric — current authoritative caliber: whole-run cooperation gain (全程协作增益), n=101/group.** After **3000-episode** full convergence, BC-MARL improves the **pure environment reward (`env_reward`, excluding the BC incentive)** over Pure-MARL by **+6.54%** on the whole-run caliber (**NR-202**: −32.4286 ± 2.2913 vs −34.6982 ± 2.3849; Welch **p = 6.85×10⁻¹¹**, Mann-Whitney p = 5.36×10⁻¹⁰, Cohen's **d = 0.971**, bootstrap 95% CI **[1.626, 2.906]** excluding 0). This is the **same-seed re-run after the F01 mechanism fix** (λ actually entering the training gradient) — the main effect **survives the fix**. Two further batches agree in direction: **NR-2 +7.70%** (original batch, p=1.1×10⁻¹⁴, d=1.17) and **NR-203 +6.61%** (cross-seed generalization, seeds 301–400, p=8.2×10⁻¹², d=1.03). The post-fix amplitude is slightly lower than the pre-fix reading (NR-134 +7.70%); the two generations must be quoted side by side with the mechanism difference labelled.
+
+> ⛔ **Retracted as current headline: last-50 `env_reward` +25.75% (NR-1 / NR-129).** That figure is a **pre-F01-fix** reading (λ not in the training gradient). After the fix, the same-seed last-50 result is **+3.24%, Welch p=0.733, d=0.048, 95% CI [−1.34, 1.93] containing 0 — not significant** (NR-201). It must not be quoted as the current last-50 caliber.
 
 **Historical baseline (n=71/group — still registered in `number_registry.json`, kept for traceability only; NOT the current headline).** The table below is the original n=71 baseline: **+28.17%**, Welch p=0.0095 (**BH-FDR significant / Bonferroni non-significant**), d=0.441, 95% CI [0.648, 4.576], post-hoc power = 0.74.
 
@@ -151,17 +156,18 @@ Set `consensus_mode` in `config.json`: `cw_pbft` (default) / `standard_pbft` / `
 | **BC-MARL** | **-6.658 ± 6.045** | 62.46% ± 0.94% | 71 | (baseline) |
 | Pure-MARL | -9.270 ± 5.792 | 61.27% ± 1.07% | 71 | 0.0095 (**) |
 
-*Table above = historical n=71 baseline. Current n=101 authoritative readings: last-50 `env_reward` **+25.75%** (p=0.003348, d=0.42); whole-run `env_reward` **+7.70%** (p=1.1×10⁻¹⁴, d=1.17); whole-run cooperation rate **0.6250 vs 0.6132 = +1.92%** (p=1.5×10⁻¹⁴, d=1.17).*
+*Table above = historical n=71 baseline (pre-F01-fix). Current authoritative whole-run `env_reward`: **+6.54%** (NR-202, p=6.85×10⁻¹¹, d=0.971) / **+7.70%** (NR-2, p=1.1×10⁻¹⁴, d=1.17) / **+6.61%** (NR-203, p=8.2×10⁻¹², d=1.03). Current last-50: **+3.24%, p=0.733 — not significant** (NR-201).*
 
-- **BC vs Pure (`env_reward`, current n=101)**: **+25.75%** relative, **p=0.003348, d=0.42 — significant under Bonferroni / BH-FDR / Holm** (bootstrap 95% CI [0.8236, 4.08] excludes 0). ⚠️ The 30 newly added seed pairs alone are **not** significant (p=0.169, +20.5%) and must be co-reported.
-- **BC vs Pure (`env_reward`, historical n=71)**: +28.17% relative, **n=71, p=0.0095, d=0.441 — BH-FDR significant / Bonferroni non-significant** (95% CI [0.648, 4.576] excludes 0). Kept for traceability; not the headline.
+- **BC vs Pure (`env_reward`, current — whole-run, n=101)**: **+6.54%** (NR-202), **p=6.85×10⁻¹¹, d=0.971**, 95% CI [1.626, 2.906] excludes 0 — **robust to the F01 mechanism fix**, and the current headline.
+- **BC vs Pure (`env_reward`, current — last-50, n=101)**: **+3.24%, p=0.733, d=0.048 — NOT significant** (NR-201). The earlier **+25.75%** (NR-1 / NR-129) is a **pre-fix** reading and is **retracted** as the current last-50 caliber.
+- **BC vs Pure (`env_reward`, historical n=71, pre-fix)**: +28.17% relative, **n=71, p=0.0095, d=0.441 — BH-FDR significant / Bonferroni non-significant** (95% CI [0.648, 4.576] excludes 0). Traceability only; not the headline.
 - **Retired historical calibers**: earlier revisions cited two comparison calibers — V3.7 (500 episodes, not converged) and V2 (1000 episodes, BC incentive included). Both are **retired and no longer referenced**: neither is comparable with the competition's unified `env_reward` caliber (a `total_reward` that bundles the BC incentive is not the same quantity). See the caliber registry in `number_registry.json`.
-- **Whole-run cooperation rate**: over the full 3000-episode run, at **n=101/group** BC-MARL averages **0.6250** vs Pure-MARL **0.6132**, i.e. **+1.92%, Welch p = 1.5×10⁻¹⁴, Cohen d = 1.17** — a highly significant, large-effect improvement. (Historical n=71 reading: 0.6246 ± 0.0094 vs 0.6127 ± 0.0107, **+1.95%**, d=1.19.) Note this is a *different caliber* from the `env_reward` headline above (whole-run average vs last-50 average) and the two must not be mixed.
+- **Whole-run cooperation rate (pre-fix batch, n=101)**: 0.6250 vs 0.6132, i.e. **+1.92%, Welch p = 1.5×10⁻¹⁴, Cohen d = 1.17** (NR-135; historical n=71 reading 0.6246 ± 0.0094 vs 0.6127 ± 0.0107 = +1.95%, d=1.19). ⚠️ **This reading comes from the pre-fix batch (same batch as NR-134); a post-F01-fix re-measurement of the cooperation-rate caliber is NOT yet registered**, so it must be labelled pre-fix and must not be presented as a post-fix result.
 - **Anti-betrayal**: `avg_betrayal_rate` is **exactly 0.000 in all 142 runs** (71 seeds × 2 modes, 3000 episodes each); the `selfish` control mode averages 0.35. The BC incentive/penalty design therefore prevents defection collapse.
 - **CW-PBFT vs PBFT — scope of the advantage (honest reporting)**: with **synthetic** weights that already encode the fault prior (spread ratio R≈8), CW-PBFT reaches 97–99% success where standard PBFT collapses to 0% at 40% Byzantine. However, a 5-seed × 2000-round repetition experiment shows that under **uniform weights (R=1)** or weights derived from **real MARL contribution scores (R≈1.007)**, CW-PBFT is **exactly equivalent** to standard PBFT. Weighted voting therefore adds no fault tolerance on its own; the safety bound is `b < n/(2R+1)`, which for R≈1.007 reduces to the classical `n/3`. All CW-PBFT > standard-PBFT success-rate gains come from **controlled weight-broadening configs (R≈15)**; under real MARL contribution weights (R≈1.01) contribution-weighted voting is **identical** to standard PBFT (NR-39~44 verdict=IDENTICAL), and we do **not** claim contribution-weighting improves fault tolerance.
 - **Attack defense**: 100% interception for the **6** signature-layer attacks (observation forgery / message tampering / replay / sybil / k-reuse / long-range) recorded in `attack_defense_report.json` and the E6 batch report `results/attack_defense_batch_report.json` (6 classes × 50 trials = 300, 100% blocked (Wilson 95% CI [92.9%, 100%] per class)); 主节点故障（不健康/被标记）触发视图切换的 failover 路径已测试通过（标记驱动模拟，未注入真实矛盾提案/equivocation），由 failover 测试套件覆盖。
 
-> **Positioning**: the value proposition is **trust augmentation** — 容错共识（PBFT 族；实验覆盖省略/崩溃故障，不建模任意拜占庭/矛盾投票）, cryptographic identity anchoring, 100% interception of the signature-layer attacks and verifiable incentive fairness — rather than RL performance optimization. The BC effect on `env_reward` is **+25.75% at n=101 (p=0.003348, d=0.42; significant under Bonferroni / BH-FDR / Holm, but the 30 added pairs alone are not)**; the historical n=71 baseline was **BH-FDR significant / Bonferroni non-significant** (p=0.0095, d=0.441). The incentive was designed to shape **cooperation**, and there the effect is highly significant (whole-run cooperation rate +1.92%, p=1.5×10⁻¹⁴, d=1.17 at n=101). Cross-algorithm comparison reveals strong algorithm selectivity: QMIX shows significant positive effect (p=0.035, d=0.695, n=20) while MAPPO is non-significant with negative direction (p=0.625, d=-0.222, n=10). Note also the bounded scope of the CW-PBFT advantage documented above.
+> **Positioning**: the value proposition is **trust augmentation** — 容错共识（PBFT 族；实验覆盖省略/崩溃故障，不建模任意拜占庭/矛盾投票）, cryptographic identity anchoring, 100% interception of the signature-layer attacks and verifiable incentive fairness — rather than RL performance optimization. The current headline effect is the **whole-run** `env_reward` gain of **+6.54% at n=101 (NR-202, p=6.85×10⁻¹¹, d=0.971), which survives the F01 mechanism fix**; the pre-fix last-50 +25.75% is **retracted** (post-fix same-seed last-50 is +3.24%, p=0.733, not significant). Cross-algorithm comparison reveals strong algorithm selectivity: QMIX shows significant positive effect (p=0.035, d=0.695, n=20) while MAPPO is non-significant with negative direction (p=0.625, d=-0.222, n=10). Note also the bounded scope of the CW-PBFT advantage documented above.
 
 ---
 

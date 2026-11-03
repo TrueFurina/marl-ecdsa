@@ -84,16 +84,22 @@ jobs:
           PORT=""
           for i in $(seq 1 20); do
             sleep 2
-            # 启动器用 _free_port() 从 9090 起找空闲端口，实际端口打印在 banner 里
+            # 启动器用 _free_port() 从 9090 起找空闲端口，实际端口打印在 banner 里。
+            # 注意：GitHub Actions 的 bash 带 -e，`[ -z "$X" ] && X=...` 在 X 非空时
+            # 返回 1 会直接中断整个步骤（2026-11-03 windows 冒烟即因此秒退）。
+            # 故一律用 if/fi，且命令替换加 `|| true` 兜住 grep 无匹配的非零退出。
             if [ -z "$PORT" ]; then
-              PORT=$(grep -oE 'http://127\.0\.0\.1:[0-9]+' smoke.log | head -1 | grep -oE '[0-9]+$')
+              PORT="$(grep -oE 'http://127\.0\.0\.1:[0-9]+' smoke.log 2>/dev/null | head -1 | grep -oE '[0-9]+$' || true)"
             fi
-            [ -z "$PORT" ] && PORT=9090
-            # 注意：新版带登录鉴权，`/` 会 302 到 /login，且 /api/* 需登录（401）。
-            # 因此用公开的 /healthz 判就绪、/login 判页面渲染，二者都通过才算成功。
+            if [ -z "$PORT" ]; then
+              PORT=9090
+            fi
+            # 新版带登录鉴权：`/` 会 302 到 /login，`/api/*` 需登录（401）。
+            # 故用公开的 /healthz 判就绪 + /login 判页面渲染，二者都通过才算成功。
             if curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1 \
                && curl -sf "http://127.0.0.1:${PORT}/login" | grep -q "MARL-ECDSA"; then
-              OK=1; break
+              OK=1
+              break
             fi
           done
           kill $PID 2>/dev/null || true
