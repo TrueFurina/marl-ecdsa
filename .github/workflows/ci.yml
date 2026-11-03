@@ -1,0 +1,170 @@
+name: CI - Test Suite
+
+# =============================================================================
+# 为什么这个文件必须在**仓库根**的 .github/workflows/ 下
+#
+# GitHub Actions 只扫描仓库根目录的 .github/workflows/。此前本工作流写在
+# marl-ecdsa-consensus-chain/.github/workflows/ci.yml —— 那个路径不会被注册成
+# 工作流，因此**一次都没运行过**（/actions/workflows 里只有 build-binaries 与
+# pages-build-deployment）。
+#
+# 代价是有实测记录的：2026-11-03 的 d9e701c（"sync: 源码对齐 V29 新基线"）
+# 把 6 处安全/正确性修复连同另外 4 处一起覆盖回旧版，仓库里那 6 个回归锁文件
+# 全红（19 failed + 1 collection error），而 main 上的审计简报仍写着"9 处缺陷
+# 全部已修复"。没有 CI 就没有人被告知。
+#
+# 本文件是那次事故的结构性修复：把测试门搬到会被执行的位置，并把安全不变量
+# 单独拆成一个 fail-fast 的 job —— 它跑得比全量套件快得多（只装 numpy +
+# cryptography），一旦被回退就立刻红。
+# =============================================================================
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'marl-ecdsa-consensus-chain/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # 入口脚本与 pyproject.toml 都在子目录里
+    working-directory: marl-ecdsa-consensus-chain
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 第一道：安全不变量（fail-fast，依赖极轻，几十秒内出结果）
+  # ---------------------------------------------------------------------------
+  security-invariants:
+    name: 安全不变量（fail-fast）
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install minimal deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install cryptography numpy pytest pytest-asyncio pytest-timeout
+
+      - name: Security / correctness invariants
+        # 这些文件锁的是「可被静默回退的语义」，不是覆盖率：
+        #   security_guard   —— k 重用检测 fail-closed + 淘汰归档 + 类型归一
+        #   ecdsa_utils      —— 签名与载荷绑定（含 extra），裸字节包拒绝
+        #   mappo / qmix     —— critic 目标形状、状态离散化确定性
+        #   nash_verifier    —— 混合策略均衡 p_me 与 p_opp 同公式
+        #   standard_pbft    —— 女巫门控 + 自报权重纠偏
+        #   failover         —— 心跳缺省值不得伪造超时
+        #   incentive        —— NaN 不得被钳成满分 / 污染账本
+        run: |
+          python -m pytest -q \
+            tests/test_security_guard_type_confusion.py \
+            tests/test_security_guard_kreuse_eviction.py \
+            tests/test_signature_payload_binding.py \
+            tests/test_verify_package_field_binding.py \
+            tests/test_mappo_critic_targets.py \
+            tests/test_qmix_state_index_determinism.py \
+            tests/test_nash_verifier_canonical.py \
+            tests/test_standard_pbft_sybil_gate.py \
+            tests/test_failover_heartbeat_semantics.py \
+            tests/test_incentive_nonfinite_guard.py
+
+  # ---------------------------------------------------------------------------
+  # 第二道：全量测试套件
+  # ---------------------------------------------------------------------------
+  test:
+    name: pytest (${{ matrix.python-version }})
+    needs: security-invariants
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('marl-ecdsa-consensus-chain/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio pytest-timeout
+
+      - name: Run test suite
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+      - name: Verify dashboard imports (Flask route registration)
+        run: |
+          python -c "from visualization.dashboard import _create_app; app = _create_app(); assert app is not None; print('dashboard OK, routes:', len(app.url_map._rules))"
+
+      - name: Verify consensus factory (all modes)
+        run: |
+          python -c "
+          from blockchain.consensus.factory import create_consensus_engine
+          for mode in ['cw_pbft', 'standard_pbft', 'fast']:
+              eng = create_consensus_engine('node_0', ['node_0','node_1','node_2'], mode=mode)
+              assert eng is not None
+          print('consensus factory OK')
+          "
+
+      # ---- 裸命令冒烟（评委视角：无 PYTHONPATH）-----------------------------
+      # 教训存档：conftest 把项目根注入 sys.path，导致 tests/ 全绿但按说明书裸跑
+      # 入口脚本时 ModuleNotFoundError。
+      - name: Bare-command smoke (no PYTHONPATH)
+        run: |
+          env -u PYTHONPATH python scripts/network_demo.py --help >/dev/null
+          env -u PYTHONPATH python scripts/one-click/start_p2p_cluster.py --help >/dev/null
+          env -u PYTHONPATH python scripts/one-click/run_full_experiment.py --help >/dev/null
+          env -u PYTHONPATH python train.py --help >/dev/null
+          env -u PYTHONPATH python main.py --help >/dev/null
+          env -u PYTHONPATH python scripts/smoke_test_e2e.py
+          echo "bare-command smoke OK"
+
+      # ---- 口径门禁（rules 已分层入库，CI 无私有配置时规则依然生效）--------
+      - name: Caliber gate — void tokens (fail-closed)
+        run: |
+          python scripts/scan_void_tokens.py \
+            --root "$PWD" \
+            --report "$RUNNER_TEMP/scan_void_tokens_report.json" \
+            --overwrite
+
+      - name: Pre-commit gates — repo-wide (fail-closed)
+        run: |
+          python scripts/pre-commit/secrets_scan.py $(git -c core.quotePath=false ls-files)
+          python scripts/pre-commit/honesty_scan.py
+          python scripts/pre-commit/caliber_check.py --strict
+          python scripts/pre-commit/structure_guard.py --all
+
+      - name: Citation gate — synthetic references
+        run: |
+          python scripts/scan_citation_blacklist.py \
+            --root "$PWD" \
+            --report "$RUNNER_TEMP/scan_citation_report.json" \
+            --overwrite
+
+      - name: Registry mirror integrity
+        run: python scripts/check_registry_mirror.py
