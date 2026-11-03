@@ -65,6 +65,21 @@ CI 首次运行 `77 passed / 1 failed`，失败项是
 - `.agents/skills/test-gate/SKILL.md` 的 `"1632 passed" 是当前基线` 低于 NR-19 下限，
   改为指向登记簿，不再另抄一份数字。
 
+### 七、全量套件第一次在 CI 上跑完：3 failed / 2275 passed / 11 skipped
+
+3.11 与 3.12 两个 job 结果一致。三条失败都不是"被回退的修复"，而是新暴露的：
+
+1. `test_qmix_state_index_determinism.py` 2 条 —— `_state_index` 是 **NumPy 回退**实现的
+   方法，CI 全量 job 装了 torch，`IQLEstimator` 指向 torch 版 `QMIXAgent`，没有该方法。
+   这暴露了工作流自身的结构问题：安全不变量门只装 `numpy+cryptography`（跑回退路径），
+   全量 job 装了 torch（跑 torch 路径），**同一断言在两道门里落在不同实现上**。
+   处理：文件加 `skipif(HAS_TORCH)` 并写明覆盖分工。
+2. `test_f04_round_recovery.py::test_transient_failure_resume_same_txid` —— 就绪判据
+   写错了：数「在线节点**个数**」而不是等「**指定的**节点」。
+   `start(names=('node-3',))` 在 node-1/2 已跑时 `>= 1` 立刻成立，根本没等 node-3。
+   本机（无 torch，导入快）恰好赶上；CI 上导入慢几秒就稳定失败。
+   处理：按 `node` 字段精确等待，预算 3.6s → 16s。
+
 ### 实测（本机，非对外口径）
 
 | 项 | 结果 |

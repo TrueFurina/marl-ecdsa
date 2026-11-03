@@ -418,6 +418,62 @@ skip 数由 9 变为 22（本机缺 torch 导致更多 skip）—— NR-19 需�
 
 ---
 
+## 12. 全量套件第一次在 CI 上跑完：3 failed / 2275 passed / 11 skipped
+
+解除收集期错误后，`pytest tests/` 第一次在 CI 上跑到终点（3.11 与 3.12 两个 job 结果一致）：
+
+```
+3 failed, 2275 passed, 11 skipped, 2 subtests passed in 313.98s (0:05:13)   # py3.11
+3 failed, 2275 passed, 11 skipped, 2 subtests passed in 621.52s (0:10:21)   # py3.12
+```
+
+三条失败，**没有一条是 §10 那些"被回退的修复"**，全部是新暴露的：
+
+### 12.1 `test_qmix_state_index_determinism.py`（2 条）
+
+```
+AttributeError: 'QMIXAgent' object has no attribute '_state_index'
+subprocess.CalledProcessError: ... from marl.algorithms.qmix import IQLEstimator ...
+```
+
+根因：`_state_index` 是 **NumPy 回退实现** `IQLEstimator` 的方法；CI 的全量 job 装了
+torch，`IQLEstimator` 指向 torch 版 `QMIXAgent`，压根没有这个方法。
+
+**这条暴露了本工作流自身的一个结构问题**：安全不变量门刻意只装
+`numpy + cryptography`（为了让 fail-fast 在几十秒内出结果），于是它跑的是**回退路径**；
+而全量 job 装了 torch，跑的是**torch 路径**。同一条断言在两道门里落在不同实现上 ——
+这意味着"第一道门绿"不能推出"第二道门绿"。
+
+处理：文件加 `pytestmark = skipif(HAS_TORCH)`，并在 docstring 里写明覆盖分工 ——
+回退路径由安全不变量门（无 torch）覆盖，torch 环境下跳过而不是假通过。
+
+### 12.2 `test_f04_round_recovery.py::test_transient_failure_resume_same_txid`（1 条）
+
+```
+AssertionError: 'quorum_failed' != 'replicated'
+```
+
+根因在**测试自己**的就绪判据：
+
+```python
+if sum(x.get('online', False) for x in dc.statuses()['nodes']) >= len(names):
+```
+
+判的是"在线节点**个数**"。在 node-1 / node-2 已经在跑的情况下，
+`start(names=('node-3',))` 的 `>= 1` **立刻成立** —— 根本不等 node-3 起来就去 propose。
+本机（未装 torch，子进程 import 快）恰好赶得上；CI 上装了 torch，
+`visualization.distributed_consensus` 的导入要几秒，第二次 propose 只打到 2 个节点，
+于是 `quorum_failed`。
+
+处理：改为按 `node` 字段等**指定的这几个节点各自** online，等待预算从 3.6s 放宽到 16s。
+
+> 两条都属「本地绿 ≠ CI 绿」的第三、第四种形态：
+> 前者是**同一断言落在不同依赖组合的不同实现上**，后者是**就绪判据的语义写错了**
+> （数个数 ≠ 等某人）。前两种（区块签名门缺区块签名、f04 用户 id 硬编码）
+> 见 §11.1 与 §11.4。
+
+---
+
 ## 验证口径
 
 ```
