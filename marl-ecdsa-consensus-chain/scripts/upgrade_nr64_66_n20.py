@@ -1,15 +1,20 @@
 # -*- coding: utf-8 -*-
 """NR-64/65/66 扩种升级：n=10 → n=20 合并口径（seed100-119），双登记簿同步。"""
 import json
+from pathlib import Path
+
+# 路径全部相对本文件解析：REPO = 仓库根（scripts/ 的上一级），
+# WORKSPACE = 仓库的父目录（权威登记簿所在工作区）。
+REPO = Path(__file__).resolve().parents[1]
+WORKSPACE = REPO.parent
 
 STATS = json.load(open(
-    r"E:/Program/MARL/【CCF】区块链AI协同：面向MARL的共识机制/"
-    r"marl-ecdsa-consensus-chain/results/e14_expand_n20_20260930/summary_stats.json",
+    REPO / "results" / "e14_expand_n20_20260930" / "summary_stats.json",
     encoding="utf-8"))
 
 REG_PATHS = [
-    r"E:/Program/MARL/【CCF】区块链AI协同：面向MARL的共识机制/deliverables/number_registry.json",
-    r"E:/Program/MARL/【CCF】区块链AI协同：面向MARL的共识机制/marl-ecdsa-consensus-chain/number_registry.json",
+    WORKSPACE / "deliverables" / "number_registry.json",   # 权威登记簿
+    REPO / "number_registry.json",                          # 仓库镜像
 ]
 
 R4 = lambda x: round(x, 4)

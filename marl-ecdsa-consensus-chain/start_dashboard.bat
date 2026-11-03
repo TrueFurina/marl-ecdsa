@@ -3,11 +3,16 @@ rem MARL-ECDSA dashboard launcher (Windows, double-click to run).
 rem Uses %~dp0 so no non-ASCII path literal is embedded in this file.
 cd /d "%~dp0"
 
-set PY_EXE=C:\Users\Lenovo\AppData\Local\Programs\Python\Python312\python.exe
-
-if not exist "%PY_EXE%" (
-  echo [ERROR] Python312 not found: %PY_EXE%
-  echo Please edit PY_EXE in this file.
+rem Resolve Python interpreter: PATH first, then the py launcher.
+rem (Never hard-code a developer machine path here.)
+set "PY_EXE="
+for /f "delims=" %%P in ('where python 2^>nul') do if not defined PY_EXE set "PY_EXE=%%P"
+if not defined PY_EXE (
+  for /f "delims=" %%P in ('py -3 -c "import sys;print(sys.executable)" 2^>nul') do set "PY_EXE=%%P"
+)
+if not defined PY_EXE (
+  echo [ERROR] Python 3.10+ not found in PATH.
+  echo Install Python or edit PY_EXE in this file to point at python.exe.
   pause
   exit /b 1
 )
