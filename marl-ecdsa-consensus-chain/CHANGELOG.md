@@ -15,6 +15,70 @@
 
 ---
 
+## 2026-11-03（续）— CI 归位后首轮实测：修 8 处、撤回 1 处误判
+
+> 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。取证与逐条判据见
+> `deliverables/assurance/reports/security_audit_2026-11-02.md` §11。
+
+### 一、第一道门转绿：区块签名
+
+CI 首次运行 `77 passed / 1 failed`，失败项是
+`test_signature_payload_binding.py::test_block_with_genuine_tx_accepted` ——
+账本自 2026-11-02 起有「出块者签名 + `state_root` 可重算」门，而测试塞的是
+`state_root="0"*64` 且不签名的合成区块。`_make_block()` 改走真实出块流程
+（`构造 → finalize() → sign_block()`）。顺带修掉 `test_block_with_forged_tx_rejected`
+的**假通过**（原先它拦的是「区块没签名」，不是「伪造交易」）。修后 **78 passed**。
+
+### 二、撤回一处误判
+
+`cw_pbft_failover` 的"恢复"实际是把 main 更好的实现（显式 `UNKNOWN`）改回较差的
+（预填表、一律 `HEALTHY`），已撤回，与 main 逐字节一致。
+连带修掉 main 上一对**自相矛盾**的测试（见上），两份心跳测试并存 **27 passed**。
+
+### 三、真修复：C4 组合攻击缺口关闭
+
+`security_guard` 的淘汰摘要档案让「FIFO 挤出后重用 `r`」被拦下；测试按该文件自述的
+约定翻转断言，并新增残留边界测试（档案仅进程内）。探针与证据同步重算：
+**4/4 绕过 → 3/4**，C4 转 ✅ 拦截。
+
+### 四、main 上三处既有红灯（CI 归位才看见）
+
+1. `scripts/smoke_test_e2e.py` 的 P0-1 断言 `λ == 0.1`：P2-E 自适应 λ 后取值为
+   `(0.05, 0.15)` 带内，实测 `0.10231058578630006`。改为钉「`λ_base=0.1` 的传参通路 +
+   运行时在自适应带内」。
+2. `tests/test_f04_web_wiring.py` 把通道键写死 `'1'`：全量套件里更早用例注册过用户后
+   新用户 id 就不是 1，4 条假红（**单独跑是 5 passed**）。改为从 `session['uid']` 读。
+3. `structure_guard.py --all` 报 13 个根级历史文档（V18–V27 等）：登记为**存量冻结
+   豁免**（常量集合，只减不增），每次运行打印提醒，不静默腐烂。
+
+### 五、`test_f11_grandchild_cleanup.py` 的收集期错误
+
+依赖 `launcher/supervisor.py`，该模块不在本仓库，模块级 `exec_module` 抛
+`FileNotFoundError` → 整个 `pytest tests/` 中断（其余 2000+ 条一条没跑）。
+不删用例，缺模块时整模块 skip。
+
+### 六、门禁自身的两个 bug
+
+- `caliber_check.py` 的 `_RE_TESTS` 不支持千分位，`2,183 passed` 被读成 `183`，
+  把等于下限的表述判成假红；现接受 `1,234` 与 `1234`。
+- `.agents/skills/test-gate/SKILL.md` 的 `"1632 passed" 是当前基线` 低于 NR-19 下限，
+  改为指向登记簿，不再另抄一份数字。
+
+### 实测（本机，非对外口径）
+
+| 项 | 结果 |
+|---|---|
+| 安全不变量门（10 个文件） | 78 passed |
+| 全量 `tests/` | 2227 passed / 2 failed / 22 skipped（合计 2251） |
+| 2 条 failed | `test_deps_importable`（本机缺 torch）＋`test_next_nr::test_threaded_no_duplicate`（Windows 文件锁，main 上同样红） |
+| 未计入 | `test_qmix.py`、`test_algorithm_family_contract.py`（本机装不上 torch，已 `--ignore`） |
+
+> 这些是**本机实测**，不是对外口径。用例总数已由 NR-19 的 2192 增长到 2251+，
+> 登记簿需重新基线化（属独立流程，本次不动）。
+
+---
+
 ## 2026-11-03 — 恢复被「源码对齐」提交静默回退的 6 处修复 + CI 归位
 
 > 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
@@ -32,7 +96,10 @@
 - `qmix`：NumPy 回退回到内建 `hash()`（受 `PYTHONHASHSEED` 影响，复跑不一致）；
 - `nash_verifier`：`p_me` 回到 `(M[1,0]-M[1,1])/denom`（鹰鸽/猎鹿的混合均衡漏报）；
 - `standard_pbft`：女巫门控还在，但自报 `weight` 纠偏被删（真实成员可自带 999）；
-- `cw_pbft_failover`：心跳表恒空 → 从未发心跳的主节点永不被判超时（死主不替换）；
+- ~~`cw_pbft_failover`：心跳表恒空 → 从未发心跳的主节点永不被判超时（死主不替换）~~
+  **此条判断错误，已撤回**：main 现实现是「空表 + 对从未心跳的节点返回 `UNKNOWN`」，
+  比 11-02 那版（预填整表、一律 `HEALTHY`）更严 —— 缺信息不等于健康。详见
+  `security_audit_2026-11-02.md` §11.2；
 - `incentive_contract` / `world_state` / `settlement_coordinator`：三处 NaN 护栏
   全被删 → NaN 被钳成满分、并永久污染账本积分。
 

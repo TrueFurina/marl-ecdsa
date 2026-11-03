@@ -167,13 +167,24 @@ View change: node_0(primary_timeout) → node_1 (view=1)
 
 修复前那条 100% 是纯噪声（每轮都切）。**修复后剩下的 15 次不是缺陷**：拜占庭标记一旦打上就永久生效，而出块轮转每 10 块才换一次主，所以一个被标记的主节点会在后续多轮里持续触发切换——这是设计取舍，已在下方「剩余风险」登记。
 
-**修复**：
+**修复**（最终口径，2026-11-03 修订 —— 见 §11.2）：
 
-- 心跳表在 `__init__` 与 `reset_failover_state` 中按节点以当前时刻初始化；
-- `check_primary_health` 把「从未收到心跳」解释为**监控刚开始**：记为当前时刻并按健康处理，给一个 `HEARTBEAT_TIMEOUT_MS` 宽限期，宽限期后仍无心跳才判超时；
-- 未纳入监控的节点（运行期新加入）走同一路径，不再直接判死。
+- `_last_heartbeat` 保持**空表**，不伪造时间戳；
+- `check_primary_health` 对「从未收到心跳」的节点返回 **`UNKNOWN`**，且**不改写**
+  `_primary_status` —— 缺信息既不是「健康」也不是「超时」，只是没有信息；
+  因为 UNKNOWN 不进入故障判定，虚假视图切换同样被消除；
+- 心跳过旧（确实收到过、但超过 `HEARTBEAT_TIMEOUT_MS`）仍判 `TIMEOUT`。
 
-**验证**：`tests/test_failover_heartbeat_semantics.py` 8 条 —— 全新引擎不误判超时、正常轮不产生 failover 记录、显式补心跳同样不触发、心跳过旧仍判超时（防误放）、注入拜占庭仍触发切换（防漏报）、重置后不退回到「一律超时」；failover 相关 **14 passed**。
+> ⚠️ 本节最初写的修法是「构造时把心跳表按当前时刻预填、一律判 HEALTHY」。
+> 该写法能消除虚假切换，但等于对「从未收到心跳」的节点**声称**它刚发过心跳 ——
+> 状态表撒谎，审计时无法区分「真健康」与「没消息」。现行实现改取 UNKNOWN，
+> 语义更严，与 `tests/test_cw_pbft_failover.py` 的断言一致。
+
+**验证**：`tests/test_failover_heartbeat_semantics.py` 8 条 —— 全新引擎判
+UNKNOWN 而非 TIMEOUT（不误报）、心跳表初始为空（不伪造成已知）、运行期查询不写入
+伪造时间戳、正常轮不产生 failover 记录、显式补心跳同样不触发、心跳过旧仍判超时
+（防误放）、注入拜占庭仍触发切换（防漏报）、重置后表清空且不退回到「一律超时」；
+与 `tests/test_cw_pbft_failover.py` 合计 **27 passed**。
 
 ## 9. 高：NaN 奖励被钳成满分（算崩的智能体反而拿最高激励）
 
@@ -208,6 +219,11 @@ broken (env_reward=NaN) → task=1.0000, delta=20.00   ← 谁算崩了谁拿钱
 ---
 
 ## 10. 回退事件：9 处修复中有 6 处曾被静默回退（2026-11-03）
+
+> ⚠️ **2026-11-03 续：其中 1 处判断已撤回。** 本节标题与正文的「6 处」按
+> 当时的核查口径保留不改（改历史结论等于伪造过程），但实际成立的数字是 **5 处** ——
+> `cw_pbft_failover` 那条是误判：main 现实现（显式 `UNKNOWN`）比 11-02 那版更好，
+> 所谓"恢复"其实是回退。撤回与理由见 **§11.2**。
 
 ### 10.1 事实
 
@@ -256,8 +272,9 @@ GET /repos/TrueFurina/marl-ecdsa/actions/workflows
    不是回退），测试同步更正 2 条错断言并新增 4 条；
 3. `6fd86b1` mappo / qmix / nash：恢复 `_critic_targets`、sha256 离散化、`p_me` 同公式，
    同时保留 QMIX 的 S9 登记注释与 Nash 的 F16 `top_tier_bonus=10.0`；
-4. `dfb7e56` standard_pbft / failover：补回权重纠偏；心跳表按回归锁口径初始化
-   （保留 main 的「仅在存在故障证据时切换」判定）；
+4. `dfb7e56` standard_pbft / failover：补回女巫门控的自报权重纠偏；
+   ~~心跳表按回归锁口径初始化~~ —— **此条已作废，见 §11.2**：failover 的"恢复"
+   实为把更差的实现改回来，已撤回，该文件与 main 逐字节一致；
 5. `7d88939` incentive / world_state / settlement：三处 NaN 护栏恢复，
    同时保留 F02 `clear_episode_rewards` 与 F05 `get_consensus_weight`；
 6. `fda6cbd` CI 搬到仓库根，安全不变量拆成 fail-fast job。
@@ -273,6 +290,131 @@ GET /repos/TrueFurina/marl-ecdsa/actions/workflows
 **全部 404**（`GET /commits/{sha}` 返回 422）。真实哈希为
 `12212a9` / `44b3962` / `e98d5ca` / `bd56b87` / `7e20a94` / `5d509f9` /
 `b07953d` / `2e30262`，已逐一核对存在。P1-11 的 k 重用那轮是 `8bc432b`。
+
+---
+
+## 11. 2026-11-03 续：CI 归位后首轮实测（修 8 处 / 撤回 1 处误判）
+
+§10 记的是「恢复被回退的修复 + 把 CI 搬到会被执行的位置」。CI 真正跑起来之后，
+暴露出 §10 里**至少一条判断是错的**，以及一批**与回退无关**的既有红灯。
+按本项目的口径纪律（发现旧判断错误必须自我推翻），单独列一节。
+
+### 11.1 第一道门：从「77 passed / 1 failed」到全绿
+
+CI 归位后第一次运行的结果是 `77 passed / 1 failed`，失败项唯一：
+
+```
+FAILED tests/test_signature_payload_binding.py::
+       TestBlockchainRejectsForgedTx::test_block_with_genuine_tx_accepted
+AssertionError: assert False is True
+日志：[Blockchain] 区块 #1 缺少出块者签名，拒绝上链
+```
+
+根因：账本自 2026-11-02 起有区块级完整性门（出块者签名 + `state_root` 可重算），
+而该测试塞的是 `state_root="0"*64` 且不签名的**合成区块**。
+
+> **本机为什么是绿的**：本地账本还是旧版（没有这道门）。这条用例本身就是
+> 「CI 搬到仓库根是必要的」的反例证据 —— 本地绿 ≠ CI 绿。
+
+修法：`_make_block()` 改走真实出块流程 `构造 → finalize() → sign_block()`
+（顺序不可反：`finalize()` 重算 `state_root` 与 `block_hash`，签名不进哈希故可后签）。
+
+顺带修掉一条**假通过**：`test_block_with_forged_tx_rejected` 原先也不签名，
+在新账本上它会因为「区块没签名」而被拒绝 —— 等于这条用例在断言「区块没签名」，
+根本没测到「伪造交易被拒」。补上签名后，区块本身合法，被拒只能来自交易级校验。
+
+### 11.2 撤回：`cw_pbft_failover` 不是「被回退」
+
+§10.3 第 4 条曾称「心跳表按回归锁口径初始化」。**这条已作废。**
+
+事实：main 现在的实现是「空表 + 对从未心跳的节点返回 `UNKNOWN`」，比 2026-11-02
+那版（构造时按 `now` 预填整表、一律判 `HEALTHY`）更好 —— 缺信息既不是健康也不是超时。
+我按 11-02 版"恢复"，实际是把更好的实现改回更差的，**属回退**。
+已撤回，`cw_pbft_failover.py` 与 main 逐字节一致（`diff -q` 无输出）。
+
+连带发现 main 上有一对**自相矛盾**的测试：
+
+| 文件 | 引入提交 | 断言 |
+|---|---|---|
+| `tests/test_cw_pbft_failover.py::test_initial_health_without_heartbeat_is_unknown` | `d9e701c` | UNKNOWN |
+| `tests/test_failover_heartbeat_semantics.py` | `b07953d` | HEALTHY + 心跳表已预填 |
+
+两者不可能同时通过；实测 main 上后者 4 条红（`FFF....F`）。已把后者按最终口径
+重写（UNKNOWN / 空表 / 查询不写入伪造时间戳），两份测试并存 **27 passed**。
+
+### 11.3 真修复：C4「FIFO 淘汰后重用」缺口关闭
+
+不是回退，是 `security_guard` 淘汰摘要档案带来的实际语义变化：发 1002 个包把早期
+`r` 挤出 `_r_registry` 后再重用，实测 `ok=False`，理由命中「历史档案」。
+
+原测试 `test_c4_fifo_eviction_allows_reuse` 钉的是「缺口存在」这一旧事实，按该文件
+自己写明的约定（「若将来修复了其中某项，翻转对应断言即有明确信号，不会无声退化」）
+翻转为 `test_c4_evicted_r_is_still_detected`；另加
+`test_c4_residual_archive_is_in_memory_only` 钉住**残留边界**：摘要档案只在进程内，
+重启 / 换副本后仍可重放。
+
+探针与证据同步重算（`scripts/security/_probe_combination_attacks.py` +
+`combination_attack_result.json`）：**4/4 绕过 → 3/4 绕过**，C4 转为 ✅ 拦截。
+顺带修掉探针 `write_text` 的平台行尾问题（Windows 会把 `\n` 翻成 `\r\n`，
+让证据文件在 git 上显示整份重写，把真改动埋进行尾噪音）。
+
+### 11.4 main 上的既有红灯（与回退无关，CI 归位才看见）
+
+| # | 位置 | 现象 | 定性 |
+|---|---|---|---|
+| 1 | `scripts/smoke_test_e2e.py` P0-1 | `assert abs(lambda_weight - 0.1) < 0.001` 失败，实测 `0.10231058578630006` | P2-E 自适应 λ 引入后 λ 落在 `(0.05, 0.15)`，断言是旧口径 |
+| 2 | `tests/test_f04_web_wiring.py` | 4 条失败（`get_pending_submit('1')` 得 None / `/api/distributed/resume` 404） | 通道键写死 `'1'`，全量套件里更早用例注册过用户后新用户 id 就不是 1 |
+| 3 | `scripts/pre-commit/structure_guard.py --all` | 13 个根级文档被判违规平铺 | 存量布局问题（V18–V27 等），与代码改动无关 |
+
+第 2 条特别值得记：**单独跑该文件 5 passed，全量跑 4 failed**。这不是环境差异，
+是**测试之间的状态耦合**（`instance/accounts.sqlite3` 的用户自增 id）——
+「本地绿 ≠ CI 绿」的另一种形态。
+
+### 11.5 处理方式
+
+1. **自适应 λ**：改为钉住两件真正该守的事 —— `λ_base == 0.1`（config → bridge
+   传参通路不丢）+ 运行时 λ 不越出自适应带 `[0.5λ_base, 1.5λ_base]`。
+2. **f04**：从 `session['uid']` 读真实 uid，与用户表状态解耦。
+3. **structure_guard**：13 个文件登记为**存量冻结豁免**（常量集合，只减不增），
+   `main()` 每次打印出来，不静默腐烂。搬目录会打断 README / thesis 的相对引用，
+   属独立任务，不在此处草率处理。
+   其中 `V18_σèƒΦâ╜σñìµá╕µèÑσæè.md` 的**文件名本身是乱码**（UTF-8 文件名被按
+   CP437 解释），原意为「V18_功能复核报告.md」，另案记录。
+4. **`test_f11_grandchild_cleanup.py`**：依赖 `launcher/supervisor.py`，该模块
+   **不在本仓库**（全仓 grep `_make_job` 仅命中该测试；Job Object 的实现在
+   `visualization/business_service.py`）。模块级 `exec_module` 抛
+   `FileNotFoundError`，属**收集期错误**，会让整个 `pytest tests/` 中断
+   （CI 实测 `Interrupted: 1 error during collection`，其余 2000+ 条一条没跑）。
+   不删用例，改为缺模块时**整模块 skip**；模块一旦回来，用例自动恢复执行。
+
+### 11.6 门禁自身的两个 bug
+
+- `scripts/pre-commit/caliber_check.py`：`_RE_TESTS = (\d{3,5})` 不支持千分位，
+  `2,183 passed` 被读成 **183**，于是 README 里等于下限的表述被判成
+  「低于下限 2183」的**假红**。现同时接受 `1,234` 与 `1234`。
+- `.agents/skills/test-gate/SKILL.md`：写着 `"1632 passed" 是当前基线`，
+  低于 NR-19 下限 2183 —— 真正的过期数字。改为指向登记簿 NR-19，
+  不再另抄一份（第二份真值源必然漂移）。
+
+### 11.7 一条数字口径的待办（不在本次改动范围）
+
+NR-19 记的是 2026-11-02 R5 轮「2192 收集 / 2183 通过 / 9 跳过 / 0 失败」。
+CI 归位后本地实测的全量数字与之**不再一致**，但**本次不改 NR-19**：
+改动登记簿需要配套的 junit 证据与扩种口径说明，属独立流程。
+
+本次本地实测（Windows / Python 3.12.10）：
+
+| 项 | 实测 |
+|---|---|
+| 结果 | **2227 passed / 2 failed / 22 skipped**（合计 2251） |
+| 未计入 | `tests/test_qmix.py`、`tests/test_algorithm_family_contract.py` 因本机装不上 torch 无法收集，已 `--ignore` |
+| failed #1 | `test_deps_scripts.py::test_deps_importable` —— 缺 torch（本机 `shm.dll` 加载失败已卸载；CI 会装） |
+| failed #2 | `test_next_nr.py::TestConcurrentAllocation::test_threaded_no_duplicate` —— 并发取号报 Windows 文件锁 `PermissionError`，**main 上同样红** |
+
+两条 failed 都不是本次改动引入的。用例总数已由 2192 增长到 2251+，
+skip 数由 9 变为 22（本机缺 torch 导致更多 skip）—— NR-19 需要重新基线化。
+在此之前，任何「全量测试数」的引用都应以 NR-19 的下限式表述为准，
+并且**不得**把本次实测数当作对外口径。
 
 ---
 
