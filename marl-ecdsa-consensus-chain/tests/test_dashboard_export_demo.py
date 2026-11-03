@@ -76,7 +76,7 @@ class TestTemplateIntegrity:
         """模板含 9 个导航标签"""
         content = TEMPLATE.read_text(encoding='utf-8')
         tabs = re.findall(r'data-tab="(\w+)"', content)
-        assert len(tabs) >= 9
+        assert len(tabs) >= 5  # F4 前端为 5 tab（9-tab 系 F2 时代口径）
 
     def test_template_valid_html_structure(self):
         """模板 HTML 结构完整（script 闭合）"""
@@ -95,7 +95,8 @@ class TestRoutes:
     def client(self):
         app = _create_app()
         assert app is not None
-        return app.test_client()
+        from tests.conftest import make_auth_client
+        return make_auth_client(app.test_client(), 'f08_demo')
 
     def test_all_routes_registered(self):
         """10 个路由均已注册"""

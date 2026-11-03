@@ -5,20 +5,7 @@ QMIX / VDN 算法模块测试
 """
 import pytest
 
-from marl.algorithms.qmix import HAS_TORCH, QMIXTrainer
-
-# ⚠️ ReplayBuffer / VDNMixer **只在 HAS_TORCH 分支存在**（见 qmix.py 的
-# `if HAS_TORCH:` 块）；NumPy 回退分支只提供 IQLEstimator / QMIXMixer /
-# QMIXTrainer（外加 QMIXAgent = IQLEstimator 的别名）。
-# 因此这里必须按 HAS_TORCH 守卫，否则无 torch 环境下是**导入期 AttributeError**，
-# 而不是一条清楚的 skip——整个测试文件收集失败，还看不出是缺依赖。
-# 与 tests/test_mappo_r1.py 的写法保持一致。
-if HAS_TORCH:
-    from marl.algorithms.qmix import ReplayBuffer, VDNMixer
-
-pytestmark = pytest.mark.skipif(
-    not HAS_TORCH,
-    reason="ReplayBuffer/VDNMixer 仅存在于 PyTorch 实现分支（NumPy 回退分支不提供）")
+from marl.algorithms.qmix import ReplayBuffer, VDNMixer, QMIXTrainer
 
 
 class TestReplayBuffer:

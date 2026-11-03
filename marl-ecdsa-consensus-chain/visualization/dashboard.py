@@ -1,22 +1,6 @@
-"""
-MARL-ECDSA 共识链 — 全功能可视化平台 v3.9（共识投票+区块浏览器增强版）
-
-面向 CCF 第五届区块链竞赛国赛线下演示：
-- 深色科技感 UI，粒子背景 + 光晕效果
-- 9 标签页：总览 | 训练监控 | 对比分析 | 三模式对比 | 区块链 | 共识投票 | 区块浏览器 | 系统 | P2P网络
-- v3.9 新增：CW-PBFT共识投票可视化（权重分布+贡献度雷达+三阶段流程）
-- v3.9 新增：区块浏览器（区块列表+交易趋势+出块者分布）
-- v3.8 新增：子组件流水线 SVG 图（SigningService→ActionRecorder→CooperationDetector→SettlementCoordinator）
-- v3.8 新增：4 子组件独立统计卡片 + per-agent 签名/合作状态面板
-- **演示模式**：自动轮播标签页（6秒间隔），评委走近即看动画
-- **数字滚动动画**：关键指标从 0 渐变到最终值
-- **导出报告**：一键生成可打印的 HTML 报告
-- **键盘快捷键**：1-9 切换标签，P 开启演示模式，E 导出报告
-- 历史数据加载（JSON 文件），支持离线演示
-
-启动：python -c "from visualization.dashboard import start_dashboard; start_dashboard()"
-"""
+"""MARL-ECDSA V27 dashboard. Account-scoped training, dynamic governance, three-node evidence and audit."""
 import hashlib
+import time
 import json
 import logging
 import os
@@ -26,6 +10,11 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger('dashboard')
+
+# F14（2026-11-03）：贡献存证去重的进程级互斥——「扫全链查重」与「签名+propose」
+# 必须原子，否则两个并发请求都能通过查重、以不同 nonce 各自出块造成同纪元重复存证。
+# 单 Web（run_simple 串行）本无并发，但库/多线程入口仍需该锁兜底。
+_ATTEST_MUTEX = threading.Lock()
 
 # 大改后 attack_defense_demo 等脚本迁至 scripts/legacy/{analysis,experiments}/，
 # dashboard 攻防演示接口仍按顶层模块名 import。将其目录加入 sys.path 以兼容
@@ -143,6 +132,71 @@ def _load_result_file(filename: str) -> Optional[Dict]:
     return None
 
 
+
+
+def _latest_completed_training(mode: str, user_id=None):
+    """Read real, completed training from the authenticated user's tasks."""
+    import sqlite3
+    dbpath = _BASE_DIR / 'instance' / 'business.sqlite3'
+    root = (_BASE_DIR / 'instance' / 'training_logs').resolve()
+    if not dbpath.is_file():
+        return None
+    try:
+        with sqlite3.connect(str(dbpath), timeout=3) as db:
+            if user_id is None:
+                rows = db.execute("SELECT id,config,result_path,exit_code FROM jobs WHERE status='completed' ORDER BY finished_at DESC,created_at DESC LIMIT 300").fetchall()
+            else:
+                rows = db.execute("SELECT id,config,result_path,exit_code FROM jobs WHERE status='completed' AND user_id=? ORDER BY finished_at DESC,created_at DESC LIMIT 300", (user_id,)).fetchall()
+    except sqlite3.Error as exc:
+        logger.warning('训练任务查询失败：%s', exc)
+        return None
+    for jid, config_json, stored_path, exit_code in rows:
+        try:
+            cfg = json.loads(config_json)
+            if exit_code != 0 or cfg.get('mode') != mode:
+                continue
+            path = Path(stored_path).resolve()
+            if os.path.commonpath([str(path), str(root)]) != str(root) or path.suffix.lower() != '.json' or not path.is_file():
+                # Support a safely relocated copied V20 database. Never read the old outside path.
+                path = (root / (jid + '.json')).resolve()
+            if os.path.commonpath([str(path), str(root)]) != str(root) or not path.is_file():
+                continue
+            with path.open(encoding='utf-8') as stream:
+                data = json.load(stream)
+            if (isinstance(data,dict) and isinstance(data.get('summary'),dict)
+                    and isinstance(data.get('episode_rewards'),list)
+                    and data.get('config',{}).get('mode') == mode):
+                data['_format']='single'
+                data['_source']='completed_training_job'
+                return data
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            logger.warning('跳过无效训练任务 %s：%s', jid, exc)
+    return None
+
+
+def _training_result(mode: str, user_id=None):
+    """Runtime training output first, historical files second; no fabricated fallback."""
+    result = _latest_completed_training(mode, user_id=user_id)
+    if result is not None:
+        return result
+    # Authenticated users must never receive unrelated archived/global runs.
+    # Keep the old historical file fallback for explicitly unscoped legacy tools only.
+    if user_id is not None:
+        return None
+    aliases = {'pure_marl':'pure', 'bc_marl':'bc', 'selfish':'selfish'}
+    alias = aliases.get(mode,mode)
+    combined = _load_result_file(f'results/training_results_{mode}_combined.json')
+    if combined and isinstance(combined, dict) and 'episode_rewards_mean' in combined:
+        combined['_format'] = 'combined'
+        combined['_source'] = 'archived_experiment'
+        return combined
+    legacy = _load_result_file(f'training_results_{alias}.json')
+    if legacy and isinstance(legacy,dict) and isinstance(legacy.get('summary'),dict):
+        legacy['_format'] = 'single'
+        legacy['_source'] = 'historical_result'
+        return legacy
+    return None
+
 # =============================================================================
 # 平台 HTML 已迁移至 templates/dashboard.html (Jinja2 模板分离)
 # =============================================================================
@@ -159,19 +213,18 @@ def _load_result_file(filename: str) -> Optional[Dict]:
 
 def _route_index():
     """Dashboard 首页：加载训练数据注入模板"""
-    def _load(fname):
-        data = _load_result_file(fname)
-        if data:
-            data['_format'] = 'single'
-        return data
-    pure, bc, selfish = _load('training_results_pure.json'), _load('training_results_bc.json'), _load('training_results_selfish.json')
-    return render_template('dashboard.html',
+    from flask import session
+    uid = session['uid']
+    pure, bc, selfish = (_training_result('pure_marl', user_id=uid),
+                         _training_result('bc_marl', user_id=uid),
+                         _training_result('selfish', user_id=uid))
+    return render_template('dashboard.html', username=session.get('username',''), csrf=session.get('_csrf',''),
         pure_data_json=json.dumps(pure, ensure_ascii=False) if pure else 'null',
         bc_data_json=json.dumps(bc, ensure_ascii=False) if bc else 'null',
         selfish_data_json=json.dumps(selfish, ensure_ascii=False) if selfish else 'null')
 
 def _route_healthz():
-    return jsonify({'status': 'ok', 'service': 'marl-ecdsa-dashboard', 'version': 'v3.9'})
+    return jsonify({'status': 'ok', 'service': 'marl-ecdsa-dashboard', 'version': 'v27'})
 
 def _route_favicon():
     """站点图标。
@@ -204,47 +257,45 @@ def _route_api_data():
     })
 
 def _route_p2p_stats():
-    """P2P网络统计接口"""
-    live_weights = _dashboard_data.get('consensus_stats', {}).get('weights', {})
-    consensus_rounds = _dashboard_data.get('blockchain_stats', {}).get('height', 0)
-    has_live_data = bool(live_weights) or consensus_rounds > 0
-    base = {
-        'is_simulated': True,
-        'note': '当前为模拟数据模式，实际P2P网络数据需启用--use-p2p',
-    }
-    if not has_live_data:
-        return jsonify({**base, 'p2p_enabled': False, 'message': 'P2P 网络未启用',
-            'n_nodes': 0, 'nodes': {}, 'total_consensus_rounds': 0, 'total_msg_sent': 0,
-            'total_msg_received': 0, 'avg_latency_ms': 'N/A', 'weights': {}, 'recent_log': []})
-    return jsonify({**base, 'p2p_enabled': True, 'n_nodes': 3,
-        'nodes': {'agent_0': {}, 'agent_1': {}, 'agent_2': {}},
-        'total_consensus_rounds': consensus_rounds,
-        'total_msg_sent': consensus_rounds * 6, 'total_msg_received': consensus_rounds * 6,
-        'avg_latency_ms': '~8', 'weights': live_weights,
-        'recent_log': _dashboard_data.get('p2p_log', [])})
+    """Read-only P2P view. Historical consensus statistics do not prove live P2P connectivity."""
+    consensus = _dashboard_data.get('consensus_stats', {}) or {}
+    log = _dashboard_data.get('p2p_log', []) or []
+    network = _dashboard_data.get('p2p_stats', {}) or {}
+    if not isinstance(network, dict):
+        network = {}
+    live = network.get('p2p_enabled') is True
+    # Only report connectivity metrics if an actual network collector supplied them.
+    return jsonify({
+        'p2p_enabled': live,
+        'is_simulated': not live or bool(network.get('is_simulated', False)),
+        'note': '仅展示原始网络采集数据；训练权重不能证明 P2P 已启用',
+        'n_nodes': network.get('n_nodes', 0) if live else 0,
+        'nodes': network.get('nodes', {}) if live else {},
+        'connections': network.get('connections', []) if live else [],
+        'total_consensus_rounds': network.get('total_consensus_rounds') if live else None,
+        'total_msg_sent': network.get('total_msg_sent') if live else None,
+        'total_msg_received': network.get('total_msg_received') if live else None,
+        'avg_latency_ms': network.get('avg_latency_ms') if live else None,
+        'weights': network.get('weights', consensus.get('weights', {})),
+        'recent_log': network.get('recent_log', log),
+    })
 
 def _route_api_load(mode):
-    """加载训练结果"""
-    mode_map = {'pure': 'pure_marl', 'bc': 'bc_marl', 'selfish': 'selfish'}
-    mapped = mode_map.get(mode, mode)
-    combined = _load_result_file(str(_BASE_DIR / 'results' / f'training_results_{mapped}_combined.json'))
-    if combined and 'episode_rewards_mean' in combined:
-        combined['_format'] = 'combined'
-        return jsonify(combined)
-    fnames = {'pure': 'training_results_pure.json', 'bc': 'training_results_bc.json', 'selfish': 'training_results_selfish.json'}
-    fname = fnames.get(mode)
-    if fname:
-        data = _load_result_file(fname)
-        if data:
-            data['_format'] = 'single'
-            return jsonify(data)
-    return jsonify({'error': f'未找到 {mode} 的训练结果'}), 404
+    """Latest completed real job, then archived data, with a precise missing-data response."""
+    mapping = {'pure':'pure_marl','bc':'bc_marl','selfish':'selfish'}
+    if mode not in mapping:
+        return jsonify({'error':'不支持的训练模式'}),400
+    from flask import session
+    result = _training_result(mapping[mode], user_id=session['uid'])
+    if result is None:
+        return jsonify({'error':'暂无已完成的该模式训练数据','mode':mode,'available':False}),404
+    return jsonify(result)
 
 def _route_api_compare():
-    pure = _load_result_file('training_results_pure.json')
-    bc = _load_result_file('training_results_bc.json')
-    selfish = _load_result_file('training_results_selfish.json')
-    return jsonify({'pure': pure, 'bc': bc, 'selfish': selfish})
+    from flask import session
+    return jsonify({'pure':_training_result('pure_marl', user_id=session['uid']),
+                    'bc':_training_result('bc_marl', user_id=session['uid']),
+                    'selfish':_training_result('selfish', user_id=session['uid'])})
 
 def _route_consensus_votes():
     """共识投票可视化数据"""
@@ -357,7 +408,7 @@ def _route_api_attack_inject():
             pass
 
         try:
-            if attack_type == 'byzantine':
+            if attack_type in ('byzantine', 'byzantine_primary'):
                 from blockchain.consensus.cw_pbft_failover import CWPBFTConsensusWithFailover
                 nodes = [f'node_{i}' for i in range(5)]
                 sim = CWPBFTConsensusWithFailover(nodes[0], nodes)
@@ -430,15 +481,26 @@ def _route_api_attack_inject():
 #: 登记簿不可读时的兜底值（与 deliverables/number_registry.json 登记值一致）。
 #: 仅作断网/缺文件时的兜底；正常情况下返回的 source 会显示真实出处。
 _CALIBER_FALLBACK = {
-    'NR-1': {'id': 'NR-1', 'improvement_pct': 28.17, 'welch_p': 0.009524,
-             'cohens_d': 0.4412, 'n': 71,
-             'field': 'summary.avg_env_reward_last_50（末50回合 env_reward，不含BC激励）'},
-    'NR-2': {'id': 'NR-2', 'improvement_pct': 7.92, 'welch_p': 5.02e-11,
-             'cohens_d': 1.1962, 'n': 71,
-             'field': 'summary.avg_env_reward（全程 env_reward，不含BC激励）'},
-    'NR-3': {'id': 'NR-3', 'improvement_pct': 1.95, 'welch_p': 7.28e-11,
-             'cohens_d': 1.1858, 'n': 71,
+    'NR-1': {'id': 'NR-1', 'improvement_pct': 25.75, 'welch_p': 0.003348,
+             'cohens_d': 0.4179, 'n': 101,
+             'field': 'summary.avg_env_reward_last_50（末50回合 env_reward，不含BC激励）',
+             'role': '首轮机制读数（赛后 λ 进梯度修复后同种子收敛，不作主口径）'},
+    'NR-2': {'id': 'NR-2', 'improvement_pct': 7.7, 'welch_p': 1.142e-14,
+             'cohens_d': 1.1749, 'n': 101,
+             'field': 'summary.avg_env_reward（全程 env_reward，不含BC激励）',
+             'role': '主口径：全程协作增益'},
+    'NR-3': {'id': 'NR-3', 'improvement_pct': 1.92, 'welch_p': 1.504e-14,
+             'cohens_d': 1.1691, 'n': 101,
              'field': 'summary.avg_cooperation_rate（全程平均合作率）'},
+    # 跨种子稳健读数（决策 A：全程口径跨两批独立种子收敛于 +6.5~6.6%，这是对外主读数）
+    'NR-202': {'id': 'NR-202', 'improvement_pct': 6.54, 'welch_p': 6.85e-11,
+               'cohens_d': 0.9705, 'n': 202,
+               'field': '全程 env_reward（同种子机制修复后复现，202 运行）',
+               'role': '主口径稳健性：同种子修复后复现'},
+    'NR-203': {'id': 'NR-203', 'improvement_pct': 6.61, 'welch_p': 8.21e-12,
+               'cohens_d': 1.0294, 'n': 200,
+               'field': '全程 env_reward（跨种子 301–400 泛化，200 运行）',
+               'role': '主口径稳健性：跨种子泛化'},
 }
 
 
@@ -476,10 +538,31 @@ def _route_api_caliber():
         caliber[nid] = item
     return jsonify({
         'source': source,
-        'note': 'NR-1（末50回合）与 NR-2（全程）必须同报；主口径 BH-FDR 显著 / Bonferroni '
-                '不显著，效应量小-中，不得表述为强证据或证明激励有效。',
+        'note': '主口径=全程协作增益（NR-2 +7.7% 原初批；NR-202 +6.54% 同种子修复后复现；'
+                'NR-203 +6.61% 跨种子泛化），三批方向一致、稳健显著。NR-1 末50 +25.75% 为'
+                '首轮机制读数，赛后 λ 进梯度修复后同种子收敛，故不作主口径。单点不得宣称'
+                '“证明激励有效”，效应量与口径边界如实同报。',
         'caliber': caliber,
     })
+
+
+def _load_persistent_secret():
+    import secrets
+    secret_file = _BASE_DIR / 'instance' / 'session_secret'
+    secret_file.parent.mkdir(parents=True, exist_ok=True)
+    if secret_file.exists():
+        return secret_file.read_text(encoding='utf-8').strip()
+    value = secrets.token_hex(32)
+    try:
+        with secret_file.open('x', encoding='utf-8') as f:
+            f.write(value)
+    except FileExistsError:
+        return secret_file.read_text(encoding='utf-8').strip()
+    try:
+        secret_file.chmod(0o600)
+    except OSError:
+        pass
+    return value
 
 
 # =============================================================================
@@ -494,6 +577,367 @@ def _create_app():
                       static_folder=str(_BASE_DIR / 'static'),
                       static_url_path='/static',
                       template_folder=str(_BASE_DIR / 'templates'))
+
+    # 站内账户：SQLite 存储密码哈希，不影响现有实验 API 和匿名演示。
+    import os
+    from flask import session, redirect, url_for, flash
+    from werkzeug.security import generate_password_hash, check_password_hash
+    import sqlite3, secrets
+    from threading import Lock
+    users_db = _BASE_DIR / 'instance' / 'accounts.sqlite3'
+    users_db.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(users_db) as conn:
+        conn.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)')
+    flask_app.secret_key = os.environ.get('MARL_DASHBOARD_SECRET') or _load_persistent_secret()
+    flask_app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax')
+    db_lock = Lock()
+    @flask_app.before_request
+    def require_account():
+        # Static assets and login/registration remain public; all dashboard APIs require login.
+        if request.endpoint in ('static', 'favicon', 'healthz', 'login', 'register'):
+            return None
+        if session.get('uid') is None:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': '请先登录', 'login_url': '/login'}), 401
+            return redirect(url_for('login'))
+        # On authenticated POST endpoints with side effects verify CSRF.
+        if request.method == 'POST' and request.endpoint != 'logout':
+            token = request.headers.get('X-CSRF-Token', '')
+            if not secrets.compare_digest(token, session.get('_csrf', '')):
+                return jsonify({'error': 'CSRF 校验失败'}), 403
+
+
+    def csrf_token():
+        if '_csrf' not in session: session['_csrf'] = secrets.token_urlsafe(32)
+        return session['_csrf']
+    flask_app.jinja_env.globals['csrf_token'] = csrf_token
+
+    @flask_app.route('/login', methods=['GET','POST'])
+    def login():
+        if request.method == 'POST':
+            if not secrets.compare_digest(request.form.get('csrf_token',''), csrf_token()):
+                flash('请求已失效，请刷新页面重试。', 'error')
+            else:
+                name = request.form.get('username','').strip()
+                password = request.form.get('password','')
+                with sqlite3.connect(users_db) as conn:
+                    row = conn.execute('SELECT id,password_hash FROM users WHERE username=?',(name,)).fetchone()
+                if row and check_password_hash(row[1],password):
+                    session.clear(); session['uid']=row[0]; session['username']=name; csrf_token()
+                    return redirect(url_for('index'))
+                flash('账号或密码错误。','error')
+        if session.get('uid'):
+            return redirect(url_for('index'))
+        return render_template('auth.html', mode='login')
+
+    @flask_app.route('/register', methods=['GET','POST'])
+    def register():
+        if request.method == 'POST':
+            name = request.form.get('username','').strip()
+            password = request.form.get('password','')
+            confirm = request.form.get('confirm','')
+            if not secrets.compare_digest(request.form.get('csrf_token',''),csrf_token()):
+                flash('请求已失效，请刷新页面重试。','error')
+            elif not (3 <= len(name) <= 32) or not all(c.isascii() and (c.isalnum() or c in '_-') for c in name):
+                flash('账号需要 3–32 位英文字母、数字、下划线或连字符。','error')
+            elif len(password)<10 or len(password)>128 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
+                flash('密码须为 10–128 位，并包含字母与数字。','error')
+            elif password != confirm:
+                flash('两次输入的密码不一致。','error')
+            else:
+                try:
+                    with db_lock, sqlite3.connect(users_db) as conn:
+                        conn.execute('INSERT INTO users(username,password_hash) VALUES(?,?)',(name,generate_password_hash(password)))
+                    flash('注册成功，请登录。','success')
+                    return redirect(url_for('login'))
+                except sqlite3.IntegrityError: flash('该账号已存在。','error')
+        if session.get('uid'):
+            return redirect(url_for('index'))
+        return render_template('auth.html',mode='register')
+
+    @flask_app.route('/logout', methods=['POST'])
+    def logout():
+        if not secrets.compare_digest(request.form.get('csrf_token',''),csrf_token()):
+            return 'Invalid CSRF token', 400
+        session.clear()
+        return redirect(url_for('login'))
+
+    @flask_app.route('/api/me')
+    def api_me():
+        return jsonify({'authenticated': bool(session.get('uid')), 'username':session.get('username')})
+
+    @flask_app.route('/api/evidence/verify-ledger', methods=['POST'])
+    def api_verify_ledger():
+        from visualization.evidence_verifier import verify_export
+        if request.content_length is not None and request.content_length > 8_000_000:
+            return jsonify({'valid': False, 'error': '文件大小超过 8MB'}), 413
+        payload = request.get_json(silent=True)
+        if payload is None:
+            return jsonify({'valid': False, 'error': '请提交 JSON 格式的账本数据'}), 400
+        return jsonify(verify_export(payload))
+
+    @flask_app.route('/api/p2p/probe', methods=['POST'])
+    def api_p2p_probe():
+        import socket, time
+        values = request.get_json(silent=True) or {}
+        try:
+            ports = values.get('ports', [])
+            if not isinstance(ports, list) or not 1 <= len(ports) <= 12:
+                raise ValueError('请选择 1—12 个本机端口')
+            ports = [int(x) for x in ports]
+            if any(port < 1 or port > 65535 for port in ports):
+                raise ValueError('端口必须在 1—65535 之间')
+        except (ValueError, TypeError) as e:
+            return jsonify({'error': str(e)}), 400
+        results = []
+        for port in ports:
+            started = time.monotonic()
+            try:
+                with socket.create_connection(('127.0.0.1', port), timeout=0.35):
+                    reachable = True
+            except OSError:
+                reachable = False
+            results.append({'host': '127.0.0.1', 'port': port,
+                            'reachable': reachable,
+                            'elapsed_ms': round((time.monotonic()-started)*1000, 2)})
+        return jsonify({'results': results, 'scope': 'local_tcp_port_probe'})
+
+    from visualization import business_service as biz
+
+    @flask_app.route('/api/business/transactions', methods=['GET', 'POST'])
+    def business_transactions():
+        uid=session['uid']
+        if request.method=='GET': return jsonify({'transactions':biz.recent(uid)})
+        data=request.get_json(silent=True) or {}
+        try:return jsonify(biz.submit(uid,data.get('content'))),201
+        except ValueError as e:return jsonify({'error':str(e)}),400
+
+    @flask_app.route('/api/business/transactions/<txid>')
+    def business_transaction(txid):
+        result=biz.lookup(session['uid'],txid)
+        return (jsonify(result),200) if result else (jsonify({'error':'交易不存在'}),404)
+
+    @flask_app.route('/api/business/train/jobs', methods=['GET','POST'])
+    def business_jobs():
+        if request.method=='GET':return jsonify({'jobs':biz.jobs(session['uid'])})
+        try:return jsonify(biz.start(session['uid'],request.get_json(silent=True))),201
+        except ValueError as e:return jsonify({'error':str(e)}),400
+
+    @flask_app.route('/api/business/train/jobs/<jid>')
+    def business_job(jid):
+        job=biz.get_job(session['uid'],jid)
+        return (jsonify(job),200) if job else (jsonify({'error':'任务不存在'}),404)
+
+    @flask_app.route('/api/business/train/jobs/<jid>/stop', methods=['POST'])
+    def business_stop(jid):
+        job=biz.stop(session['uid'],jid)
+        return (jsonify(job),200) if job else (jsonify({'error':'任务不存在'}),404)
+
+    @flask_app.route('/api/business/train/jobs/<jid>/logs')
+    def business_logs(jid):
+        log=biz.logs(session['uid'],jid)
+        return (jsonify({'logs':log}),200) if log is not None else (jsonify({'error':'任务不存在'}),404)
+
+    @flask_app.route('/api/business/chain/audit')
+    def business_chain_audit():
+        return jsonify(biz.audit(session['uid']))
+
+    @flask_app.route('/api/business/chain/blocks')
+    def business_chain_blocks():
+        return jsonify({'blocks':biz.blocks(session['uid'])})
+
+    @flask_app.route('/api/business/chain/receipt/<txid>')
+    def business_chain_receipt(txid):
+        import re
+        if not re.fullmatch(r'[0-9a-f]{64}',txid):return jsonify({'error':'交易哈希无效'}),400
+        result=biz.receipt(session['uid'],txid)
+        return jsonify(result) if result else (jsonify({'error':'交易不存在或无权访问'}),404)
+
+    @flask_app.route('/api/business/chain/tamper-check', methods=['POST'])
+    def business_chain_tamper_check():
+        import re
+        data=request.get_json(silent=True) or {}
+        txid=data.get('txid','')
+        if not isinstance(txid,str) or not re.fullmatch(r'[0-9a-f]{64}',txid):return jsonify({'error':'交易哈希无效'}),400
+        try:result=biz.simulate_tamper(session['uid'],txid,data.get('content'))
+        except ValueError as e:return jsonify({'error':str(e)}),400
+        return jsonify(result) if result else (jsonify({'error':'交易不存在或无权访问'}),404)
+
+    @flask_app.route('/api/distributed/snapshot', methods=['GET'])
+    def distributed_snapshot():
+        from visualization import distributed_consensus as dc
+        return jsonify(dc.latest_snapshot())
+
+    @flask_app.route('/api/distributed/collaboration/jobs')
+    def distributed_collaboration_jobs():
+        from visualization import collaboration_service as cs
+        return jsonify(cs.jobs(session['uid']))
+
+    @flask_app.route('/api/distributed/collaboration/task/<job_id>/lifecycle')
+    def distributed_task_lifecycle(job_id):
+        """Unified, account-scoped evidence state for one BC-MARL task."""
+        from visualization import collaboration_lifecycle as lifecycle
+        try:
+            return jsonify(lifecycle.task_lifecycle(session['uid'], job_id))
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            return jsonify({'error': str(exc)}), 400
+
+    @flask_app.route('/api/distributed/collaboration/audit')
+    def distributed_collaboration_audit():
+        from visualization import collaboration_lifecycle as lifecycle
+        try:
+            return jsonify(lifecycle.audit_portfolio(session['uid']))
+        except (ValueError, OSError, TypeError, KeyError) as exc:
+            return jsonify({'error': str(exc)}), 400
+
+    @flask_app.route('/api/distributed/contribution/preview', methods=['POST'])
+    def distributed_contribution_preview():
+        from visualization import collaboration_service as cs
+        body=request.get_json(silent=True) or {}
+        try:
+            return jsonify(cs.candidate(session['uid'], body.get('job_id'), body.get('window',20)))
+        except (ValueError, OSError, TypeError, KeyError) as e:
+            return jsonify({'error':str(e)}),400
+
+    @flask_app.route('/api/distributed/contribution/activate',methods=['POST'])
+    def distributed_contribution_activate():
+        from visualization import collaboration_service as cs
+        from visualization import distributed_consensus as dc
+        body=request.get_json(silent=True) or {}
+        try:
+            candidate=cs.candidate(session['uid'],body.get('job_id'),body.get('window',20))
+            if (candidate['origin_sha256']!=body.get('origin_sha256') or
+                    candidate['training_binding']['training_result_sha256']!=body.get('training_result_sha256') or
+                    candidate['rounds_sha256']!=body.get('rounds_sha256')):
+                raise ValueError('贡献来源或训练结果已变化，请重新预览')
+            return jsonify(dc.activate_snapshot(candidate))
+        except (ValueError,OSError,TypeError,KeyError) as e:
+            return jsonify({'error':str(e)}),400
+
+    @flask_app.route('/api/distributed/recover',methods=['POST'])
+    def distributed_recover():
+        from visualization import distributed_consensus as dc
+        body=request.get_json(silent=True) or {}
+        cfg=dc.init_network()
+        node=next((x for x in cfg['peers'] if x['id']==body.get('node')),None)
+        if node is None:return jsonify({'error':'未知节点'}),400
+        try:return jsonify(dc.recover_node(node,cfg['peers']))
+        except (ValueError,OSError,KeyError) as e:return jsonify({'error':str(e)}),400
+
+    @flask_app.route('/api/distributed/epochs')
+    def distributed_epochs():
+        from visualization import distributed_consensus as dc
+        return jsonify(dc.epoch_status())
+
+    @flask_app.route('/api/distributed/nodes')
+    def distributed_nodes():
+        from visualization import distributed_consensus as dc
+        return jsonify(dc.statuses())
+
+    @flask_app.route('/api/distributed/submit',methods=['POST'])
+    def distributed_submit():
+        from visualization import distributed_consensus as dc
+        body=request.get_json(silent=True) or {}
+        try:
+            tx=biz.sign_distributed(session['uid'],body.get('content'))
+            result=dc.propose(tx,max_views=body.get("max_views",3),timeout=body.get("timeout",1.0))
+            if result.get('status')=='quorum_failed':
+                # F04：失败现场登记——resume 端点用原 txid 幂等续跑
+                biz.remember_pending_submit(session['uid'],tx,result)
+            return jsonify(result), (201 if result['status']=='replicated' else 202)
+        except ValueError as ex:return jsonify({'error':str(ex)}),400
+
+    @flask_app.route('/api/distributed/pending',methods=['GET'])
+    def distributed_pending():
+        """F04：网络卡死轮次可视化 + 当前用户的待续跑存证。"""
+        from visualization import distributed_consensus as dc
+        st=dc.pending_rounds()
+        mine=biz.get_pending_submit(session['uid'])
+        return jsonify({'network':st,'my_pending':(
+            {'txid':mine['txid'],'age_s':round(time.time()-mine['at'],1),
+             'status':mine['status']} if mine else None)})
+
+    @flask_app.route('/api/distributed/resume',methods=['POST'])
+    def distributed_resume():
+        """F04：同 txid 幂等续跑——不再生成新 nonce（与重复点击提交的本质区别）。"""
+        from visualization import distributed_consensus as dc
+        mine=biz.get_pending_submit(session['uid'])
+        if not mine:return jsonify({'error':'无可续跑的存证'}),404
+        result=dc.propose(mine['tx'],max_views=3,timeout=1.0)
+        if result.get('status')=='replicated':
+            biz.pop_pending_submit(session['uid'])
+        else:
+            biz.remember_pending_submit(session['uid'],mine['tx'],result)
+        return jsonify(result), (201 if result['status']=='replicated' else 202)
+
+    @flask_app.route('/api/distributed/abort-pending',methods=['POST'])
+    def distributed_abort_pending():
+        """F04：协调清障（网络级操作，与停节点/换纪元同信任级）+ 清除本用户 pending。"""
+        from visualization import distributed_consensus as dc
+        outcome=dc.abort_pending_round()
+        biz.pop_pending_submit(session['uid'])
+        return jsonify(outcome), (200 if outcome.get('coordinated') else 409)
+
+    @flask_app.route('/api/distributed/contribution/attest', methods=['POST'])
+    def distributed_contribution_attest():
+        """Attest a verified BC-MARL job's contribution weights on the active epoch."""
+        from visualization import distributed_consensus as dc
+        from visualization import collaboration_service as cs
+        body=request.get_json(silent=True) or {}
+        try:
+            cfg=dc.init_network()
+            evidence=cs.attest_event(cfg, session['uid'])
+            # V25: a task-level commit must match the job explicitly chosen in the UI.
+            selected_job=body.get('job_id')
+            if selected_job is not None and selected_job!=evidence['training_job_id']:
+                raise ValueError('所选训练任务与当前激活的贡献纪元不一致，请核对权重快照')
+            # A contribution/epoch commitment is a unique governance event.
+            # Do not sign a new transaction if this snapshot is already on a
+            # signed local chain, even if replicas have not fully caught up.
+            # F14：去重扫全链（cap=None），而非展示用的最近 10 条，避免历史存证被挤出漏检。
+            # F14 原子化：查重→签名→propose 全程持锁，堵并发双提交窗口。
+            from visualization import collaboration_lifecycle as lifecycle
+            with _ATTEST_MUTEX:
+                existing=next((r for r in lifecycle._committed_blocks(
+                    cfg, session['uid'], evidence['training_job_id'], cap=None)
+                    if r['snapshot_hash'] == evidence['snapshot_hash']), None)
+                if existing:
+                    verification=dc.cross_verify(existing['height'], deep=True)
+                    return jsonify({'status':'already_attested',
+                        'block_height':existing['height'], 'txid':existing['txid'],
+                        'snapshot':existing['snapshot_hash'],
+                        'replication_confirmed':verification['consistent'],
+                        'message':'该训练任务在当前纪元已有签名存证，请核验或恢复落后节点，勿重复提交'}),200
+                raw=json.dumps(evidence,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+                if len(raw)>2048:
+                    raise ValueError('贡献事件超出交易长度限制')
+                signed=biz.sign_distributed(session['uid'],raw)
+                result=dc.propose(signed,max_views=body.get("max_views",3),timeout=body.get("timeout",1.0))
+            if result.get('status')=='quorum_failed':
+                # F04：失败现场登记——resume 端点用原 txid 幂等续跑
+                biz.remember_pending_submit(session['uid'],signed,result)
+            result['evidence']=evidence
+            result['evidence_sha256']=hashlib.sha256(raw.encode()).hexdigest()
+            result['evidence_status']='replicated' if result['status']=='replicated' else 'not_fully_replicated'
+            return jsonify(result), (201 if result['status']=='replicated' else 202)
+        except (ValueError,TypeError,KeyError,OSError) as e:
+            return jsonify({'error':str(e)}),400
+
+    @flask_app.route('/api/distributed/collaboration/trace/<int:height>')
+    def distributed_collaboration_trace(height):
+        from visualization import collaboration_service as cs
+        try:
+            if height < 1:
+                raise ValueError('区块高度必须大于零')
+            return jsonify(cs.trace(height, session['uid']))
+        except (ValueError,TypeError,KeyError,OSError) as e:
+            return jsonify({'error':str(e)}),400
+
+    @flask_app.route('/api/distributed/verify/<int:height>')
+    def distributed_verify(height):
+        from visualization import distributed_consensus as dc
+        if height<1:return jsonify({'error':'无效高度'}),400
+        return jsonify(dc.cross_verify(height))
 
     # 注册路由
     flask_app.add_url_rule('/', 'index', _route_index)

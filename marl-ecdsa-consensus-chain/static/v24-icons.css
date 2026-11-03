@@ -1,0 +1,66 @@
+/* V24 semantic icon design system. All vector icons use local inline SVG; no external fonts. */
+:root{--v24-ink:#17282e;--v24-teal:#0d9d91;--v24-teal-dark:#087d78;--v24-mint:#9be8d2;--v24-warm:#e99a73;--v24-paper:#f7f7f3;--v24-outline:#d5e6dd}
+.v24-icon{width:20px;height:20px;display:inline-block;vertical-align:middle;flex:none;stroke:currentColor;overflow:visible;shape-rendering:geometricPrecision}
+.v24-icon *{vector-effect:non-scaling-stroke}
+.brand-mark .v24-icon{width:25px;height:25px;color:#fff;filter:drop-shadow(0 1px 3px #10372c55)}
+.nav-tabs .nav-icon{width:34px;height:34px;min-width:34px;border-radius:10px;display:grid;place-items:center;color:#a8c8c5;background:rgba(141,212,196,.075);border:1px solid transparent;transition:color .18s,background .18s,border-color .18s,transform .18s}
+.nav-tabs .nav-icon .v24-icon{width:19px;height:19px}
+.nav-tab.active .nav-icon{color:#a7f2db;background:rgba(56,184,163,.18);border-color:rgba(135,231,209,.27)}
+.nav-tab:hover .nav-icon{color:#b8f1e4;background:rgba(64,176,150,.14);transform:translateY(-1px)}
+.nav-tab[data-tab="attack"]:hover .nav-icon{color:#f8bea1;background:rgba(233,154,115,.14)}
+.side-footer-icon{background:rgba(19,169,151,.14)!important;border:1px solid rgba(151,230,202,.18);color:#a4e8d5!important}
+.side-footer-icon .v24-icon{width:21px;height:21px}
+.loading-logo .v24-icon{width:24px;height:24px}
+.value-strip .vs-icon{width:39px;height:39px;background:#e4f5ef!important;color:#11897d!important;border:1px solid #cae9dc;box-shadow:inset 0 1px #fff}
+.value-strip>div:nth-child(2) .vs-icon{background:#e7f3f0!important;color:#1e837f!important}
+.value-strip>div:nth-child(3) .vs-icon{background:#fff1e8!important;color:#bd7856!important;border-color:#f3dfd1}
+.value-strip>div:nth-child(4) .vs-icon{background:#e8f4eb!important;color:#287f69!important}
+.vs-icon .v24-icon{width:21px;height:21px}
+.v24-action-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;line-height:0;pointer-events:none}
+.v24-action-icon>.v24-icon{width:16px;height:16px}
+button.v24-decorated{display:inline-flex;align-items:center;justify-content:center;gap:8px}
+button.v24-decorated:disabled .v24-action-icon{opacity:.55}
+button.v24-decorated:hover .v24-action-icon{transform:translateY(-1px);transition:transform .18s ease}
+button#mobile-menu .v24-icon{width:20px;height:20px;color:var(--v24-teal-dark)}
+/* Standardize legacy colored symbolic tiles with palette-linked icon content. */
+.security-icon,.metric-icon{border:1px solid #d3e8df}
+.security-icon.green,.metric-card.green .metric-icon{color:#0c9180!important;background:#e2f5ed!important}
+.security-icon.blue,.metric-card.blue .metric-icon{color:#187d86!important;background:#e5f3f1!important}
+.security-icon.yellow,.metric-card.orange .metric-icon{color:#b87850!important;background:#fff1e7!important}
+.security-icon.red{color:#b85f53!important;background:#fdf0eb!important}
+.metric-card.purple .metric-icon{color:#0d807b!important;background:#e6f4f1!important}
+/* Authentication uses the same glyph shapes but context-appropriate contrast. */
+.auth-page .brand-glyph{background:linear-gradient(135deg,#11a99a,#097e78 72%,#e99a73);border:1px solid #a7e8d747}
+.auth-page .brand-glyph .v24-icon{width:32px;height:32px;color:#fff}
+.auth-page .node-symbol{color:#b4f4db;background:#8be4cc16;border:1px solid #9ce6d529}
+.auth-page .node-symbol .v24-icon{width:19px;height:19px}
+.auth-page .hub-icon{width:34px;height:34px;color:#9ee8d2}
+.auth-page .field-icon{color:#609b93}
+.auth-page .field-icon .v24-icon{width:19px;height:19px}
+.auth-page .field-shell:focus-within .field-icon{color:var(--v24-teal-dark)}
+.auth-page .note-icon{color:var(--v24-teal-dark);background:#e3f4eb}
+.auth-page .note-icon .v24-icon{width:18px;height:18px}
+.auth-page .alert-symbol .v24-icon{width:15px;height:15px}
+.auth-page .submit-arrow{width:23px;height:23px}
+.auth-page .password-reveal{display:inline-flex;align-items:center;gap:6px}
+.auth-page .password-reveal .v24-icon{width:16px;height:16px}
+.auth-page .auth-alert.success .alert-symbol{color:#197e67}
+.auth-page .auth-alert.error .alert-symbol{color:#a94d42}
+@media(max-width:460px){.nav-tabs .nav-icon{width:31px;height:31px;min-width:31px}button.v24-decorated{gap:5px}.auth-page .password-reveal{gap:4px}}
+@media(prefers-reduced-motion:reduce){.v24-action-icon,.nav-icon{transition:none!important;transform:none!important}}
+
+/* V24 visual polish: no mixed-font menu/chevron glyphs; warm mint + teal everywhere. */
+.side-workspace .workspace-dot{background:#215b56!important;color:#a6edd9!important;border:1px solid #599c8c55!important;display:grid!important;place-items:center!important}
+.side-workspace .workspace-dot::before{content:none!important}
+.side-workspace .workspace-dot .v24-icon{width:17px;height:17px}
+.workspace-caret .v24-icon{width:14px;height:14px;color:#8bbcb4}
+.nav-chevron .v24-icon{width:14px;height:14px}
+.topbar .export-btn{background:#0d9187!important;border-color:#0d9187!important;color:#fff!important}
+.topbar .export-btn:hover{background:#087d78!important;border-color:#087d78!important}
+.hero-art .core-node{background:linear-gradient(135deg,#159b8c,#155e61)!important;color:#d7fdef!important;box-shadow:0 16px 42px #164d4d65,0 0 28px #31c5a95a!important}
+.hero-art .core-node .v24-icon{width:38px;height:38px}
+.hero-art .orbit{border-color:#93e0c58a!important}
+.hero-art .node{background:#b8f5e4!important;box-shadow:0 0 12px #6fe4c2!important}
+.auth-page .access-switch a .v24-icon{width:13px;height:13px;vertical-align:-2px;margin-left:2px}
+.menu-trigger{display:none!important}
+@media(max-width:850px){.menu-trigger{display:inline-flex!important}}

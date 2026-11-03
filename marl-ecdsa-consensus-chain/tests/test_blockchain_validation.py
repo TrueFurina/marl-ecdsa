@@ -66,16 +66,29 @@ class TestChainValidation:
 
 
 class TestNoIdentityContract:
-    """无 identity_contract（stub 模式）：空签名/未验证交易向后兼容允许"""
+    """R1 收紧（2026-10-18 拍板 1A）：identity_contract 未配置时缺签名/verified=False
+    默认拒绝（fail-closed）；仅显式 allow_unsigned_stub=True 的 stub 路径放行"""
 
-    def test_empty_signature_allowed(self):
-        bc = Blockchain()  # 无 identity_contract
+    def test_empty_signature_rejected_by_default(self):
+        bc = Blockchain()  # 无 identity_contract 且未开 stub 开关
+        tx = _make_tx(sig=False)
+        block = _make_block(bc.latest_block, [tx])
+        assert bc._validate_new_block(block) is False
+
+    def test_unverified_tx_rejected_by_default(self):
+        bc = Blockchain()
+        tx = _make_tx(verified=False)
+        block = _make_block(bc.latest_block, [tx])
+        assert bc._validate_new_block(block) is False
+
+    def test_empty_signature_allowed_with_explicit_stub(self):
+        bc = Blockchain(allow_unsigned_stub=True)  # 显式 stub 放行（向后兼容路径）
         tx = _make_tx(sig=False)
         block = _make_block(bc.latest_block, [tx])
         assert bc._validate_new_block(block) is True
 
-    def test_unverified_tx_allowed(self):
-        bc = Blockchain()
+    def test_unverified_tx_allowed_with_explicit_stub(self):
+        bc = Blockchain(allow_unsigned_stub=True)
         tx = _make_tx(verified=False)
         block = _make_block(bc.latest_block, [tx])
         assert bc._validate_new_block(block) is True
@@ -87,7 +100,10 @@ class TestWithIdentityContract:
     def test_unverified_tx_rejected(self):
         class _FakeIdentity:
             def get_public_key(self, agent_id):
-                return None  # 公钥未注册
+                return None
+
+            def is_active(self, agent_id):
+                return True  # F05：fake 合约需实现准入查询  # 公钥未注册
         bc = Blockchain(identity_contract=_FakeIdentity())
         tx = _make_tx(verified=False)
         block = _make_block(bc.latest_block, [tx])
@@ -97,6 +113,9 @@ class TestWithIdentityContract:
         class _FakeIdentity:
             def get_public_key(self, agent_id):
                 return None
+
+            def is_active(self, agent_id):
+                return True  # F05：fake 合约需实现准入查询
         bc = Blockchain(identity_contract=_FakeIdentity())
         tx = _make_tx(sig=False)
         block = _make_block(bc.latest_block, [tx])
@@ -106,7 +125,10 @@ class TestWithIdentityContract:
         """有 identity_contract + 有签名但公钥未注册 → 拒绝"""
         class _FakeIdentity:
             def get_public_key(self, agent_id):
-                return None  # 未注册
+                return None
+
+            def is_active(self, agent_id):
+                return True  # F05：fake 合约需实现准入查询  # 未注册
         bc = Blockchain(identity_contract=_FakeIdentity())
         tx = _make_tx(verified=True, sig=True)
         block = _make_block(bc.latest_block, [tx])
@@ -117,6 +139,9 @@ class TestWithIdentityContract:
         class _FakeIdentity:
             def get_public_key(self, agent_id):
                 return None
+
+            def is_active(self, agent_id):
+                return True  # F05：fake 合约需实现准入查询
         bc = Blockchain(identity_contract=_FakeIdentity())
         tx = _make_tx(verified=False)
         block = _make_block(bc.latest_block, [tx])

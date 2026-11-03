@@ -1,0 +1,7 @@
+/* V17: smaller result areas, predictable wrap, scoped scroll */
+.training-data-note{padding:12px 16px;margin:12px 0 18px;border:1px solid #c8ded7;border-radius:12px;background:#f4faf7;color:#286154;font-size:14px;line-height:1.6}
+pre,.v8-proof,#v7-train-logs,#v7-tx-detail{box-sizing:border-box;max-width:100%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;overflow:auto;max-height:460px;min-height:96px;font-size:13px;line-height:1.65;padding:14px;border-radius:12px}
+input,textarea,select{box-sizing:border-box;max-width:100%;font-size:14px;line-height:1.55}
+textarea{min-height:92px;resize:vertical} .chart-card,.data-card,.v8-panel{min-width:0}
+.chart-card canvas{max-width:100%}
+@media(max-width:760px){pre,.v8-proof,#v7-train-logs,#v7-tx-detail{max-height:340px;font-size:12px}.training-data-note{margin:8px 0}}

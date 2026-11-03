@@ -4,6 +4,7 @@ dashboard consensus_votes/block_explorer 路由测试（RalphLoop 原子任务 B
 通过标准：新增 ≥6 项测试全过
 """
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -11,12 +12,17 @@ import visualization.dashboard as dash
 
 logging.basicConfig(level=logging.CRITICAL)
 
+# F09 收尾（2026-11-03）：子进程 sys.path 不再用 '.'——pytest 启动目录不是 app/ 时
+# 子进程会 ModuleNotFoundError（误报产品缺陷）。改按本测试文件位置定位 app 目录。
+_APP_DIR = str(Path(__file__).resolve().parents[1])
+
 
 @pytest.fixture
 def client():
     app = dash._create_app()
     assert app is not None
-    return app.test_client()
+    from tests.conftest import make_auth_client
+    return make_auth_client(app.test_client(), 'f08_routes')
 
 
 class TestConsensusVotes:
@@ -98,10 +104,10 @@ class TestMerklePlaceholder:
         服务重启后同一区块编号显示成不同哈希 → 现场演示重启即穿帮）"""
         # 独立子进程重算，验证与当前进程结果一致
         import subprocess, sys as _sys
-        code = ("import sys; sys.path.insert(0, '.'); "
+        code = ("import sys; sys.path.insert(0, r'" + _APP_DIR + "'); "
                 "from visualization.dashboard import _demo_hash; "
                 "print(_demo_hash('block-7'))")
-        out = subprocess.run([_sys.executable, '-c', code], cwd='.',
+        out = subprocess.run([_sys.executable, '-c', code], cwd=str(_APP_DIR),
                              capture_output=True, text=True, timeout=60)
         assert out.returncode == 0, out.stderr
         assert out.stdout.strip() == dash._demo_hash('block-7')

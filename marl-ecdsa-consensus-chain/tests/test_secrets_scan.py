@@ -10,7 +10,8 @@
 
 本测试钉死三组契约：
 1. **真密钥必检出**：AWS Access Key / Secret、GitHub token、RSA 私钥块；
-2. **非密钥必豁免**：绝对路径（/Users/...、C:/Users/...）、40 位纯 hex（区块哈希/种子）、
+2. **非密钥必豁免**：绝对路径（Unix 家目录 ``/Users/<name>``、Windows 盘符
+   ``C:/Users/<name>``，写法见 ``test_exempts_absolute_path`` 的占位样例）、
    ``hash=``/``sha256=`` 字段上下文；
 3. **空参数直接通过**：pre-commit 第 1 步 ``$(git diff --cached --name-only)`` 空暂存时
    展开为空，``secrets_scan.py`` 必须直接返回 0，而非退化成全仓 rglob 扫描（否则扫到
@@ -103,7 +104,7 @@ def test_detects_private_key_block():
 # ── 2. 非密钥必豁免（fail-closed 的"open"半边——不能误伤） ────────────────
 
 def test_exempts_absolute_path():
-    p = _write_tmp("PY = 'C:/Users/Lenovo/AppData/Local/Programs/Python/python.exe'\n")
+    p = _write_tmp("PY = 'C:/Users/SomeUser/AppData/Local/Programs/Python/python.exe'\n")
     try:
         code, out = _run_scan(p)
     finally:

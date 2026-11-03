@@ -67,7 +67,7 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 #: 仓库根：scripts/ 的上一级（marl-ecdsa-consensus-chain/）
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
-#: 工作区根：仓库的父目录（【CCF】区块链AI协同…/，本身不是 git 仓库）
+#: 工作区根：仓库的父目录（本身不是 git 仓库）
 WORKSPACE_ROOT: Path = REPO_ROOT.parent
 
 RESULTS_DIR: Path = REPO_ROOT / "results"
@@ -711,6 +711,44 @@ def scan_text_lines(path: os.PathLike | str):
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
         for lineno, line in enumerate(fh, 1):
             yield lineno, line.rstrip("\n")
+
+
+# —— HTML：markup 屏蔽（F6，2026-10-17）—— #
+#: ``<style>…</style>`` / ``<script>…</script>`` 整段（含标签本身）。
+_HTML_STYLE_SCRIPT_RE = re.compile(
+    r"<(style|script)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+#: 任意标签 ``<…>`` 的内部（属性名/值、SVG 坐标、锚点 id 等）。
+_HTML_TAG_RE = re.compile(r"<[^>]*>", re.DOTALL)
+
+
+def _blank_keep_newlines(match: re.Match) -> str:
+    """把匹配段整体替换为等长空白；保留换行符，行号不变。"""
+    return re.sub(r"[^\n]", " ", match.group(0))
+
+
+def strip_html_markup(text: str) -> str:
+    """屏蔽 HTML 的 ``<style>/<script>`` 区段与所有标签内部（保留换行，保行号）。
+
+    F6（架构审查 2026-09-23，2026-10-17 清偿）：数字令牌只应对「读者可见
+    文本」生效。此前 CSS 色标（``radial-gradient(... at 88% 92%``）、SVG
+    坐标（``x="406"``）、锚点（``id="312"``）等 markup 内的数字被当作申报值
+    误报，拉低门禁信噪比（门禁常红 → 诱发 ``--no-verify``）。标签之间的
+    文本节点（含 ``<text>``/``<td>`` 等元素内容）原样保留，不受影响。
+    """
+    text = _HTML_STYLE_SCRIPT_RE.sub(_blank_keep_newlines, text)
+    text = _HTML_TAG_RE.sub(_blank_keep_newlines, text)
+    return text
+
+
+def scan_html_text_lines(path: os.PathLike | str):
+    """HTML 专用逐行产出：先做 markup 屏蔽（保行号），再逐行 yield。"""
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    lines = strip_html_markup(text).split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    for lineno, line in enumerate(lines, 1):
+        yield lineno, line.rstrip("\r")
 
 
 def extract_pptx_strings(path: os.PathLike | str) -> List[Tuple[str, str]]:

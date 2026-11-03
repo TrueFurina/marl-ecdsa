@@ -9,51 +9,11 @@
 total_reward = env_reward + λ * bc_score
 """
 import logging
-import math
 from typing import Dict, List, Optional, Tuple
 
 from ..ledger.world_state import WorldState, AgentStatus
 
 logger = logging.getLogger(__name__)
-
-
-def clamp_finite(
-    value,
-    low: float,
-    high: float,
-    *,
-    fallback: float = 0.0,
-    field: str = "",
-    agent_id: str = "",
-) -> float:
-    """把数值钳到 [low, high]；**非有限值（NaN / ±inf）返回 fallback**。
-
-    为什么不能直接写 `max(low, min(high, x))`：`min` / `max` 的比较对 NaN
-    恒为 False，NaN 会被原样「保留在上界」——
-
-        max(0.0, min(1.0, float('nan'))) == 1.0
-
-    于是**奖励计算坏掉的智能体反而拿到满分**。实测：env_reward=NaN 的智能体
-    task_score=1.0、链上激励 delta=20.0，而表现正常的智能体 delta=17.71 ——
-    谁把奖励算崩了，谁拿钱最多。这条 delta 还会经 `total = env + λ·bc` 回流
-    到策略奖励里，等于奖励「制造 NaN」。
-
-    :param fallback: 非有限值的替代值（默认 0.0 = 无可测贡献）
-    """
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        v = float("nan")
-
-    if not math.isfinite(v):
-        if field:
-            logger.warning(
-                f"[IncentiveContract] 非有限值 {field}={value!r} 已按 {fallback} 处理"
-                + (f"（agent={agent_id}）" if agent_id else "")
-            )
-        return fallback
-
-    return max(low, min(high, v))
 
 
 class ContributionScore:
@@ -133,12 +93,7 @@ class IncentiveContract:
         :param extra_metrics: 额外评分指标（扩展）
         """
         # 任务完成度：基于环境奖励归一化
-        # 11-03 修复：非有限值（NaN/±inf）按「无有效贡献」记 0，不得钳成满分。
-        # 旧写法 max(0.0, min(1.0, env_reward)) 对 NaN 会返回 1.0（上界）。
-        task_score = clamp_finite(
-            env_reward, 0.0, 1.0,
-            field="env_reward", agent_id=agent_id,
-        )
+        task_score = max(0.0, min(1.0, env_reward))
 
         # 协作贡献度：合作=1，中性=0.5，背叛=0
         if did_cooperate:
@@ -203,15 +158,6 @@ class IncentiveContract:
             delta = 0.0
             reason = []
 
-            # 11-03 修复：加权贡献若为非有限值（例如调用方直接塞了带 NaN 的
-            # ContributionScore），一律按 0 计。否则 NaN 会经 delta 写进
-            # WorldState，而 `NaN + x` 恒为 NaN —— 该智能体的积分会被**永久
-            # 污染**，后续任何加减都救不回来（已实测）。
-            ws_score = clamp_finite(
-                cs.weighted_score, 0.0, 1.0,
-                field="weighted_score", agent_id=agent_id,
-            )
-
             if cs.compliance_score == 0.0:
                 # 背叛惩罚（扣除双倍基础奖励）
                 penalty = -self.BASE_REWARD * self.BETRAYAL_PENALTY_MULT
@@ -221,11 +167,11 @@ class IncentiveContract:
             else:
                 # 行为相关激励：基础奖励 + 与自身加权贡献度连续的增益
                 # 消除"常数加成"：贡献越高，增益越大，BC 奖励对行为可区分
-                contrib_gain = self.CONTRIB_GAIN * ws_score
+                contrib_gain = self.CONTRIB_GAIN * cs.weighted_score
                 delta = self.BASE_REWARD + contrib_gain
                 reason.append(
                     f"基础{self.BASE_REWARD:.0f}+贡献增益{contrib_gain:.2f}"
-                    f"(加权贡献{ws_score:.3f})"
+                    f"(加权贡献{cs.weighted_score:.3f})"
                 )
                 self._ws.record_cooperation(agent_id)
 
@@ -234,7 +180,7 @@ class IncentiveContract:
             # 更新行为记录
             self._ws.record_action(
                 agent_id,
-                f"ws_{ws_score:.4f}",
+                f"ws_{cs.weighted_score:.4f}",
                 block_height
             )
 
@@ -242,7 +188,7 @@ class IncentiveContract:
             records.append({
                 'agent_id': agent_id,
                 'rank': rank + 1,
-                'weighted_score': ws_score,
+                'weighted_score': cs.weighted_score,
                 'delta': delta,
                 'reason': ', '.join(reason),
                 'new_total': self._ws.get_score(agent_id),

@@ -24,7 +24,7 @@ sys.path.insert(0, str(HERE))
 import assurance_common as ac  # noqa: E402
 
 RES = REPO / "results"
-REG = Path(r"E:\Program\MARL\【CCF】区块链AI协同：面向MARL的共识机制\deliverables\number_registry.json")
+REG = Path(__file__).resolve().parents[2] / "deliverables" / "number_registry.json"
 
 METRICS = ("avg_env_reward", "avg_cooperation_rate", "avg_betrayal_rate")
 ENGINE_SRC = RES / "weight_broadening_engine" / "results.json"

@@ -30125,7 +30125,7 @@
     "total_transactions": 15822978,
     "pending_transactions": 0,
     "latest_hash": "d7042aeb6929f669...",
-    "chain_valid": true,
+    "chain_valid": null,
     "total_signers": 3
   }
 }

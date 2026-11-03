@@ -34,7 +34,8 @@ class TestBCReward:
     def test_cooperate_reward(self):
         v = NashEquilibriumVerifier()
         reward = v.compute_bc_reward("cooperate", weighted_score=0.5)
-        assert reward == 10.0 + 5.0 * 0.5  # base + top_tier_bonus * score
+        from blockchain.contracts.incentive_contract import IncentiveContract
+        assert reward == 10.0 + IncentiveContract.CONTRIB_GAIN * 0.5  # F16 对齐：top_tier_bonus 与生产合约 CONTRIB_GAIN 同源
 
     def test_cooperate_min_reward(self):
         v = NashEquilibriumVerifier()

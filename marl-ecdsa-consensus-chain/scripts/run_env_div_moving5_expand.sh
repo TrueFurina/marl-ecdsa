@@ -4,7 +4,8 @@
 # 输出到独立目录，避免与 env_diversity/ 下的混杂种子(7,8,9,14,15,16,17,42,123,456)混淆。
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-export PY="C:/Users/Lenovo/AppData/Local/Programs/Python/Python312/python.exe"
+# Python 定位：优先环境变量 PY，否则回退 PATH 上的 python3/python（不写死本机路径，匿名合规）
+export PY="${PY:-$(command -v python3 || command -v python)}"
 export OUT=results/env_diversity_moving5_n20
 export N_EP=3000
 mkdir -p "$OUT"

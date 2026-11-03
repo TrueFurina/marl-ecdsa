@@ -130,7 +130,9 @@ def benchmark_resource_usage():
 
     ws = WorldState()
     id_contract = IdentityContract(ws)
-    bc = Blockchain(identity_contract=id_contract)
+    # 2026-11-02 审查修复：同上（run_all.py）——假签名 + 占位 state_root + 空区块签名。
+    # 此处只测「账本追加」的资源开销，不宣称交易/区块通过校验，故显式 stub 模式。
+    bc = Blockchain(identity_contract=id_contract, allow_unsigned_stub=True)
 
     def append_blocks():
         for h in range(1, 101):
@@ -237,7 +239,7 @@ def generate_scale_report(network_results, resource_results, output_path):
 """
     with open(output_path, "w") as f:
         json.dump({"network": network_results, "resource": resource_results}, f, indent=2)
-    with open(md_path, "w") as f:
+    with open(md_path, "w", encoding="utf-8") as f:
         f.write(md)
 
     print(f"\n📊 Scale report: {md_path}")

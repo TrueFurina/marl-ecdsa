@@ -40,7 +40,7 @@ def main() -> int:
         os.chmod(HOOK, 0o755)
     except OSError:
         pass
-    print("[OK] pre-commit 门禁安装完成（6 步 fail-closed）")
+    print("[OK] pre-commit 门禁安装完成（7 步 fail-closed）")
     return 0
 
 

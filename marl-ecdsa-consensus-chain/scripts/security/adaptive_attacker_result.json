@@ -1,0 +1,147 @@
+{
+  "params": {
+    "n_agents": 3,
+    "n_landmarks": 3,
+    "threshold": 0.5,
+    "dt": 1.0,
+    "v_max": 0.3,
+    "n_steps": 200,
+    "seeds": [
+      11,
+      23,
+      37,
+      41,
+      53
+    ],
+    "landmarks": [
+      [
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ],
+    "start": [
+      0.0,
+      0.0
+    ]
+  },
+  "runs": {
+    "L1_omniscient": [
+      {
+        "seed": 11,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "tail50_coop_rate": null
+      }
+    ],
+    "L2_adaptive": [
+      {
+        "seed": 11,
+        "coop_rate": 0.825,
+        "first_hit_step": 2,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.845,
+        "first_hit_step": 1,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.765,
+        "first_hit_step": 12,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.175,
+        "first_hit_step": 158,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.755,
+        "first_hit_step": 17,
+        "tail50_coop_rate": null
+      }
+    ],
+    "L2_random": [
+      {
+        "seed": 11,
+        "coop_rate": 0.0,
+        "first_hit_step": null,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.05,
+        "first_hit_step": 4,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.39,
+        "first_hit_step": 2,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.29,
+        "first_hit_step": 18,
+        "tail50_coop_rate": null
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.19,
+        "first_hit_step": 34,
+        "tail50_coop_rate": null
+      }
+    ]
+  },
+  "checks": {
+    "omniscient_high": true,
+    "random_below_blind": true
+  },
+  "advantage": 0.48899999999999993,
+  "per_seed_advantage": [
+    0.825,
+    0.7949999999999999,
+    0.375,
+    -0.11499999999999999,
+    0.565
+  ],
+  "wins": 4,
+  "verdict": "✅ 盲区存在且可被黑盒发现（优势 +0.4890，4/5 种子一致）⇒ MAGIC 论点本地成立"
+}

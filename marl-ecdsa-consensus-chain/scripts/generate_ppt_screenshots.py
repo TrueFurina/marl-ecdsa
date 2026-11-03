@@ -82,7 +82,7 @@ for _cand in (BASE.parent / 'deliverables' / 'number_registry.json',
         break
     except Exception:
         continue
-_imp = _reg.get('NR-1', {}).get('improvement_pct', 28.17)
+_imp = _reg.get('NR-1', {}).get('improvement_pct', 25.75)
 # 统一为 1 位小数（+28.2%），与设计报告/测试报告/PPT 的写法一致，
 # 避免同材料内出现 28.17 与 28.2 两种写法造成评审困惑。
 metrics = [

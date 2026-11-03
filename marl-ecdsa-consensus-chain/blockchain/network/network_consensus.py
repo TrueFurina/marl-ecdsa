@@ -17,7 +17,7 @@ import json
 import logging
 import threading
 import time
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Tuple
 
 from .p2p_node import P2PNode
 from .message_protocol import MessageProtocol, MessageType
@@ -84,6 +84,13 @@ class NetworkConsensusNode:
         self.msg_received = 0
         self.consensus_rounds = 0
 
+        # FT-FIX(2026-10-13)：跨连接消息乱序容错。
+        # 副本A的PREPARE可能先于主节点的PRE-PREPARE到达副本B（不同TCP连接到达顺序不可控），
+        # 旧实现直接丢弃导致压线容错场景丢票、共识超时。现改为缓存到 pending 队列，
+        # 待 _current_block_hash 就绪（收到 PRE-PREPARE）后 flush 处理。
+        self._pending_prepares: List[Tuple["ConsensusVote", int]] = []
+        self._round_height: Optional[int] = None  # F13：当前轮高度绑定
+
         # 注册共识消息处理器
         self.p2p.register_handler(MessageType.CONSENSUS_PREPREPARE, self._on_preprepare)
         self.p2p.register_handler(MessageType.CONSENSUS_PREPARE, self._on_prepare)
@@ -148,15 +155,17 @@ class NetworkConsensusNode:
     # 发起共识（供主节点调用）
     # -------------------------------------------------------------------------
 
-    def propose_consensus(self, block_hash: str, timeout: float = 3.0) -> bool:
+    def propose_consensus(self, block_hash: str, block_height: int, timeout: float = 3.0) -> bool:
         """
         主节点发起一轮共识（CW-PBFT/标准PBFT/快速模式）
         广播 PRE-PREPARE → 收集 PREPARE + COMMIT → 共识完成
+        :param block_height: 本轮区块高度（F13：进签名体并做主节点轮换校验）
         :return: 是否达成共识
         """
         self._consensus_done.clear()
         self._consensus_result = None
         self.consensus_rounds += 1
+        self._round_height = int(block_height)
 
         # fast 模式：单轮确认，跳过网络三阶段与权重阈值（性能演示）
         if self.consensus_mode == 'fast':
@@ -185,8 +194,8 @@ class NetworkConsensusNode:
 
         # 一次性异步广播 PRE-PREPARE + PREPARE（确保本地票已就位后再发消息）
         async def _broadcast_both():
-            await self._broadcast_vote(MessageType.CONSENSUS_PREPREPARE, vote)
-            await self._broadcast_vote(MessageType.CONSENSUS_PREPARE, prepare_vote)
+            await self._broadcast_vote(MessageType.CONSENSUS_PREPREPARE, vote, block_height=block_height)
+            await self._broadcast_vote(MessageType.CONSENSUS_PREPARE, prepare_vote, block_height=block_height)
 
         future = asyncio.run_coroutine_threadsafe(_broadcast_both(), self._loop)
         future.result(timeout=3)
@@ -200,12 +209,74 @@ class NetworkConsensusNode:
     # 消息处理器（异步，运行在 P2P 线程的 event loop）
     # -------------------------------------------------------------------------
 
+    def _process_prepare_vote(self, vote: "ConsensusVote") -> Tuple[Optional["ConsensusVote"], bool]:
+        """PREPARE 投票核心处理（锁内调用）：hash 校验 + 状态推进 + 阈值检查。
+        返回 (commit_vote, consensus_complete)；广播由调用方在锁外执行。
+        FT-FIX(2026-10-13)：从 _on_prepare 提取，供即时处理与 pending flush 复用。
+        """
+        # 严格校验：_current_block_hash 必须已由 start_consensus/receive_pre_prepare 设置
+        # 不再从投票消息自动设置——防止上轮残留消息污染哈希
+        if self.cw_pbft._current_block_hash is None:
+            return None, False
+        if vote.block_hash != self.cw_pbft._current_block_hash:
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：hash 不匹配 "
+                          f"({vote.block_hash[:8]} vs {self.cw_pbft._current_block_hash[:8]})")
+            return None, False
+
+        # 确保当前节点处于 PREPARE 状态
+        from ..consensus.cw_pbft import ConsensusState as _CS
+        if self.cw_pbft._state != _CS.COMMITTED:
+            self.cw_pbft._state = _CS.PREPARE
+
+        commit_vote = self.cw_pbft.receive_vote(vote)
+        if commit_vote:
+            # 达到 2/3 权重阈值：
+            # 1. 把自己的 COMMIT 加进自己的投票池（本地直接计入，不走网络去重）
+            self.cw_pbft._votes['commit'][self.node_id] = commit_vote
+            # 2. 本节点也立即检查是否因本次 commit 达到阈值（短路：本地不走 _on_commit）
+            self.cw_pbft._state = _CS.COMMIT
+            consensus_complete = False
+            if self.cw_pbft._check_weight_threshold('commit'):
+                self.cw_pbft._state = _CS.COMMITTED
+                self._consensus_result = True
+                self._consensus_done.set()
+                consensus_complete = True
+            return commit_vote, consensus_complete
+        return None, False
+
     async def _on_preprepare(self, msg: Dict, from_node: str):
         """收到 PRE-PREPARE：验证后广播自己的 PREPARE"""
         self.msg_received += 1
         data = MessageProtocol.get_data(msg)
         block_hash = data.get("block_hash", "")
         primary_id = data.get("voter_id", from_node)
+        block_height = data.get("block_height")
+
+        # P0修复（2026-10-15）：PRE-PREPARE 也必须验签，与 _on_prepare/_on_commit 同口径。
+        # 此前唯独本 handler 缺校验：伪造报文可触发下方 reset() 抹掉已达成的
+        # COMMITTED 状态，构成活性攻击（测试 test_preprepare_auth.py 的守护意图）。
+        if not self._verify_vote_signature(data, primary_id):
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PRE-PREPARE：签名验证失败 from {primary_id}")
+            return
+
+        # P0修复（2026-10-15）：B2 女巫门控——声称的主节点必须是已知共识成员。
+        # 与 cw_pbft.receive_vote 同口径（`vote.voter_id not in self._weights` 拒收），
+        # 隔离 B1 验签门单独测试：insecure 模式下无签名可放行，但非成员身份仍须挡下。
+        if primary_id not in self.cw_pbft._weights:
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PRE-PREPARE：主节点 {primary_id} 非共识成员")
+            return
+
+        # F13（2026-11-02 赛后）：主节点合法性校验——block_height 必须在签名体内，
+        # 且声称的主节点必须等于 get_primary(block_height) 的轮换结果。
+        # 此前签名体不含高度 ⇒ 任何成员都能冒充任意轮的主节点（S6 登记残留）。
+        if not isinstance(block_height, int) or isinstance(block_height, bool) or block_height < 1:
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PRE-PREPARE：block_height 非法 ({block_height!r})")
+            return
+        legitimate = self.cw_pbft.get_primary(block_height)
+        if primary_id != legitimate:
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PRE-PREPARE：{primary_id} 并非高度 "
+                           f"{block_height} 的合法主节点（应为 {legitimate}）")
+            return
 
         # 如果处于上轮残留状态（COMMITTED），先重置再处理新轮
         from ..consensus.cw_pbft import ConsensusState as _CS
@@ -216,13 +287,31 @@ class NetworkConsensusNode:
                 self.cw_pbft.reset()
 
             prepare_vote = self.cw_pbft.receive_pre_prepare(block_hash, primary_id)
+            self._round_height = block_height  # F13：本轮高度绑定，PREPARE/COMMIT 校验用
 
             # 关键：副本节点必须把自己的 PREPARE 票加入本地投票池！
             # 否则 _check_weight_threshold 统计时缺少自己的票，导致阈值永远不够
             self.cw_pbft._votes['prepare'][self.node_id] = prepare_vote
 
-        logger.debug(f"[NetConsensus] {self.node_id} ← PRE-PREPARE from {from_node}")
-        await self._broadcast_vote(MessageType.CONSENSUS_PREPARE, prepare_vote)
+            # FT-FIX(2026-10-13)：_current_block_hash 已就绪，flush 早先乱序到达的 PREPARE
+            # F13：乱序票携带各自 block_height，仅 flush 与本轮高度一致者
+            to_broadcast = []
+            for pending_vote, pending_height in self._pending_prepares:
+                if pending_height != block_height:
+                    logger.debug(f"[NetConsensus] {self.node_id} 丢弃乱序 PREPARE：高度 {pending_height} ≠ 本轮 {block_height}")
+                    continue
+                cv, cc = self._process_prepare_vote(pending_vote)
+                if cv:
+                    to_broadcast.append((cv, cc))
+            self._pending_prepares.clear()
+
+        # 锁外广播自己的 PREPARE（防止阻塞 event loop）
+        await self._broadcast_vote(MessageType.CONSENSUS_PREPARE, prepare_vote, block_height=block_height)
+        # 锁外广播 pending flush 产生的 COMMIT
+        for cv, cc in to_broadcast:
+            await self._broadcast_vote(MessageType.CONSENSUS_COMMIT, cv, block_height=block_height)
+            if cc:
+                logger.info(f"[NetConsensus] {self.node_id} confirmed consensus complete (pending flush)")
 
     async def _on_prepare(self, msg: Dict, from_node: str):
         """收到 PREPARE：验证签名后若达到 2/3 权重则广播 COMMIT"""
@@ -235,6 +324,17 @@ class NetworkConsensusNode:
             logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：签名验证失败 from {voter_id}")
             return
 
+        # F13：类型混淆封闭——签名体 phase 必须与本 handler 一致
+        # （PREPARE 票签名被重放为 COMMIT 票在旧实现中可通过验签）。
+        if data.get("phase") != "prepare":
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：phase 类型混淆 "
+                           f"({data.get('phase')!r})")
+            return
+        block_height = data.get("block_height")
+        if not isinstance(block_height, int) or isinstance(block_height, bool) or block_height < 1:
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：block_height 非法")
+            return
+
         vote = ConsensusVote(
             voter_id=voter_id,
             block_hash=data.get("block_hash", ""),
@@ -243,42 +343,25 @@ class NetworkConsensusNode:
         )
         logger.debug(f"[NetConsensus] {self.node_id} <- PREPARE from {from_node}")
 
-        # 严格校验：_current_block_hash 必须已由 start_consensus/receive_pre_prepare 设置
-        # 不再从投票消息自动设置——防止上轮残留消息污染哈希
         # B3修复：临界区加锁，保护 _state/_votes/_current_block_hash 并发访问
         with self._consensus_lock:
+            # FT-FIX(2026-10-13)：PRE-PREPARE 尚未到达（乱序）→ 缓存而非丢弃，
+            # 待 _on_preprepare 设置 _current_block_hash 后 flush。
+            # F13：缓存携带票内 block_height，flush 时仅接受与本轮一致者。
             if self.cw_pbft._current_block_hash is None:
-                logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：_current_block_hash 未设置")
+                self._pending_prepares.append((vote, block_height))
+                logger.debug(f"[NetConsensus] {self.node_id} 缓存乱序 PREPARE from {voter_id} "
+                             f"(pending={len(self._pending_prepares)})")
                 return
-            if vote.block_hash != self.cw_pbft._current_block_hash:
-                logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：hash 不匹配 "
-                              f"({vote.block_hash[:8]} vs {self.cw_pbft._current_block_hash[:8]})")
+            # F13：轮次绑定——与本节点当前轮高度不一致的票直接丢弃
+            if block_height != getattr(self, '_round_height', None):
+                logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：高度 {block_height} "
+                               f"≠ 本轮 {getattr(self, '_round_height', None)}")
                 return
-
-            # 确保当前节点处于 PREPARE 状态
-            from ..consensus.cw_pbft import ConsensusState as _CS
-            if self.cw_pbft._state != _CS.COMMITTED:
-                self.cw_pbft._state = _CS.PREPARE
-
-            commit_vote = self.cw_pbft.receive_vote(vote)
-            if commit_vote:
-                # 达到 2/3 权重阈值：
-                # 1. 把自己的 COMMIT 加进自己的投票池（本地直接计入，不走网络去重）
-                self.cw_pbft._votes['commit'][self.node_id] = commit_vote
-                # 2. 广播 COMMIT 给其他节点（在锁外广播，避免阻塞 event loop）
-                broadcast_commit = commit_vote
-                # 3. 本节点也立即检查是否因本次 commit 达到阈值（短路：本地不走 _on_commit）
-                from ..consensus.cw_pbft import ConsensusState as _CS
-                self.cw_pbft._state = _CS.COMMIT
-                consensus_complete = False
-                if self.cw_pbft._check_weight_threshold('commit'):
-                    self.cw_pbft._state = _CS.COMMITTED
-                    self._consensus_result = True
-                    self._consensus_done.set()
-                    consensus_complete = True
+            commit_vote, consensus_complete = self._process_prepare_vote(vote)
         # 锁外广播 + 日志
         if commit_vote:
-            await self._broadcast_vote(MessageType.CONSENSUS_COMMIT, broadcast_commit)
+            await self._broadcast_vote(MessageType.CONSENSUS_COMMIT, commit_vote, block_height=block_height)
             if consensus_complete:
                 logger.info(f"[NetConsensus] {self.node_id} confirmed consensus complete (local)")
 
@@ -291,6 +374,16 @@ class NetworkConsensusNode:
         # P1-7修复：验证投票签名，确认voter_id与签名公钥绑定
         if not self._verify_vote_signature(data, voter_id):
             logger.warning(f"[NetConsensus] {self.node_id} 丢弃 COMMIT：签名验证失败 from {voter_id}")
+            return
+
+        # F13：类型混淆封闭（同 _on_prepare）
+        if data.get("phase") != "commit":
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 COMMIT：phase 类型混淆 "
+                           f"({data.get('phase')!r})")
+            return
+        block_height = data.get("block_height")
+        if not isinstance(block_height, int) or isinstance(block_height, bool) or block_height < 1:
+            logger.warning(f"[NetConsensus] {self.node_id} 丢弃 COMMIT：block_height 非法")
             return
 
         vote = ConsensusVote(
@@ -309,13 +402,22 @@ class NetworkConsensusNode:
                 return
             if vote.block_hash != self.cw_pbft._current_block_hash:
                 logger.warning(f"[NetConsensus] {self.node_id} 丢弃 COMMIT：hash 不匹配 "
-                              f"({vote.block_hash[:8]} vs {self.cw_pbft._current_block_hash[:8]})")
+                               f"({vote.block_hash[:8]} vs {self.cw_pbft._current_block_hash[:8]})")
+                return
+            # F13：轮次绑定
+            if block_height != getattr(self, '_round_height', None):
+                logger.warning(f"[NetConsensus] {self.node_id} 丢弃 COMMIT：高度 {block_height} "
+                               f"≠ 本轮 {getattr(self, '_round_height', None)}")
                 return
 
-            # 确保在 COMMIT 状态才能统计
+            # F13 封闭：COMMIT 票只统计"本节点自己已达成 prepared（进入 COMMIT 状态）"
+            # 的轮次。旧实现直接把状态代推为 COMMIT——未 prepared 的节点也能靠他人
+            # COMMIT 票凑齐阈值，三阶段退化为两阶段。
             from ..consensus.cw_pbft import ConsensusState as _CS
-            if self.cw_pbft._state != _CS.COMMITTED:
-                self.cw_pbft._state = _CS.COMMIT
+            if self.cw_pbft._state not in (_CS.COMMIT, _CS.COMMITTED):
+                logger.warning(f"[NetConsensus] {self.node_id} 丢弃 COMMIT：本节点未达成 "
+                               f"prepared（state={self.cw_pbft._state}），协议违例")
+                return
 
             self.cw_pbft.receive_vote(vote)
 
@@ -331,12 +433,15 @@ class NetworkConsensusNode:
     # 内部广播
     # -------------------------------------------------------------------------
 
-    async def _broadcast_vote(self, msg_type: MessageType, vote: ConsensusVote):
+    async def _broadcast_vote(self, msg_type: MessageType, vote: ConsensusVote,
+                              block_height: Optional[int] = None):
         """
         将投票封装后广播给所有节点
 
         P1-7修复：发送投票前用proposer/voter的私钥对投票数据签名
         签名覆盖字段：voter_id + block_hash + phase + weight + timestamp
+        F13（2026-11-02 赛后）：签名体追加 block_height——投票与具体轮次（高度）
+        绑定，跨轮重放/换轮拼票被签名验证直接排除。
         """
         data = {
             "voter_id": vote.voter_id,
@@ -345,6 +450,8 @@ class NetworkConsensusNode:
             "weight": vote.weight,
             "timestamp": vote.timestamp,
         }
+        if block_height is not None:
+            data["block_height"] = int(block_height)
 
         # P1-7修复：ECDSA签名投票数据
         signature_hex = None
@@ -397,6 +504,9 @@ class NetworkConsensusNode:
                 "phase": data.get("phase", ""),
                 "weight": data.get("weight", 1.0),
                 "timestamp": data.get("timestamp", 0),
+                # F13：轮次高度进签名体验证体（与 _broadcast_vote 的签名体对称；
+                # 旧报文缺该键时两侧同为 None，验签语义不变）
+                "block_height": data.get("block_height"),
             }
             message_bytes = json.dumps(verify_data, sort_keys=True).encode('utf-8')
             message_hash = hashlib.sha256(message_bytes).digest()
@@ -581,11 +691,12 @@ class P2PConsensusNetwork:
         else:
             logger.info(f"[P2PNetwork] ✅ {self.n_nodes} 节点网络启动，全连接拓扑建立完成")
 
-    def run_consensus(self, block_hash: str, primary_idx: int = 0) -> bool:
+    def run_consensus(self, block_hash: str, block_height: int = 1) -> bool:
         """
         运行一轮真实 P2P CW-PBFT 共识
         :param block_hash: 待确认的区块哈希
-        :param primary_idx: 主节点索引
+        :param block_height: 本轮区块高度（F13：主节点按 get_primary(block_height)
+            轮换确定，随 PRE-PREPARE 进签名体，副本校验主节点合法性）
         :return: 是否达成共识
         """
         if not self._started:
@@ -598,24 +709,40 @@ class P2PConsensusNetwork:
             node.cw_pbft.reset()
             node._consensus_done.clear()
             node._consensus_result = None
+            node._round_height = None  # F13：轮次绑定随轮重置
             # 安全清空 msg_id 去重缓存（通过 event loop，避免线程冲突）
             node.clear_msg_cache()
 
         # 再等待一小段时间，让 reset 后的异步清理完成
         time.sleep(0.1)
 
-        primary_id = self.node_ids[primary_idx % self.n_nodes]
+        # F13：主节点不再由调用方任意指定（primary_idx），按高度轮换推导——
+        # 调用方指定主节点 = 任何成员都能发起任意轮，主节点合法性校验形同虚设。
+        any_node = next(iter(self.nodes.values()))
+        primary_id = any_node.cw_pbft.get_primary(int(block_height))
         if primary_id not in self.nodes:
             # D3 跨主机：主节点不在本进程时无法由本进程发起共识。
             # 分布式启动脚本保证只有主节点所在进程调用 run_consensus，此处仅作防御。
             raise RuntimeError(
-                f"主节点 {primary_id} 不在本进程节点 {list(self.nodes.keys())} 中，"
-                f"无法由本进程发起共识（跨主机模式下请由主节点所在主机发起）"
+                f"高度 {block_height} 的合法主节点 {primary_id} 不在本进程节点 "
+                f"{list(self.nodes.keys())} 中，无法由本进程发起共识（跨主机模式下请由主节点所在主机发起）"
             )
         primary_node = self.nodes[primary_id]
 
         t0 = time.time()
-        result = primary_node.propose_consensus(block_hash, timeout=3.0)
+        result = primary_node.propose_consensus(block_hash, block_height=int(block_height), timeout=3.0)
+        # F13：完成判定不再只看主节点布尔值——本进程内全部副本必须都到达
+        # COMMITTED（跨主机模式下远端副本不可本进程观测，边界照旧登记）。
+        # 副本经异步消息达到 COMMITTED 略晚于主节点，给 2s 宽限轮询。
+        from ..consensus.cw_pbft import ConsensusState as _CS
+        deadline = time.time() + 2.0
+        local_committed = False
+        while time.time() < deadline:
+            if all(n.cw_pbft._state == _CS.COMMITTED for n in self.nodes.values()):
+                local_committed = True
+                break
+            time.sleep(0.05)
+        result = bool(result) and local_committed
         elapsed_ms = int((time.time() - t0) * 1000)
 
         # 日志记录

@@ -292,7 +292,10 @@
    "不写「",
    "不以「",
    "✗",
-   "禁止写"
+   "禁止写",
+   "需注意",
+   "来自受控",
+   "仅来自"
   ],
   "code_line_ref": "[\\.\\w/\\\\-]+\\.(py|md|json|txt|yml|yaml|toml|cfg|ini|sh|bat)\\s*:\\s*$",
   "code_line_ref_line": "[\\.\\w/\\\\-]+\\.(py|md|json|txt|yml|yaml|toml|cfg|ini|sh|bat)\\s*:\\s*\\d"

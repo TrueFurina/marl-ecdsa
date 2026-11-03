@@ -100,6 +100,10 @@ class ConsensusVote:
     phase: str          # pre_prepare / prepare / commit
     weight: float
     timestamp: int = field(default_factory=lambda: int(time.time() * 1000))
+    # S3 登记（2026-10-12 代码审查）：历史遗留死字段——从未被写入/读取，
+    # **不参与**本类的任何签名或验签流程（真实投票签名走
+    # network_consensus._broadcast_vote 的 data["signature_hex"] 独立通道）。
+    # 保留字段仅为避免 dataclass 结构变更；勿据此认为投票对象自认证。
     signature_hex: str = ""
 
 
@@ -182,7 +186,8 @@ class CWPBFTConsensus:
         self._weights: Dict[str, float] = {nid: self.INITIAL_WEIGHT for nid in consensus_nodes}
         # 总权重
         self._total_weight: float = sum(self._weights.values())
-        # 共识开始时间
+        # 共识开始时间（单调时钟毫秒，2026-10-12 代码审查 S5 修复：原 wall clock
+        # 在 NTP 回拨时可致 elapsed 为负而永不超时；0 = 未开始）
         self._consensus_start_ms: int = 0
         # 权重演化追踪：每轮记录权重变化
         self._weight_history: List[Dict] = []
@@ -206,7 +211,12 @@ class CWPBFTConsensus:
         """
         获取指定区块高度的主节点（轮询制）
         每 BLOCKS_PER_ROTATION 个区块轮换一次
+
+        边界（2026-10-12 代码审查 S6 修复）：空节点集（n=0）无合法主节点可轮换，
+        返回空串而非抛 ZeroDivisionError。
         """
+        if self.n == 0:
+            return ""
         primary_index = (block_height // self.BLOCKS_PER_ROTATION) % self.n
         return self.consensus_nodes[primary_index]
 
@@ -225,7 +235,7 @@ class CWPBFTConsensus:
         """
         self._state = ConsensusState.PRE_PREPARE
         self._current_block_hash = block_hash
-        self._consensus_start_ms = int(time.time() * 1000)
+        self._consensus_start_ms = int(time.monotonic() * 1000)
         self._votes = {'prepare': {}, 'commit': {}}
 
         vote = ConsensusVote(
@@ -244,7 +254,7 @@ class CWPBFTConsensus:
         """
         self._state = ConsensusState.PREPARE
         self._current_block_hash = block_hash
-        self._consensus_start_ms = int(time.time() * 1000)
+        self._consensus_start_ms = int(time.monotonic() * 1000)
 
         vote = ConsensusVote(
             voter_id=self.node_id,
@@ -321,10 +331,15 @@ class CWPBFTConsensus:
         return self._state
 
     def is_timed_out(self) -> bool:
-        """检查共识是否超时"""
+        """检查共识是否超时
+
+        2026-10-12 代码审查 S5 修复：改用单调时钟（time.monotonic），
+        与 _consensus_start_ms 的写入口径一致——原 wall clock 在 NTP 回拨时
+        elapsed 可为负而永不超时（活性卡死）。
+        """
         if self._consensus_start_ms == 0:
             return False
-        elapsed = int(time.time() * 1000) - self._consensus_start_ms
+        elapsed = int(time.monotonic() * 1000) - self._consensus_start_ms
         return elapsed > self.CONSENSUS_TIMEOUT_MS
 
     def reset(self):
@@ -347,6 +362,13 @@ class CWPBFTConsensus:
         生产环境应使用 simulated_consensus()，它执行完整三阶段+权重阈值检查。
         仅用于测试/少节点场景；生产共识路径请使用 simulated_consensus()。
         """
+        # S4 修复（2026-10-12 代码审查）：本方法跳过全部阈值检查、恒返回 True，
+        # 升为 warning 级醒目告警（原仅 static docstring），防止误计入生产共识
+        # 成功率统计——与 simulated_consensus 的完整阈值路径严格区分。
+        logger.warning(
+            f"[CW-PBFT] ⚠️ fast_consensus 跳过权重阈值检查（测试/演示专用路径）: "
+            f"block_hash={block_hash[:16]}... 不得用于生产共识统计"
+        )
         self._current_block_hash = block_hash
         self._votes = {'prepare': {}, 'commit': {}}
 
@@ -394,7 +416,7 @@ class CWPBFTConsensus:
         # ── PRE-PREPARE阶段：主节点提议 ──
         self._state = ConsensusState.PRE_PREPARE
         self._current_block_hash = block_hash
-        self._consensus_start_ms = int(time.time() * 1000)
+        self._consensus_start_ms = int(time.monotonic() * 1000)
         self._votes = {'prepare': {}, 'commit': {}}
 
         # ── PREPARE阶段：非拜占庭节点投票 ──
@@ -491,6 +513,12 @@ class CWPBFTConsensus:
                 'total_weight': self._total_weight,
             })
             logger.debug(f"[CW-PBFT] {node_id} 权重: {old:.2f} → {protected_weight:.2f}")
+        else:
+            # S8 修复（2026-10-12 代码审查）：未知节点不再静默丢弃——静默失败会让
+            # 调用方（激励模块/网络层转发）无法察觉权重更新从未生效。
+            logger.warning(
+                f"[CW-PBFT] update_weight 忽略未知节点（非共识成员）: {node_id}"
+            )
 
     def _record_participation(self):
         """
@@ -512,6 +540,12 @@ class CWPBFTConsensus:
         - FLOOR=0.25 温和衰减：单纪元零参与最多衰减至25%，保留误判恢复机会
         - MAX_WEIGHT=1.5 硬钳制 + 均值归一（限制单个节点权重上限，满足 R 判据安全设计）
         - 权重更新延迟生效语义由调用方保证：纪元内冻结，本方法仅在纪元末调用
+
+        应用路径边界（2026-10-12 代码审查 S2 登记）：
+        参与率信号当前仅由 simulated_consensus（离线训练/实验路径，引擎内记录）
+        提供；真实 P2P 路径（network_consensus）未接线本方法——分布式场景下各节点
+        独立展宽会造成权重表分叉，接线前需先设计跨节点权重一致性方案。
+        故本机制当前仅在离线路径生效（见 network_consensus 模块 docstring）。
 
         返回纪元摘要 dict（epoch/R/honest 调用方自行补充），非纪元末返回 None。
         """
@@ -543,9 +577,14 @@ class CWPBFTConsensus:
                 f"[CW-PBFT] 纪元末展宽跳过 {len(banned)} 个封禁节点(w=0): {banned}"
             )
         vals = list(self._weights.values())
+        # S7 修复（2026-10-12 代码审查）：R（有效带宽比）排除封禁节点（w=0）。
+        # 修复前任一封禁节点使 min(vals)==0 ⇒ R 恒为 inf，该纪元带宽比失去区分度、
+        # 趋势分析失真。排除口径与展宽本身一致（封禁节点不参与展宽，见上方 banned 分支）。
+        # 无封禁时 active_vals == vals，行为与修复前逐值一致（不影响既有实验复现）。
+        active_vals = [w for w in vals if w > 0]
         summary = {
             'epoch': self._epoch_index,
-            'R': max(vals) / min(vals) if min(vals) > 0 else float('inf'),
+            'R': max(active_vals) / min(active_vals) if active_vals else float('inf'),
             'weights': dict(self._weights),
             'excluded_banned': list(banned),
         }
@@ -554,10 +593,15 @@ class CWPBFTConsensus:
         # 参与窗口滚动重置（近期行为主导，被误降节点有机会恢复）
         self._part_total = {nid: 0 for nid in self._part_total}
         self._part_rounds = 0
-        logger.info(
-            f"[CW-PBFT] 纪元{summary['epoch']}权重展宽: R={summary['R']:.2f} "
-            f"| w_max={max(vals):.2f} w_min={min(vals):.2f}"
-        )
+        if active_vals:
+            logger.info(
+                f"[CW-PBFT] 纪元{summary['epoch']}权重展宽: R={summary['R']:.2f} "
+                f"| w_max={max(active_vals):.2f} w_min={min(active_vals):.2f}"
+            )
+        else:
+            logger.warning(
+                f"[CW-PBFT] 纪元{summary['epoch']}全部节点被封禁(w=0)，无有效带宽比"
+            )
         return summary
 
     def get_weights(self) -> Dict[str, float]:
@@ -621,7 +665,10 @@ class CWPBFTConsensus:
             'prepare_votes': len(self._votes.get('prepare', {})),
             'commit_votes': len(self._votes.get('commit', {})),
             'current_block_hash': self._current_block_hash,
-            'weights': self._weights,
+            # S1 修复（2026-10-12 代码审查）：返回副本而非内部引用——此前外部可就地
+            # 篡改 _weights 且不触发 _total_weight 重算 → quorum 分母失真。与
+            # get_weights() 的 dict(...) 口径一致。
+            'weights': dict(self._weights),
             'consensus_success_rate': consensus_success_rate,
             'weight_history': self._weight_history[-10:],
             # P1-4修复：κ 三元组不再内联硬编码，改从 config.json 的

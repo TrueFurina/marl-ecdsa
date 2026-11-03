@@ -1,0 +1,33 @@
+/* V14: hierarchy, readable forms and content-sized results; preserve all APIs. */
+:root{--v14-ink:#16353a;--v14-accent:#117d78;--v14-line:#d9e7e4;--v14-calm:#f4faf8}
+.brand-copy strong{font-size:16px;letter-spacing:.015em}.brand-copy small{font-size:10px;letter-spacing:.01em}
+.main{max-width:1600px;width:100%;box-sizing:border-box;margin:0 auto}.tab-content,.chart-card,.v8-panel,.v9-panel,.v10-panel,.data-card{min-width:0;box-sizing:border-box}
+.page-heading h1{line-height:1.25;overflow-wrap:anywhere}.page-heading p{max-width:78ch;line-height:1.65}
+.v14-workflow{border:1px solid var(--v14-line);border-radius:18px;background:#f8fcfb;padding:22px;margin:20px 0 30px;color:var(--v14-ink)}
+.v14-overline{letter-spacing:.14em;color:var(--v14-accent);font-size:11px;font-weight:750}.v14-flow-header h2{font-size:21px;line-height:1.4;margin:5px 0}.v14-flow-header p{font-size:13px;line-height:1.65;margin:0 0 18px;color:#526d70}
+.v14-flow-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.v14-flow-grid button{border:1px solid #dce9e6;background:white;border-radius:12px;padding:15px 12px;text-align:left;min-width:0;cursor:pointer;display:flex;flex-direction:column;gap:8px;transition:transform .16s,border-color .16s,box-shadow .16s;color:#183e40}
+.v14-flow-grid button:hover,.v14-flow-grid button:focus-visible{border-color:#168c85;box-shadow:0 6px 20px #123d3820;transform:translateY(-2px)}
+.v14-flow-grid b{font-size:13px;color:var(--v14-accent)}.v14-flow-grid strong{font-size:13px;line-height:1.45}.v14-flow-grid small{font-size:11px;color:#688080;line-height:1.45}
+.v14-context{margin:18px 0 24px;padding:17px 20px;border-radius:13px;background:var(--v14-calm);border-left:4px solid var(--v14-accent);display:flex;justify-content:space-between;align-items:center;gap:18px;color:var(--v14-ink)}
+.v14-context strong{font-size:15px}.v14-context p{font-size:13px;margin:5px 0 0;line-height:1.65;max-width:90ch;color:#526e70}
+.v14-context button{border:1px solid #9fcfc8;background:white;color:#166960;border-radius:9px;cursor:pointer;padding:10px 14px;font-weight:650;white-space:nowrap}.v14-context button:hover{background:#e7f5f1}
+/* Strong distinction between a single-node receipt and multi-node evidence */
+#tab-chain :is(.v8-chain,.v7-panel,#v9-distributed,.v10-panel){max-width:100%;min-width:0}
+#tab-chain :is(.v8-chain,.v7-panel){border-left:3px solid #d5a56f}
+#tab-chain :is(#v9-distributed,.v10-panel){border-left:3px solid #158c86}
+/* Forms: actually readable and responsive, not 80px wide inline controls */
+#tab-chain input:not([type=checkbox]):not([type=hidden]),#tab-chain textarea,#tab-train input:not([type=checkbox]):not([type=hidden]),#tab-train textarea,#tab-p2p input{box-sizing:border-box;min-width:0;min-height:42px;font-size:14px;line-height:1.4;padding:9px 12px;max-width:100%}
+#tab-chain textarea,#tab-train textarea{min-height:100px;resize:vertical;width:100%}
+#tab-chain label,#tab-train label,#tab-p2p label{min-width:0;line-height:1.5}
+#tab-chain .v9-actions,#tab-chain .v8-controls,#tab-chain .v7-form{gap:12px;flex-wrap:wrap}
+/* Results: scalable, readable content without oversized blank consoles */
+:is(#v9-result,#v10-detail,#v10-recovery,#v7-tx-detail,#v7-train-logs,#v8-proof,.v6-attack-card pre){width:100%!important;max-width:100%!important;box-sizing:border-box;min-width:0!important;min-height:76px!important;height:auto!important;padding:16px 18px!important;font-size:13.5px!important;line-height:1.75!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word;overflow-y:auto;overflow-x:auto;border-radius:12px;tab-size:2}
+#v7-train-logs{min-height:150px!important;max-height:540px!important;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+#v9-result,#v10-detail,#v7-tx-detail,#v8-proof{max-height:440px!important}
+#v10-recovery,.v6-attack-card pre{max-height:350px!important}
+#tab-chain :is(.table-scroll,.v8-table-wrap),#tab-train .table-scroll{max-width:100%;overflow-x:auto}
+#tab-chain table,#tab-train table{font-size:13px;line-height:1.6}
+@media(max-width:1150px){.v14-flow-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.v14-flow-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.v14-context{flex-direction:column;align-items:stretch}.v14-context button{align-self:flex-start}.v14-workflow{padding:16px}}
+@media(max-width:450px){.v14-flow-grid{grid-template-columns:1fr}.v14-flow-grid button{padding:11px 13px} :is(#v9-result,#v10-detail,#v10-recovery,#v7-tx-detail,#v7-train-logs,#v8-proof){font-size:12px!important;padding:12px!important;max-height:45vh!important}}

@@ -102,12 +102,22 @@ def _build_parser(config_defaults):
 
 
 def _run_experiment_mode(args):
-    """实验模式"""
+    """实验模式：委托 scripts/one-click/run_full_experiment.py（现行唯一对比实验入口）"""
     logger.info("=" * 60)
     logger.info("启动对比实验模式")
     logger.info("=" * 60)
-    from experiments.run_experiment import run_experiment
-    run_experiment(n_agents=args.n_agents, n_episodes=args.n_episodes, dashboard=args.dashboard)
+    script = ROOT_DIR / 'scripts' / 'one-click' / 'run_full_experiment.py'
+    if not script.is_file():
+        logger.error(f"对比实验脚本不存在，无法运行: {script}")
+        return
+    import subprocess
+    cmd = [sys.executable, str(script), '--agents', str(args.n_agents)]
+    if args.demo:
+        cmd.append('--quick')
+    logger.info(f"$ {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=str(ROOT_DIR))
+    if result.returncode != 0:
+        logger.error(f"对比实验失败（退出码 {result.returncode}）")
 
 
 def _run_training_mode(args):

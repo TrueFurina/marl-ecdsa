@@ -22,7 +22,9 @@ def _obs(n=3, n_lm=3, near_own=False, far=False):
             lm[i % n_lm] = np.array([0.01, 0.01])  # 近分配路标
         if far:
             lm = np.full((n_lm, 2), 0.9)  # 全远
-        rows.append(np.array([0.1, 0.1, 0.5, 0.5] + lm.flatten().tolist()))
+        # F16 对齐（2026-11-02 赛后）：生产切片含 other_rel 2*(n-1) 块（测试场景填 0）
+        other = [0.0] * (2 * (n - 1))
+        rows.append(np.array([0.1, 0.1, 0.5, 0.5] + lm.flatten().tolist() + other))
     return rows
 
 

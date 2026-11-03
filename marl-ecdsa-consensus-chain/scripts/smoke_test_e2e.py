@@ -61,7 +61,7 @@ for aid in agent_ids:
     print(f"  [OK] {aid} registered, pubkey={pub_hex[:32]}...")
 
 # ── 3. Bridge 初始化 ──
-print("\n[3/8] Init BlockchainMARLBridge (lambda=0.3)...")
+print("\n[3/8] Init BlockchainMARLBridge (lambda=0.1)...")
 bridge = BlockchainMARLBridge(
     n_agents=n_agents,
     n_landmarks=n_landmarks,
@@ -71,7 +71,7 @@ bridge = BlockchainMARLBridge(
     key_manager=km,
     security_guard=sg,
     cw_pbft_consensus=cw_pbft,
-    lambda_weight=0.3,  # P0-1 fix: lambda=0.3
+    lambda_weight=0.1,  # 2026-10-18: 0.3→0.1 对齐主口径(config.json/NR-129)；P0-1 传参通路语义不变
 )
 
 # 验证 nonce 同步（P0-2 修复）
@@ -157,9 +157,9 @@ assert bc_chain.height >= 1, f"Blockchain height abnormal: {bc_chain.height}"
 # ── 8. 验证关键修复点 ──
 print("\n[8/8] Verify all fix points...")
 
-# P0-1: lambda_weight=0.3
-assert abs(bridge.lambda_weight - 0.3) < 0.001, f"P0-1 FAIL: lambda={bridge.lambda_weight}"
-print("  [OK] P0-1: lambda_weight=0.3 verified")
+
+assert abs(bridge.lambda_weight - 0.1) < 0.001, f"P0-1 FAIL: lambda={bridge.lambda_weight}"
+print("  [OK] P0-1: lambda_weight=0.1 verified")
 
 # P0-2: nonce同步
 for aid in agent_ids:

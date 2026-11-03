@@ -1,0 +1,47 @@
+/* V13: result panel sizing only. No business logic changes. */
+:root { --result-border: #d8e5e0; }
+/* Prevent oversized outputs from stretching a grid/flex column. */
+#tab-chain :is(.data-card,.chart-card,.v8-panel,.v10-panel,#v9-distributed),
+#tab-train .chart-card, #tab-attack .data-card { min-width: 0; max-width: 100%; box-sizing: border-box; }
+/* Compact inline status messages: never reserve a console-sized rectangle. */
+:is(#v10-state,#v7-tx-message,#v7-train-message,#v8-audit-info,#probe-status,#attack-status) {
+  max-width: 100%; overflow-wrap: anywhere; line-height: 1.6;
+}
+/* Results with variable length grow naturally until capped, then scroll inside. */
+:is(#v9-result,#v10-detail,#v10-recovery,#v7-tx-detail,#v7-train-logs,#v8-proof,.v6-attack-card pre) {
+  display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0;
+  height: auto; min-height: 0; margin-top: 12px; margin-bottom: 12px;
+  padding: 14px 16px; border-radius: 12px;
+  line-height: 1.65; font-size: 12.5px;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+  overflow-x: auto; overflow-y: auto;
+  overscroll-behavior: contain;
+  tab-size: 2;
+}
+#v9-result {max-height: 380px;}
+#v10-detail {max-height: 340px;}
+#v10-recovery {max-height: 260px;}
+#v7-tx-detail {max-height: 340px;}
+#v7-train-logs {max-height: 410px;}
+#v8-proof {max-height: 360px;}
+.v6-attack-card pre {max-height: 340px;}
+/* Result comparisons and details respect their own columns. */
+#attack-results, #attack-results .v6-attack-card, #attack-results .v6-attack-pane,
+#attack-results .v6-attack-compare {min-width: 0; max-width: 100%; box-sizing: border-box;}
+#attack-results .v6-attack-compare {grid-template-columns: repeat(2,minmax(0,1fr));}
+#tab-chain .v8-two {grid-template-columns: minmax(0,1.15fr) minmax(0,1fr);}
+#tab-chain .v9-node-grid {grid-template-columns: repeat(3,minmax(0,1fr));}
+/* Tables expand within their own scrolling viewport, not the entire page. */
+#tab-chain :is(.table-scroll,.v8-table-wrap), #tab-train .table-scroll {
+  width: 100%; max-width: 100%; overflow-x: auto; box-sizing: border-box;
+}
+@media (max-width: 960px) {
+  #tab-chain .v8-two {grid-template-columns: minmax(0,1fr);}
+  #tab-chain .v9-node-grid {grid-template-columns: repeat(2,minmax(0,1fr));}
+}
+@media (max-width: 700px) {
+  #tab-chain .v9-node-grid,#attack-results .v6-attack-compare {grid-template-columns: minmax(0,1fr);}
+  :is(#v9-result,#v10-detail,#v10-recovery,#v7-tx-detail,#v7-train-logs,#v8-proof,.v6-attack-card pre) {
+    padding: 12px; font-size: 11.5px; max-height: min(48vh,350px);
+  }
+}

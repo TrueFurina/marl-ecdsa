@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17282e">
+  <meta name="description" content="MARL-ECDSA 共识链：协作训练、贡献治理与可信共识工作空间。">
+  <title>{{ '登录' if mode == 'login' else '注册' }} · MARL-ECDSA 共识链</title>
+  <link rel="icon" href="/static/favicon.ico?v=24">
+  <link rel="stylesheet" href="/static/auth.css?v=23">
+  <link rel="stylesheet" href="/static/v24-icons.css?v=24">
+  <script defer src="/static/v24-icons.js?v=24"></script>
+  <script defer src="/static/auth.js?v=24"></script>
+</head>
+<body class="auth-page {{ 'is-register' if mode == 'register' else 'is-login' }}">
+  <div class="auth-layout">
+    <section class="identity-panel" aria-labelledby="intro-title">
+      <div class="identity-grid" aria-hidden="true"></div>
+      <div class="ambient ambient-one" aria-hidden="true"></div>
+      <div class="ambient ambient-two" aria-hidden="true"></div>
+      <header class="identity-top">
+        <a class="identity-brand" href="/login" aria-label="MARL-ECDSA 共识链登录页">
+          <span class="brand-glyph" aria-hidden="true"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M5 6.5 12 3l7 3.5v10L12 21l-7-4.5Z"/><path d="M5 6.5 12 12l7-5.5M12 12v9"/><circle cx="5" cy="6.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="6.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="21" r="1.5" fill="currentColor" stroke="none"/></svg>
+          </span>
+          <span class="brand-lines"><strong>MARL-ECDSA</strong><small>共识链 · 可信协作工作空间</small></span>
+        </a>
+        <span class="identity-index">SECURE WORKSPACE <span class="identity-index-dot"></span></span>
+      </header>
+
+      <div class="identity-main">
+        <div class="identity-heading">
+          <span class="eyebrow"><span class="eyebrow-line"></span>协作智能体 · 区块链治理</span>
+          <h1 id="intro-title">让每一份协作贡献<br><span>都有据可循。</span></h1>
+          <p>将多智能体训练、贡献治理与链上证据连接起来，让协作过程可追溯，让治理依据可核验。</p>
+        </div>
+
+        <div class="network-visual" aria-label="从协作训练到贡献治理再到可信共识的流程示意">
+          <svg class="network-lines" viewBox="0 0 520 310" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+            <defs>
+              <linearGradient id="networkGradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#70e3d0" stop-opacity=".65"/><stop offset="1" stop-color="#e7ae83" stop-opacity=".8"/></linearGradient>
+            </defs>
+            <path class="link-base" d="M112 81 C191 74 187 158 260 158 S351 73 431 81"/>
+            <path class="link-base" d="M112 81 C122 177 181 235 260 158 S345 235 431 233"/>
+            <path class="link-base" d="M260 158 C328 167 358 212 431 233"/>
+            <path class="link-beam" d="M112 81 C191 74 187 158 260 158 S351 73 431 81"/>
+            <path class="link-beam slow" d="M112 81 C122 177 181 235 260 158 S345 235 431 233"/>
+            <path class="link-beam alternate" d="M260 158 C328 167 358 212 431 233"/>
+            <circle class="network-ring" cx="260" cy="158" r="70" />
+            <circle class="network-ring inner" cx="260" cy="158" r="49" />
+            <circle class="network-orbit-dot" cx="260" cy="88" r="4" />
+          </svg>
+          <div class="diagram-node node-train"><span class="node-symbol"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 14h4l2.5-6 4 11 3.2-9 2.1 4H22"/><path d="M17 4l2-2 2 2"/></svg></span><strong>协作训练</strong><small>BC-MARL</small></div>
+          <div class="diagram-hub"><span class="hub-glow"></span><svg class="v24-icon hub-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M5 19h14M8 16V9m8 7V7"/><circle cx="8" cy="6" r="2.5"/><circle cx="16" cy="4" r="2.5"/><path d="M5 19c0-3 1-4 3-4m8-2c2 0 3 3 3 6"/></svg><span>贡献治理</span></div>
+          <div class="diagram-node node-vote"><span class="node-symbol"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M3 20h18v-7H3Z"/><path d="m8 9 4 4 6-8"/><path d="M3 16h18"/></svg></span><strong>加权共识</strong><small>ECDSA</small></div>
+          <div class="diagram-node node-proof"><span class="node-symbol"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12 2 4 6v7c0 4 3 7 8 9 5-2 8-5 8-9V6Z"/><path d="m8.5 12 2.4 2.4 4.6-5"/></svg></span><strong>链上核验</strong><small>TRACE</small></div>
+          <span class="diagram-caption">TRAINING → GOVERNANCE → CONSENSUS → AUDIT</span>
+        </div>
+
+        <div class="identity-process" aria-label="平台工作流程">
+          <div><span>01</span><strong>协作训练</strong><small>产生有来源的任务记录</small></div>
+          <div><span>02</span><strong>权重治理</strong><small>形成纪元化配置快照</small></div>
+          <div><span>03</span><strong>可信核验</strong><small>关联签名、证书与区块</small></div>
+        </div>
+      </div>
+      <footer class="identity-footer"><span>MARL-ECDSA CONSENSUS CHAIN</span><span>本地协作与验证平台</span></footer>
+    </section>
+
+    <main class="access-panel" id="main-content">
+      <div class="access-toolbar"><span class="toolbar-mark"><span></span>统一身份入口</span><span class="toolbar-side">ACCOUNT ACCESS</span></div>
+      <div class="access-content">
+        <div class="access-card">
+          <nav class="auth-tabs" aria-label="账户操作">
+            <a href="/login" class="{{ 'active' if mode == 'login' else '' }}"{% if mode == 'login' %} aria-current="page"{% endif %}>登录账户</a>
+            <a href="/register" class="{{ 'active' if mode == 'register' else '' }}"{% if mode == 'register' %} aria-current="page"{% endif %}>注册账户</a>
+          </nav>
+          <div class="card-intro"><span class="card-eyebrow">{{ 'WELCOME BACK' if mode == 'login' else 'GET STARTED' }}</span><h2>{{ '欢迎回来' if mode == 'login' else '创建工作空间账户' }}</h2><p>{{ '登录后继续查看训练任务、共识节点与链上记录。' if mode == 'login' else '创建本地平台账户，开始管理协作任务与可信共识。' }}</p></div>
+
+          {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, msg in messages %}<div class="auth-alert {{ 'success' if category == 'success' else 'error' }}" role="{{ 'status' if category == 'success' else 'alert' }}"><span class="alert-symbol" aria-hidden="true">{% if category == 'success' %}<svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="m4.5 12 5.2 5.2L19.5 7"/></svg>{% else %}<svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="m12 3 10 17H2Z"/><path d="M12 9v5m0 3h.01"/></svg>{% endif %}</span><span>{{ msg }}</span></div>{% endfor %}
+          {% endwith %}
+
+          <form class="auth-form" id="auth-form" method="post" action="{{ '/login' if mode == 'login' else '/register' }}" data-auth-mode="{{ mode }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="field"><label for="username">账户名称</label><div class="field-shell"><span class="field-icon" aria-hidden="true"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="8" r="4"/><path d="M4.5 21v-1c0-4 3-6 7.5-6s7.5 2 7.5 6v1"/></svg></span><input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" inputmode="text" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_-]{3,32}" title="3–32 位英文字母、数字、下划线或连字符" placeholder="输入账户名称" autofocus></div></div>
+
+            <div class="field"><div class="label-row"><label for="password">{{ '登录密码' if mode == 'login' else '设置密码' }}</label>{% if mode == 'register' %}<small>至少 10 位，包含字母与数字</small>{% endif %}</div><div class="field-shell"><span class="field-icon" aria-hidden="true"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></span><input id="password" name="password" type="password" autocomplete="{{ 'current-password' if mode == 'login' else 'new-password' }}" required minlength="{{ 1 if mode == 'login' else 10 }}"{% if mode == 'register' %} maxlength="128"{% endif %} placeholder="{{ '请输入登录密码' if mode == 'login' else '创建安全密码' }}"><button class="password-reveal" type="button" data-reveal="password" aria-label="显示密码" aria-pressed="false"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M2 12c2.5-4 5.8-6 10-6s7.5 2 10 6c-2.5 4-5.8 6-10 6S4.5 16 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><span class="reveal-label">显示</span></button></div><small class="caps-hint" id="caps-hint" hidden>大写锁定键已开启</small></div>
+
+            {% if mode == 'register' %}
+            <div class="password-meter" aria-label="密码强度"><span class="meter-track"><i></i></span><span class="meter-text" id="password-strength">请设置账户密码</span></div>
+            <div class="field"><label for="confirm">确认密码</label><div class="field-shell"><span class="field-icon" aria-hidden="true"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.8 2.8L16.5 9"/></svg></span><input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="10" maxlength="128" placeholder="再次输入刚才的密码" aria-describedby="confirm-hint"><button class="password-reveal" type="button" data-reveal="confirm" aria-label="显示确认密码" aria-pressed="false"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M2 12c2.5-4 5.8-6 10-6s7.5 2 10 6c-2.5 4-5.8 6-10 6S4.5 16 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><span class="reveal-label">显示</span></button></div><small class="field-hint" id="confirm-hint" aria-live="polite">请与上方密码保持一致</small></div>
+            {% endif %}
+            <button class="auth-submit" id="auth-submit" type="submit"><span class="submit-label">{{ '进入工作空间' if mode == 'login' else '创建账户' }}</span><svg class="submit-arrow v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h16m-6-6 6 6-6 6"/></svg><span class="submit-spinner" aria-hidden="true"></span></button>
+            <p class="form-message" id="form-message" role="status" aria-live="polite" hidden></p>
+          </form>
+
+          <div class="access-switch">{{ '还没有平台账户？' if mode == 'login' else '已经拥有账户？' }} <a href="{{ '/register' if mode == 'login' else '/login' }}">{{ '立即注册' if mode == 'login' else '返回登录' }}<span aria-hidden="true"> ↗</span></a></div>
+          <div class="access-note"><span class="note-icon" aria-hidden="true"><svg class="v24-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12 2.5 20 6v5.8c0 4.9-3 8.1-8 9.7-5-1.6-8-4.8-8-9.7V6Z"/><path d="m8.6 12 2.2 2.2 4.8-5"/></svg></span><span>账户验证由本地服务端完成；请妥善保管登录凭据。</span></div>
+        </div>
+      </div>
+      <footer class="access-footer"><span>MARL-ECDSA / TRUSTED COLLABORATION</span><span>LOGIN &amp; IDENTITY</span></footer>
+    </main>
+  </div>
+</body>
+</html>

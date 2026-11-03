@@ -37,6 +37,7 @@
 // ===================== 粒子背景 =====================
 (function() {
     const c = document.getElementById('particles');
+    if (!c || getComputedStyle(c).display === 'none') return;
     const ctx = c.getContext('2d');
     let w, h, particles = [];
     function resize() { w = c.width = window.innerWidth; h = c.height = window.innerHeight; }
@@ -104,7 +105,7 @@ let demoMode = false;
 let demoInterval = null;
 // 09-28 修复：此前漏掉 'attack'，演示模式 6s 轮播永不展示攻防演示页（自废最强演示页）。
 // 追加在末尾（而非按导航顺序插入），以保持既有键盘快捷键 1-9 → TABS[0..8] 的映射不变。
-const TABS = ['overview', 'monitor', 'compare', 'tri', 'blockchain', 'consensus', 'explorer', 'system', 'p2p', 'attack'];
+const TABS = ['overview', 'train', 'incentive', 'chain', 'audit'];
 
 function toggleDemoMode() {
     demoMode = !demoMode;
@@ -131,6 +132,11 @@ function doExport() {
     const ps = pureData?.summary || {};
     const bs = bcData?.summary || {};
     const ss = selfishData?.summary || {};
+    const cal = CALIBER_LATEST || CALIBER_FALLBACK;
+    const pTxt = v => { const s = String(v ?? '--'); return s.startsWith('<') ? 'p' + s : 'p=' + s; };
+    const bcCfg = bcData?.config || {};
+    const cfg = k => (bcCfg[k] != null) ? bcCfg[k] : '--';
+    const algLabel = a => ({ iql: 'IQL (Independent Q-Learning)', vdn: 'VDN (Value Decomposition Networks)', qmix: 'QMIX' }[String(a || '').toLowerCase()] || (a ? String(a).toUpperCase() : '--'));
     const now = new Date().toLocaleString('zh-CN');
 
     const reportHTML = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>MARL-ECDSA 实验报告</title>
@@ -152,8 +158,8 @@ th{background:#f1f5f9;font-weight:600;color:#475569}td{font-size:0.9rem}
 <tr><td>Exp C</td><td>Selfish</td><td>含自私智能体</td><td>${ss.avg_reward?.toFixed(1)||'--'}</td><td>${((ss.avg_cooperation_rate||0)*100).toFixed(1)}%</td></tr></table>
 
 <h2>核心结论</h2>
-<div class="highlight">🏆 权威申报口径（登记簿 NR-1，n=71/组）：末50回合 env_reward +28.17%（Welch p=0.0095，BH-FDR 显著/Bonferroni 不显著），须与 NR-2 全程 +7.92%（p&lt;1e-10）同报。本机运行观测：总奖励提升 ${(bs.avg_reward&&ps.avg_reward) ? ((bs.avg_reward-ps.avg_reward)/Math.abs(ps.avg_reward)*100).toFixed(0) : '--'}%（当前加载运行·演示数据，非申报口径）。
-${(ps.avg_env_reward!=null&&bs.avg_env_reward!=null&&ps.avg_env_reward!==0) ? '⚖ <strong>环境奖励（公平对比，env_reward）提升 '+((Math.abs(ps.avg_env_reward)-Math.abs(bs.avg_env_reward))/Math.abs(ps.avg_env_reward)*100).toFixed(0)+'%</strong> — 该口径为申报主口径。' : '本页为单次演示运行；申报主口径为 n=71/组 env_reward：末50回合 +28.2%（Welch p=0.0095）与全程 +7.9%（p&lt;1e-10）两口径同报，效果强依赖底层算法。'}</div>
+<div class="highlight"><strong>主口径（全程协作增益，跨种子稳健）</strong>：区块链激励带来全程 env_reward 提升 ${cal.nr2.pct}（原初批 n=101，Welch ${pTxt(cal.nr2.p)}）；机制修复后同种子复现 ${cal.nr202.pct}（n=${cal.nr202.n}，${pTxt(cal.nr202.p)}）、跨种子泛化 ${cal.nr203.pct}（n=${cal.nr203.n}，${pTxt(cal.nr203.p)}），三批方向一致、Cohen's d≈1.0，统计 power≈1.0。本机运行观测：总奖励提升 ${(bs.avg_reward&&ps.avg_reward) ? ((bs.avg_reward-ps.avg_reward)/Math.abs(ps.avg_reward)*100).toFixed(0) : '--'}%（当前加载运行·单次数据，非申报口径）。
+<div style="margin-top:6px;font-size:0.92em;opacity:0.9">末50 回合 ${cal.nr1.pct}（n=${cal.nr1.n}，${pTxt(cal.nr1.p)}）为首轮机制读数——赛后让自适应 λ 真正进入训练梯度后，同种子复现显示末50 优势收敛，故主口径诚实地迁移至上述全程读数（详见答辩口径裁决）。环境奖励（公平对比）本机观测：${(ps.avg_env_reward!=null&&bs.avg_env_reward!=null&&ps.avg_env_reward!==0) ? '<strong>'+((bs.avg_env_reward-ps.avg_env_reward)/Math.abs(ps.avg_env_reward)*100).toFixed(0)+'%</strong>' : '--'}（单次运行，不可与 n=101 均值混读）。</div></div>
 
 <h2>ECDSA 安全机制</h2>
 <table><tr><th>安全特性</th><th>实现</th></tr>
@@ -170,7 +176,7 @@ ${(ps.avg_env_reward!=null&&bs.avg_env_reward!=null&&ps.avg_env_reward!==0) ? '�
 <tr><td>惩罚等级</td><td>警告(10) → 降权(30) → 封禁(50)</td></tr></table>
 
 <h2>区块链流水线统计</h2>
-<p>以下数据来自 BC-MARL 实验组（1000 回合完整集成训练），验证区块链与MARL双向协同的完整数据流。</p>
+<p>以下数据来自 BC-MARL 实验组（${bs.total_episodes||'--'} 回合集成训练），验证贡献→共识→积分结算闭环的完整数据流。</p>
 <table><tr><th>流水线模块</th><th>指标</th><th>值</th></tr>
 ${(() => {
     const bc = bcData || {};
@@ -192,17 +198,18 @@ ${(() => {
 })()}</table>
 
 <h2>算法与环境参数</h2>
+<p style="text-align:center;color:#94a3b8;font-size:0.8rem">以下取自当前加载 BC-MARL 任务的实际配置（结果文件 config 字段），未落盘项显示 --。</p>
 <table><tr><th>参数</th><th>值</th></tr>
-<tr><td>算法</td><td>IQL (Independent Q-Learning)</td></tr>
+<tr><td>算法</td><td>${algLabel(bcCfg.algorithm)}</td></tr>
 <tr><td>环境</td><td>SimpleSpread (NumPy)</td></tr>
-<tr><td>智能体数</td><td>3</td></tr>
-<tr><td>目标点数</td><td>3</td></tr>
-<tr><td>最大步数</td><td>25</td></tr>
-<tr><td>隐藏维度</td><td>128</td></tr>
-<tr><td>学习率</td><td>0.001</td></tr>
-<tr><td>折扣因子 γ</td><td>0.8</td></tr>
-<tr><td>λ权重</td><td>0.1</td></tr>
-<tr><td>训练回合</td><td>1000</td></tr></table>
+<tr><td>智能体数</td><td>${cfg('n_agents')}</td></tr>
+<tr><td>目标点数</td><td>${cfg('n_landmarks')}</td></tr>
+<tr><td>最大步数</td><td>${cfg('max_steps')}</td></tr>
+<tr><td>隐藏维度</td><td>${cfg('hidden_dim')}</td></tr>
+<tr><td>学习率</td><td>${cfg('lr')}</td></tr>
+<tr><td>折扣因子 γ</td><td>${cfg('gamma')}</td></tr>
+<tr><td>λ权重</td><td>${cfg('lambda_weight')}</td></tr>
+<tr><td>训练回合</td><td>${cfg('n_episodes') !== '--' ? cfg('n_episodes') : (bs.total_episodes||'--')}</td></tr></table>
 
 <div class="footer">MARL-ECDSA 共识链 · CCF 第五届区块链竞赛 · ${now}</div></body></html>`;
 
@@ -215,8 +222,9 @@ ${(() => {
 
 // ===================== 键盘快捷键 =====================
 document.addEventListener('keydown', (e) => {
+    if (e.target.closest('input,textarea,select,[contenteditable]')) return;
     if (e.key >= '1' && e.key <= '9') { switchTab(TABS[parseInt(e.key)-1]); e.preventDefault(); }
-    if (e.key === 'p' || e.key === 'P') { toggleDemoMode(); e.preventDefault(); }
+    // 已删除自动轮播入口，不再绑定 P 快捷键。
     if (e.key === 'e' || e.key === 'E') { showExportModal(); e.preventDefault(); }
     if (e.key === 'Escape') { hideExportModal(); if (demoMode) toggleDemoMode(); }
 });
@@ -229,12 +237,12 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     const content = document.getElementById('tab-' + tab);
     if (content) content.classList.add('active');
-    if (tab === 'compare') loadComparison();
-    if (tab === 'tri') loadTriComparison();
-    if (tab === 'blockchain') loadBlockchain();
+    if (tab === 'train') { loadMonitor(); loadComparison(); }
+    if (tab === 'incentive') loadIncentive();
+    if (tab === 'chain') { /* V26: task-bound chain lifecycle is rendered from authoritative APIs. */ }
     if (tab === 'consensus') loadConsensus();
     if (tab === 'explorer') loadBlockExplorer();
-    if (tab === 'system') loadSystem();
+
     if (tab === 'overview') loadOverview();
     if (tab === 'monitor') loadMonitor();
     if (tab === 'p2p') loadP2PData();
@@ -289,7 +297,7 @@ var baseOpts = {
     interaction: { mode: 'index', intersect: false },
     plugins: {
         legend: {
-            labels: { color: '#cbd5e1', font: { size: 12 }, usePointStyle: true, pointStyleWidth: 8, padding: 16 }
+            labels: { color: '#59677e', font: { size: 12 }, usePointStyle: true, pointStyleWidth: 8, padding: 16 }
         },
         tooltip: {
             backgroundColor: 'rgba(15,23,42,0.92)',
@@ -303,7 +311,7 @@ var baseOpts = {
     },
     scales: {
         x: {
-            grid: { color: 'rgba(148,163,184,0.06)', drawTicks: false },
+            grid: { color: 'rgba(148,163,184,0.12)', drawTicks: false },
             ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 12 }
         },
         y: {
@@ -353,16 +361,18 @@ async function initAll() {
 
     const loaded = pureData || bcData;
     if (!loaded) {
-        _error('未加载到任何训练数据！请检查 training_results_*.json');
-        document.getElementById('top-mode').textContent = '数据加载失败';
+        document.getElementById('top-mode').textContent = '尚无训练结果';
+        const note=document.getElementById('training-data-note');
+        if(note)note.textContent='目前没有已完成的训练结果，请在「协作训练」中运行任务，完成后刷新数据。';
     } else {
         document.getElementById('top-mode').textContent = '数据已加载';
-        _debug('数据加载成功: pure=' + (pureData ? pureData.summary.total_episodes : 'N/A') + 'eps, bc=' + (bcData ? bcData.summary.total_episodes : 'N/A') + 'eps');
+        _debug('数据加载成功: pure=' + (pureData?.summary?.total_episodes ?? 'N/A') + 'eps, bc=' + (bcData?.summary?.total_episodes ?? 'N/A') + 'eps');
         setTimeout(function() { document.getElementById('debug-bar').style.display = 'none'; }, 2000);
     }
 
     loadOverview();
     loadMonitor();
+    loadComparison();
 
     // 权威口径 Bento 卡（登记簿驱动）+ 数据截至时间戳
     renderCaliber();
@@ -373,11 +383,19 @@ async function initAll() {
 // 兜底常量与 deliverables/number_registry.json 登记值一致；正常情况数据来自
 // /api/caliber（后端程序化读登记簿），口径出处显示在卡片脚注。
 // NR-1（末50回合）与 NR-2（全程）必须同报，禁单点宣称"激励有效"。
+// 2026-11-02 与后端 _CALIBER_FALLBACK（dashboard.py:477）同步至 n=101 口径。
 var CALIBER_FALLBACK = {
-    nr1: { pct: '+28.17%', p: '0.0095', d: '0.44', n: 71 },
-    nr2: { pct: '+7.92%', p: '<1e-10', d: '1.20' },
-    nr3: { pct: '+1.95%' }
+    nr1: { pct: '+25.75%', p: '0.0033', d: '0.42', n: 101 },
+    nr2: { pct: '+7.70%', p: '<1e-10', d: '1.17' },
+    nr3: { pct: '+1.92%' },
+    // nr202/nr203 由 declared(mean_bc_all/mean_pure_all/p_merged/d_merged) 派生：
+    //   improvement_pct=(bc-pure)/|pure|*100，welch_p=p_merged，cohens_d=d_merged。
+    // 注：离线包 registry 冻结于 NR-200（不含 202/203），故此处用派生真值兜底；
+    //     实验证据侧 registry 含 NR-202/203，接口可达时以登记簿为准。
+    nr202: { pct: '+6.54%', p: '6.9e-11', d: '0.97', n: 202 },
+    nr203: { pct: '+6.61%', p: '8.2e-12', d: '1.03', n: 200 }
 };
+var CALIBER_LATEST = null;
 
 function setDataUpdated() {
     var el = document.getElementById('data-updated');
@@ -391,6 +409,7 @@ function setDataUpdated() {
 
 function renderCaliber() {
     var done = function(cal, source) {
+        CALIBER_LATEST = cal;
         var g = function(id) { return document.getElementById(id); };
         if (g('cal-nr1-pct')) g('cal-nr1-pct').textContent = cal.nr1.pct;
         if (g('cal-nr1-p')) g('cal-nr1-p').textContent = cal.nr1.p;
@@ -399,7 +418,7 @@ function renderCaliber() {
         if (g('cal-nr2-p')) g('cal-nr2-p').textContent = cal.nr2.p;
         if (g('cal-nr2-d')) g('cal-nr2-d').textContent = cal.nr2.d;
         if (g('cal-nr3-pct')) g('cal-nr3-pct').textContent = cal.nr3.pct;
-        if (g('cal-n')) g('cal-n').textContent = cal.nr1.n || 71;
+        if (g('cal-n')) g('cal-n').textContent = cal.nr1.n || '--';
         if (g('cal-src')) g('cal-src').textContent = '口径出处：' + source;
     };
     var fmtP = function(v) {
@@ -412,13 +431,22 @@ function renderCaliber() {
             .then(function(j) {
                 var c = j.caliber || {};
                 var n1 = c['NR-1'] || {}, n2 = c['NR-2'] || {}, n3 = c['NR-3'] || {};
+                var n202 = c['NR-202'] || {}, n203 = c['NR-203'] || {};
                 if (n1.improvement_pct == null) return Promise.reject(new Error('empty caliber'));
                 done({
                     nr1: { pct: '+' + Number(n1.improvement_pct).toFixed(2) + '%',
-                           p: fmtP(n1.welch_p), d: Number(n1.cohens_d).toFixed(2), n: n1.n || 71 },
+                           p: fmtP(n1.welch_p), d: Number(n1.cohens_d).toFixed(2), n: n1.n || '--' },
                     nr2: { pct: '+' + Number(n2.improvement_pct).toFixed(2) + '%',
                            p: fmtP(n2.welch_p), d: Number(n2.cohens_d).toFixed(2) },
-                    nr3: { pct: '+' + Number(n3.improvement_pct).toFixed(2) + '%' }
+                    nr3: { pct: '+' + Number(n3.improvement_pct).toFixed(2) + '%' },
+                    nr202: { pct: '+' + Number(n202.improvement_pct != null ? n202.improvement_pct : 6.54).toFixed(2) + '%',
+                             p: fmtP(n202.welch_p != null ? n202.welch_p : 6.85e-11),
+                             d: Number(n202.cohens_d != null ? n202.cohens_d : 0.97).toFixed(2),
+                             n: n202.n || 202 },
+                    nr203: { pct: '+' + Number(n203.improvement_pct != null ? n203.improvement_pct : 6.60).toFixed(2) + '%',
+                             p: fmtP(n203.welch_p != null ? n203.welch_p : 8.21e-12),
+                             d: Number(n203.cohens_d != null ? n203.cohens_d : 1.03).toFixed(2),
+                             n: n203.n || 200 }
                 }, j.source || 'number_registry.json');
             })
             .catch(function() {
@@ -513,12 +541,12 @@ function loadOverview() {
         const blkchain = bcData.blockchain_stats || {};
         const consensus = bcData.consensus_stats || {};
         pipelineScale.innerHTML = [
-            {l:'ECDSA签名', v:ecdsa.sign_count||0, c:'#34d399', icon:'🔐'},
-            {l:'ECDSA验签', v:ecdsa.verify_count||0, c:'#38bdf8', icon:'✅'},
-            {l:'SecurityGuard通过', v:security.security_pass_count||0, c:'#fbbf24', icon:'🛡️'},
-            {l:'CW-PBFT PREPARE投票', v:consensus.prepare_votes||0, c:'#818cf8', icon:'⚖️'},
+            {l:'ECDSA签名', v:ecdsa.sign_count||0, c:'#34d399', icon:'key'},
+            {l:'ECDSA验签', v:ecdsa.verify_count||0, c:'#38bdf8', icon:'check-circle'},
+            {l:'SecurityGuard通过', v:security.security_pass_count||0, c:'#fbbf24', icon:'shield-check'},
+            {l:'CW-PBFT PREPARE投票', v:consensus.prepare_votes||0, c:'#818cf8', icon:'vote'},
         ].map(s => `<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px;text-align:center;">
-            <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:4px;">${s.icon} ${s.l}</div>
+            <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:4px;">${window.MarlIcons?.icon(s.icon) || ''} ${s.l}</div>
             <div style="font-size:1.3rem;font-weight:700;color:${s.c};">${typeof s.v==='number'&&s.v>9999?((s.v||0)/1000).toFixed(0)+'K':(s.v||0)}</div>
         </div>`).join('');
     }
@@ -681,11 +709,14 @@ function loadMonitor() {
         }]
     }, baseOpts);
 
-    // 排行榜
-    const lb = d.leaderboard || [];
-    document.getElementById('mon-leaderboard').innerHTML = lb.length > 0
-        ? lb.map((x,i) => `<tr><td>${i+1}</td><td>${x.agent_id}</td><td class="${x.score>=0?'score-pos':'score-neg'}">${(x.score||0).toFixed(1)}</td><td><span class="badge-sm ${x.score>=0?'badge-ok':'badge-err'}">${x.score>=0?'活跃':'异常'}</span></td></tr>`).join('')
-        : '<tr><td colspan="4" style="color:var(--text-dim)">暂无排行榜数据</td></tr>';
+    // 排行榜（已迁移至激励tab，此处防御性跳过）
+    const lbEl = document.getElementById('mon-leaderboard');
+    if (lbEl) {
+        const lb = d.leaderboard || [];
+        lbEl.innerHTML = lb.length > 0
+            ? lb.map((x,i) => `<tr><td>${i+1}</td><td>${x.agent_id}</td><td class="${x.score>=0?'score-pos':'score-neg'}">${(x.score||0).toFixed(1)}</td><td><span class="badge-sm ${x.score>=0?'badge-ok':'badge-err'}">${x.score>=0?'活跃':'异常'}</span></td></tr>`).join('')
+            : '<tr><td colspan="4" style="color:var(--text-dim)">暂无排行榜数据</td></tr>';
+    }
 
     // 摘要
     document.getElementById('mon-summary').innerHTML = [
@@ -701,7 +732,9 @@ function loadMonitor() {
 // ===================== 对比分析 =====================
 function loadComparison() {
     if (!pureData || !bcData) {
-        document.getElementById('cmp-pure-metrics').innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-dim)">等待数据...</div>';
+        document.getElementById('cmp-pure-metrics').textContent='缺少 Pure MARL 与 BC-MARL 对照数据';
+        document.getElementById('cmp-bc-metrics').textContent='请检查训练结果文件';
+        for(const id of ['chart-cmp-reward','chart-cmp-coop','chart-cmp-dist']) {const el=document.getElementById(id);if(el){el.style.display='none';const card=el.closest('.chart-card');if(card&&!card.querySelector('.chart-empty')){const p=document.createElement('p');p.className='chart-empty';p.textContent='当前无可绘制的实验数据';card.append(p)}}}
         return;
     }
     const ps = (pureData && pureData.summary) || {}, bs = (bcData && bcData.summary) || {};
@@ -715,7 +748,7 @@ function loadComparison() {
         ? checkSig(bs.avg_reward, bs.avg_reward_ci95, ps.avg_reward, ps.avg_reward_ci95) : null;
     // [v3.7] 公平对比：基于 env_rewards（纯环境奖励，不含BC激励）
     const pe = ps.avg_env_reward || 0, be = bs.avg_env_reward || 0;
-    const envImprove = (pe !== 0 && be !== 0) ? ((Math.abs(pe) - Math.abs(be)) / Math.abs(pe) * 100) : null;
+    const envImprove = (pe !== 0 && be !== 0) ? ((be - pe) / Math.abs(pe) * 100) : null;
 
     // 指标卡片（合并格式显示 ±std）
     var fmtMetric = function(s, extra){
@@ -734,11 +767,11 @@ function loadComparison() {
         return '<div class="compare-metric"><div class="val" style="color:#38bdf8">'+m.v+'</div><div class="lbl">'+m.l+'</div></div>';
     }).join('');
 
-    var impText = '本机运行观测：BC-MARL 提升 +'+(improve||0).toFixed(0)+'%（演示数据·非申报口径；权威口径 +28.17%，见登记簿 NR-1/NR-2）';
+    var impText = '训练奖励均值相对变化：'+(Number.isFinite(improve)?improve.toFixed(1)+'%':'无法计算')+'；本项仅依据当前载入的实验文件计算。';
     if (improveSig !== null) impText += '  [' + improveSig + ']';
     // [v3.7] 环境奖励公平对比（不存在时静默跳过）
     if (envImprove !== null && !isNaN(envImprove)) {
-        impText += ' | <span style="color:#fbbf24">⚖ 环境奖励提升 +'+envImprove.toFixed(0)+'% (公平对比)</span>';
+        impText += ' | <span style="color:#fbbf24">环境奖励提升 +'+envImprove.toFixed(0)+'% (公平对比)</span>';
     }
     document.getElementById('cmp-improve').innerHTML = impText;
 
@@ -792,7 +825,7 @@ function loadComparison() {
                 fill: false
             },
             {
-                label: 'BC均值 -45.0',
+                label: 'BC 平均奖励 '+Number(bs.avg_reward||0).toFixed(1),
                 data: Array(smLabels.length).fill(bs.avg_reward || 0),
                 borderColor: 'rgba(56,189,248,0.3)',
                 borderWidth: 1,
@@ -856,9 +889,12 @@ function loadTriComparison() {
         ].map(function(m){ return '<div class="compare-metric"><div class="val" style="color:'+m.c+'">'+m.v+'</div><div class="lbl">'+m.l+'</div></div>'; }).join('');
     }
 
-    document.getElementById('tri-pure-metrics').innerHTML = metricsFor(ps, '#94a3b8');
-    document.getElementById('tri-bc-metrics').innerHTML = metricsFor(bs, '#38bdf8');
-    document.getElementById('tri-selfish-metrics').innerHTML = hasSelfish
+    const _tp = document.getElementById('tri-pure-metrics');
+    if (_tp) _tp.innerHTML = metricsFor(ps, '#94a3b8');
+    const _tb = document.getElementById('tri-bc-metrics');
+    if (_tb) _tb.innerHTML = metricsFor(bs, '#38bdf8');
+    const _ts = document.getElementById('tri-selfish-metrics');
+    if (_ts) _ts.innerHTML = hasSelfish
         ? metricsFor(ss, '#f87171')
         : '<div style="padding:20px;text-align:center;color:var(--text-dim)">训练中...</div>';
 
@@ -910,6 +946,7 @@ function loadTriComparison() {
 
 // ===================== 区块链 =====================
 function loadBlockchain() {
+    if (!document.getElementById('bc-stats')) return; // V25: legacy detached ledger panels removed
     const d = bcData || pureData || {};
     const config = d.config || {};
     const bcScores = d.bc_scores_final || {};
@@ -1030,18 +1067,21 @@ function loadBlockchain() {
 function loadSystem() {
     const d = bcData || pureData || {};
     const c = d.config || {};
-    document.getElementById('sys-config').innerHTML = [
+    const _sc = document.getElementById('sys-config');
+    if (_sc) _sc.innerHTML = [
         ['模式', c.mode||'未知'],['智能体数', c.n_agents||3],['目标点数', c.n_landmarks||3],
         ['总回合', c.n_episodes||'--'],['每回合步数', c.max_steps||25],
         ['随机种子', c.seed||42],['lambda权重', c.lambda_weight||0.1],
     ].map(r => `<tr><td style="color:var(--text-dim);width:160px">${r[0]}</td><td>${r[1]}</td></tr>`).join('');
 
-    document.getElementById('sys-env').innerHTML = [
+    const _se = document.getElementById('sys-env');
+    if (_se) _se.innerHTML = [
         ['环境','SimpleSpread (NumPy)'],['状态维度','18'],['观测维度','14'],['动作空间','5 (离散)'],
         ['智能体数','3'],['目标点数','3'],['最大步数','25'],
     ].map(r => `<tr><td style="color:var(--text-dim);width:140px">${r[0]}</td><td>${r[1]}</td></tr>`).join('');
 
-    document.getElementById('sys-algo').innerHTML = [
+    const _sa = document.getElementById('sys-algo');
+    if (_sa) _sa.innerHTML = [
         ['算法','IQL (Independent Q-Learning)'],['隐藏维度',c.hidden_dim||128],
         ['学习率',c.lr||0.001],['折扣因子',c.gamma||0.8],
         ['Batch Size',c.batch_size||64],['Target τ',0.01],
@@ -1187,6 +1227,7 @@ function drawP2PTopology(nodes, connections, activeNode) {
 let consensusDataLoaded = false;
 
 function loadConsensus() {
+    if (!document.getElementById('cs-rounds')) return; // V25: obsolete aggregate experiment chart removed
     fetch('/api/consensus_votes')
         .then(r => r.json())
         .then(data => {
@@ -1347,14 +1388,17 @@ function startConsensusPhaseAnimation() {
 let explorerDataLoaded = false;
 
 function loadBlockExplorer() {
+    if (!document.getElementById('ex-blocks-body')) return; // V25: obsolete generic explorer removed
     fetch('/api/block_explorer')
         .then(r => r.json())
         .then(data => {
             // 更新统计卡片
             document.getElementById('ex-height').textContent = data.total_blocks || 0;
-            document.getElementById('ex-txs').textContent = data.total_transactions || 0;
+            const _txs = document.getElementById('ex-txs');
+            if (_txs) _txs.textContent = data.total_transactions || 0;
             const ecdsa = data.ecdsa_stats || {};
-            document.getElementById('ex-sigs').textContent = (ecdsa.sign_count || 0) + '/' + (ecdsa.verify_count || 0);
+            const _sigs = document.getElementById('ex-sigs');
+            if (_sigs) _sigs.textContent = (ecdsa.sign_count || 0) + '/' + (ecdsa.verify_count || 0);
             // chain_valid: true=真实链校验通过 / false=校验失败 / null=示意数据（未做真实链校验）
             (function () {
                 var cv = data.chain_valid;
@@ -1430,102 +1474,7 @@ function loadBlockExplorer() {
 
 let p2pDataLoaded = false;
 
-function _drawP2PDemo() {
-    // 演示拓扑兜底（3 节点全互联）；指标卡如实显示"未启用"，不造假数据
-    const nodes = ['agent_0', 'agent_1', 'agent_2'];
-    const conns = [[0,1], [0,2], [1,2]];
-    const topoCanvas = document.getElementById('p2p-canvas');
-    if (topoCanvas && topoCanvas.offsetWidth === 0) {
-        const container = topoCanvas.parentElement;
-        topoCanvas.width = container ? container.clientWidth || 800 : 800;
-        topoCanvas.height = 380;
-    }
-    setTimeout(() => drawP2PTopology(nodes, conns, 0), 100);
-    // 权重分布兜底：用共识权重（若有），否则均匀三节点
-    fetch('/api/consensus_votes').then(r => r.json()).then(cv => {
-        const w = (cv && cv.weights && Object.keys(cv.weights).length) ? cv.weights
-                  : {agent_0: 0.3, agent_1: 0.3, agent_2: 0.3};
-        setTimeout(() => drawWeightChart(w), 150);
-    }).catch(() => {});
-    document.getElementById('p2p-nnodes').textContent = '3（演示）';
-    document.getElementById('p2p-rounds').textContent = '--';
-    document.getElementById('p2p-msgs').textContent = '--';
-    document.getElementById('p2p-latency').textContent = '--';
-    document.getElementById('p2p-log').innerHTML =
-        '<div style="color:#8a94a6;">P2P 网络未启用（模拟数据模式）。拓扑为演示布局；运行 <code>python network_demo.py</code> 启用实时网络。</div>';
-}
-
-function loadP2PData() {
-    // Try to fetch P2P network stats from API
-    fetch('/api/p2p_stats')
-        .then(r => r.json())
-        .then(data => {
-            if (!data.n_nodes) {
-                // 模拟数据模式（p2p_enabled=false, n_nodes=0）：API 正常返回但无节点数据，
-                // 不渲染也不触发 catch → 页面全空白。兜底走演示拓扑，指标卡如实显示未启用。
-                _drawP2PDemo();
-                p2pDataLoaded = true;
-                return;
-            }
-            if (data.n_nodes) {
-                document.getElementById('p2p-nnodes').textContent = data.n_nodes;
-                document.getElementById('p2p-rounds').textContent = data.total_consensus_rounds || '--';
-                document.getElementById('p2p-msgs').textContent = (data.total_msg_sent || 0) + ' / ' + (data.total_msg_received || 0);
-                document.getElementById('p2p-latency').textContent = (data.avg_latency_ms || '--') + ' ms';
-                
-                // Fix canvas dimensions (hidden tab causes 0-size)
-                const topoCanvas = document.getElementById('p2p-canvas');
-                if (topoCanvas && (topoCanvas.width === 0 || topoCanvas.offsetWidth === 0)) {
-                    const container = topoCanvas.parentElement;
-                    topoCanvas.width = container ? container.clientWidth || 800 : 800;
-                    topoCanvas.height = 380;
-                }
-                
-                // Draw topology
-                const nodes = data.nodes ? Object.keys(data.nodes) : ['agent_0', 'agent_1', 'agent_2'];
-                const conns = [];
-                for (let i = 0; i < nodes.length; i++) {
-                    for (let j = i + 1; j < nodes.length; j++) {
-                        conns.push([i, j]);
-                    }
-                }
-                drawP2PTopology(nodes, conns, 0);
-                
-                // Weight chart (Canvas 2D, no Chart.js dependency)
-                if (data.weights) {
-                    setTimeout(() => drawWeightChart(data.weights), 100);
-                }
-                
-                // Message log
-                if (data.recent_log && data.recent_log.length > 0) {
-                    let log = '';
-                    data.recent_log.slice(-20).reverse().forEach(entry => {
-                        log += '<div style="padding:2px 0; border-bottom:1px solid rgba(0,0,0,0.06);">' + entry + '</div>';
-                    });
-                    document.getElementById('p2p-log').innerHTML = log;
-                } else {
-                    // 无实时消息日志时如实留空，不生成任何占位数据
-                    document.getElementById('p2p-log').innerHTML =
-                        '<div style="color:#8a94a6;">暂无消息日志（P2P 网络未启用时无实时消息）</div>';
-                }
-            }
-            p2pDataLoaded = true;
-        })
-        .catch(() => {
-            // Fallback: show static demo topology
-            const nodes = ['agent_0', 'agent_1', 'agent_2'];
-            const conns = [[0,1], [0,2], [1,2]];
-            // Fix canvas dimensions
-            const topoCanvas = document.getElementById('p2p-canvas');
-            if (topoCanvas && topoCanvas.offsetWidth === 0) {
-                const container = topoCanvas.parentElement;
-                topoCanvas.width = container ? container.clientWidth || 800 : 800;
-                topoCanvas.height = 380;
-            }
-            setTimeout(() => drawP2PTopology(nodes, conns, 0), 100);
-            document.getElementById('p2p-log').innerHTML = '<div style="color:#556;">P2P网络未启动。运行 python network_demo.py 查看实时拓扑。</div>';
-        });
-}
+function loadP2PData() { /* 本机端口检查由 network-v4.js 控制 */ }
 
 function drawWeightChart(weights) {
     try {
@@ -1627,7 +1576,7 @@ function loadAttackPanel() {
         const status = document.getElementById('attack-status');
         if (status) {
             status.innerHTML = '<div style="padding:12px 16px;background:rgba(37,99,235,0.08);border:1px solid rgba(37,99,235,0.3);border-radius:8px;color:#1e3a8a;font-size:0.9rem;">'
-                + '👆 点击上方任一攻击按钮（或 ⚡ 一键注入全部）开始攻防演示，实时对比无区块链基线与 MARL-ECDSA 防护的拦截效果。</div>';
+                + '选择攻击类型，分别查看无防护基线与启用防护时的实验结果。</div>';
         }
         const results = document.getElementById('attack-results');
         if (results) results.innerHTML = '';
@@ -1638,19 +1587,19 @@ async function injectAttack(type) {
     const status = document.getElementById('attack-status');
     const results = document.getElementById('attack-results');
     const btnRow = document.getElementById('attack-btn-row');
-    status.textContent = '⏳ 正在注入攻击并验证区块链防护...';
+    status.textContent = '正在执行两组受控对照测试…';
     status.style.color = '#f59e0b';
     btnRow.querySelectorAll('button').forEach(b => b.disabled = true);
     try {
         const resp = await fetch('/api/attack/inject?type=' + encodeURIComponent(type));
         const data = await resp.json();
-        if (data.error) { status.textContent = '❌ ' + data.error; return; }
+        if (data.error) { status.textContent = '错误：' + data.error; return; }
         attackInjected = true;
-        status.textContent = '✅ 攻击注入完成，防护结果如下';
+        status.textContent = '对照测试已完成，请分别查看基线与防护环境的判定';
         status.style.color = '#10b981';
         renderAttackResult(data);
     } catch(e) {
-        status.textContent = '❌ 请求失败: ' + e.message;
+        status.textContent = '请求失败：' + e.message;
         status.style.color = '#ef4444';
     } finally {
         btnRow.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -1669,45 +1618,124 @@ const ATTACK_NAMES = {
 
 function renderAttackResult(data) {
     const container = document.getElementById('attack-results');
+    container.replaceChildren();
     const list = data.attack_type === 'all' ? data.results : [data];
-    let html = '';
-    list.forEach(r => {
-        const name = ATTACK_NAMES[r.attack_type] || r.attack_type;
-        const noBc = r.no_bc || {};
-        const withBc = r.with_bc || {};
-        const noBcOk = !!noBc.attack_successful;
-        const withBcOk = !!withBc.attack_successful;
-        const defended = noBcOk && !withBcOk;
+    for (const r of list) {
+        if (!r || !r.no_bc || !r.with_bc) continue;
+        const no = r.no_bc, yes = r.with_bc;
+        const baseSuccess = no.attack_successful === true;
+        const secureSuccess = yes.attack_successful === true;
+        const wrap = document.createElement('article'); wrap.className='v6-attack-card';
+        const h = document.createElement('h3'); h.textContent = ATTACK_NAMES[r.attack_type] || r.attack_type;
+        const summary = document.createElement('p'); summary.className = 'v6-attack-summary';
+        summary.textContent = baseSuccess && !secureSuccess ? '对照结论：基线允许攻击，启用防护后拒绝攻击' :
+          secureSuccess ? '对照结论：启用防护后攻击仍然成功' :
+          baseSuccess ? '对照结论：防护环境结果尚未明确' : '对照结论：基线下攻击未成功，不能据此认定防护有效';
+        const compare = document.createElement('div'); compare.className='v6-attack-compare';
+        for (const [title,part,success] of [['无防护基线',no,baseSuccess],['启用 MARL-ECDSA 防护',yes,secureSuccess]]) {
+            const pane = document.createElement('div'); pane.className='v6-attack-pane ' + (success?'v6-risk':'v6-safe');
+            const label=document.createElement('h4'); label.textContent=title;
+            const status=document.createElement('strong'); status.textContent=success?'恶意提案通过':'恶意提案未通过';
+            const desc=document.createElement('p'); desc.textContent=part.description || '无结果说明';
+            pane.append(label,status,desc); compare.append(pane);
+        }
+        const details=document.createElement('details'); const sum=document.createElement('summary');sum.textContent='查看原始判定数据';
+        const pre=document.createElement('pre'); pre.textContent=JSON.stringify(r,null,2);details.append(sum,pre);
+        wrap.append(h,summary,compare,details); container.append(wrap);
+    }
+    if (!container.children.length) container.textContent='接口未返回可显示的对照结果';
+}
 
-        let detailsHtml = '';
-        const detailKeys = Object.keys(withBc).filter(k => !['attack_successful', 'description'].includes(k));
-        detailKeys.forEach(k => {
-            const v = withBc[k];
-            const vStr = (typeof v === 'object') ? JSON.stringify(v) : String(v);
-            detailsHtml += `<div style="display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:0.8rem;border-bottom:1px solid rgba(0,0,0,0.06);">
-                <span style="color:#8899aa;">${k}</span><span style="color:#e2e8f0;font-family:monospace;text-align:right;">${vStr}</span></div>`;
-        });
+// CCF v2: 真实实验数据与公式推演严格隔离。
+function contributionLab() {
+  const get = id => document.getElementById(id);
+  if (!get('lab-task')) return;
+  const t = Number(get('lab-task').value)/100, k = Number(get('lab-coop').value)/100,
+        h = Number(get('lab-compliance').value)/100;
+  const score = .40*t + .35*k + .25*h;
+  const betrayed = get('lab-betray').value === 'betray';
+  const delta = betrayed ? -20 : 10 + 10*score;
+  for (const [id, val] of [['lab-task',t],['lab-coop',k],['lab-compliance',h]])
+    get(id+'-value').textContent = (val*100).toFixed(0)+'%';
+  get('lab-score').textContent = score.toFixed(3) + ' / 1.000';
+  get('lab-scorebar').style.width = (score*100).toFixed(1)+'%';
+  get('lab-delta').textContent = (delta>0?'+':'')+delta.toFixed(2)+' 积分';
+  get('lab-explanation').textContent = betrayed ? '背叛惩罚 = −10 × 2（与贡献分值无关）' : '基础奖励 10 + 贡献增益 10 × C';
+}
+function incentiveRows() {
+  const rows = bcData && Array.isArray(bcData.leaderboard) ? bcData.leaderboard : [];
+  return rows.filter(r => r && typeof r.agent_id !== 'undefined')
+    .slice().sort((a,b) => (Number(b.score)||0)-(Number(a.score)||0));
+}
+function incentiveCsv() {
+  const rows = incentiveRows();
+  if (!rows.length) return;
+  // RFC4180-like CSV quoting avoids malformed commas, embedded quotes and newlines.
+  const cell = x => '"'+String(x ?? '').replace(/"/g,'""')+'"';
+  const csv = '\uFEFF' + [['rank','agent_id','contribution_score'],...rows.map((r,i)=>[i+1,r.agent_id,r.score])]
+    .map(row=>row.map(cell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  const url = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.href=url; a.download='ccf_agent_contributions.csv'; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function loadIncentive() {
+  const s = bcData?.summary || {};
+  const rows = incentiveRows();
+  const pct = (v) => (typeof v === 'number' && Number.isFinite(v)) ? (v*100).toFixed(1) + '%' : '暂无数据';
+  const stats = [
+    ['累计训练回合', typeof s.total_episodes === 'number' ? s.total_episodes.toLocaleString('zh-CN') : '暂无数据'],
+    ['平均协作率', pct(s.avg_cooperation_rate)],
+    ['智能体贡献记录', rows.length ? String(rows.length) : '暂无数据'],
+    ['平均背叛率', pct(s.avg_betrayal_rate)]
+  ];
+  const box = document.getElementById('incentive-stats');
+  if (!box) return;
+  box.innerHTML = stats.map(([k,v]) => `<div class="stat-card"><div class="label">${k}</div><div class="value">${v}</div></div>`).join('');
+  const filterEl = document.getElementById('incentive-filter');
+  const query = String(filterEl?.value || '').trim().toLowerCase();
+  const selected = rows.filter(r=>String(r.agent_id).toLowerCase().includes(query));
+  const safe = (x) => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  document.getElementById('incentive-leaderboard').innerHTML = selected.length
+    ? selected.map((r) => `<tr><td>${rows.indexOf(r)+1}</td><td>${safe(r.agent_id)}</td><td>${typeof r.score === 'number' && Number.isFinite(r.score) ? r.score.toFixed(2) : '—'}</td><td>${typeof r.score === 'number' && Number.isFinite(r.score) ? '已记录' : '缺失分值'}</td></tr>`).join('')
+    : `<tr><td colspan="4">${rows.length ? '没有匹配的智能体' : '尚无贡献记录，请先运行 BC-MARL 实验。'}</td></tr>`;
+  document.getElementById('incentive-match-count').textContent = `匹配 ${selected.length} / ${rows.length} 条记录`;
+  const exportBtn=document.getElementById('incentive-export');
+  exportBtn.disabled=rows.length===0;
+  contributionLab();
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  for(const id of ['lab-task','lab-coop','lab-compliance','lab-betray'])
+    document.getElementById(id)?.addEventListener('input', contributionLab);
+  document.getElementById('incentive-filter')?.addEventListener('input', loadIncentive);
+  document.getElementById('incentive-export')?.addEventListener('click', incentiveCsv);
+  contributionLab();
+});
 
-        html += `
-        <div class="chart-card full" style="padding:20px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-                <h3 style="margin:0;">${name}</h3>
-                <span class="badge ${defended ? 'badge-green' : 'badge-red'}" style="font-size:0.85rem;">${defended ? '🛡 已拦截' : '⚠ 未拦截'}</span>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                <div style="background:rgba(255,107,107,0.08);border:1px solid rgba(255,107,107,0.25);border-radius:10px;padding:14px;">
-                    <div style="font-size:0.85rem;color:#ff8a8a;margin-bottom:6px;">❌ 无区块链基线</div>
-                    <div style="font-size:1.1rem;font-weight:700;color:#ef4444;margin-bottom:6px;">${noBcOk ? '攻击成功' : '—'}</div>
-                    <div style="font-size:0.85rem;color:#aab8c8;line-height:1.6;">${noBc.description || ''}</div>
-                </div>
-                <div style="background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.25);border-radius:10px;padding:14px;">
-                    <div style="font-size:0.85rem;color:#5eead4;margin-bottom:6px;">✅ MARL-ECDSA 区块链防护</div>
-                    <div style="font-size:1.1rem;font-weight:700;color:${withBcOk ? '#ef4444' : '#10b981'};margin-bottom:6px;">${withBcOk ? '攻击成功' : '攻击被拦截'}</div>
-                    <div style="font-size:0.85rem;color:#aab8c8;line-height:1.6;">${withBc.description || ''}</div>
-                </div>
-            </div>
-            ${detailsHtml ? `<div style="margin-top:12px;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 14px;">${detailsHtml}</div>` : ''}
-        </div>`;
-    });
-    container.innerHTML = html;
+
+// User-initiated data refresh; does not generate experiments or synthesize results.
+async function refreshCurrentData(btn) {
+  const status=document.querySelector('#tab-'+(document.querySelector('.nav-tab.active')?.dataset.tab||'overview')+' .v6-action-status');
+  const tab=document.querySelector('.nav-tab.active')?.dataset.tab || 'overview';
+  btn.disabled=true;status.textContent='正在从服务端重新读取数据…';
+  try {
+    const modes=['pure','bc','selfish'];
+    // A missing mode (HTTP 404) is a valid empty state, not a global refresh failure.
+    // Never retain old values when the service has no newer result.
+    const values=await Promise.all(modes.map(async mode=>{
+      const response=await fetch('/api/load/'+mode+'?t='+Date.now(),{cache:'no-store'});
+      if(response.status===404) return null;
+      if(!response.ok) throw new Error(mode+' 数据读取失败 ('+response.status+')');
+      return response.json();
+    }));
+    [pureData,bcData,selfishData]=values;
+    const note=document.getElementById('training-data-note');
+    if(note)note.textContent=(!pureData&&!bcData)?'尚无训练结果。请先运行任务并等待完成。':(!pureData||!bcData)?'当前仅有部分模式的训练结果；请完成另一模式后再进行同口径对照。':'已加载两种模式的训练结果。';
+    if(tab==='overview') loadOverview();
+    else if(tab==='train') {loadMonitor();loadComparison();}
+    else if(tab==='incentive') loadIncentive();
+    else if(tab==='chain'){loadBlockchain();loadConsensus();loadBlockExplorer();}
+    status.textContent=(pureData||bcData||selfishData?'数据已更新 · ':'暂无可用训练结果 · ')+new Date().toLocaleTimeString();
+  } catch(err){status.textContent='刷新失败：'+err.message;}
+  finally{btn.disabled=false;}
 }

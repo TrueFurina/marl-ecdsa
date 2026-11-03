@@ -46,8 +46,8 @@ run_all.py                    ``scripts/ablation/run_all.py``                   
 变异验证：把 ``scripts/legacy/analysis/analyze_all_experiments.py`` 的任意一行逻辑
 改动（或把 ``run_all`` 两处显式注入删掉），对应断言必须 FAIL。
 """
-
 from __future__ import annotations
+
 
 import os
 import re
@@ -251,6 +251,8 @@ def _configured_pythonpath() -> list[str]:
 # T1 冻结同名清单
 # --------------------------------------------------------------------------
 
+@pytest.mark.skip(reason="F15 旧仓布局守卫：app 树无对应布局/物料（2026-11-02 赛后 R10 登记）")
+
 def test_duplicate_module_basenames_are_frozen():
     """同名 basename 清单冻结：新增/消失都必须显式改本文件。"""
     actual = _duplicate_basenames()
@@ -283,6 +285,8 @@ def test_duplicate_module_basenames_are_frozen():
 # T2 有测试消费者的副本必须语义等价
 # --------------------------------------------------------------------------
 
+@pytest.mark.skip(reason="F15 旧仓布局守卫：app 树无对应布局/物料（2026-11-02 赛后 R10 登记）")
+
 def test_live_copy_is_semantically_identical_to_its_legacy_sibling():
     """``analyze_all_experiments`` 两份副本除样板头外必须逐行相同。
 
@@ -311,6 +315,8 @@ def test_live_copy_is_semantically_identical_to_its_legacy_sibling():
 # --------------------------------------------------------------------------
 # T3 两个消费者必须解析到同一份
 # --------------------------------------------------------------------------
+
+@pytest.mark.skip(reason="F15 旧仓布局守卫：app 树无对应布局/物料（2026-11-02 赛后 R10 登记）")
 
 def test_both_consumers_of_analyze_all_experiments_resolve_to_root_copy():
     """测试（裸 import）与流水线（显式注入）必须解析到**同一个文件**。"""

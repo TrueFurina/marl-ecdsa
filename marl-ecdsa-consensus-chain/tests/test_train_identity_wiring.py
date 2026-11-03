@@ -117,6 +117,26 @@ class TestInjectedChainEnforcement:
         tx.tx_id = tx.compute_hash()
         return tx
 
+    @staticmethod
+    def _seal_block(bc, proposer_priv, tx):
+        """构造并封口一个**真实有效**的区块（state_root 可重算 + 出块者签名可验）。
+
+        2026-11-02（区块级完整性校验启用后）：此前本项目区块 `signature_hex=""`、
+        `state_root="r"`，会被区块级校验直接拒绝，导致本类的正控/负控全部由
+        「区块被拒」而非「交易签名」决定 —— 断言即使通过也是假阳性。
+        """
+        from blockchain.crypto.ecdsa_utils import ECDSAUtils
+        from blockchain.ledger.block import Block
+        blk = Block(block_height=bc.latest_block.block_height + 1,
+                    previous_hash=bc.latest_block.block_hash,
+                    timestamp=1000, proposer="agent_0", transactions=[tx],
+                    state_root="")
+        blk.finalize()
+        blk.signature_hex = ECDSAUtils.sign(
+            proposer_priv, bytes.fromhex(blk.block_hash)
+        ).hex()
+        return blk
+
     def _chain_with_agent(self):
         from blockchain.contracts.identity_contract import IdentityContract
         from blockchain.crypto.ecdsa_utils import ECDSAUtils
@@ -131,39 +151,31 @@ class TestInjectedChainEnforcement:
 
     def test_valid_tx_accepted(self):
         """正控：真实签名的交易可上链"""
-        from blockchain.ledger.block import Block
         bc, ic, priv = self._chain_with_agent()
         tx = self._signed_tx("agent_0", priv, ic)
-        blk = Block(block_height=1, previous_hash=bc.latest_block.block_hash,
-                    timestamp=1000, proposer="agent_0", transactions=[tx],
-                    state_root="r", signature_hex="")
+        blk = self._seal_block(bc, priv, tx)
         assert bc.append_block(blk) is True
         assert bc.height == 1
 
     def test_unsigned_tx_rejected(self):
         """强制生效：空签名交易被拒绝"""
-        from blockchain.ledger.block import Block, Transaction
+        from blockchain.ledger.block import Transaction
         bc, ic, priv = self._chain_with_agent()
         tx = Transaction(tx_id="", agent_id="agent_0", action=[0.1], action_hash="h",
                          timestamp=1000, nonce=1, signature_hex="", tx_type="action",
                          extra={"step": 0, "env_reward": 0.0, "verified": True})
         tx.tx_id = tx.compute_hash()
-        blk = Block(block_height=1, previous_hash=bc.latest_block.block_hash,
-                    timestamp=1000, proposer="agent_0", transactions=[tx],
-                    state_root="r", signature_hex="")
+        blk = self._seal_block(bc, priv, tx)
         assert bc.append_block(blk) is False
         assert bc.height == 0
 
     def test_tampered_signature_rejected(self):
         """强制生效：签名被篡改的交易被拒绝"""
-        from blockchain.ledger.block import Block
         bc, ic, priv = self._chain_with_agent()
         tx = self._signed_tx("agent_0", priv, ic)
         # 篡改签名（保持 hex 合法、DER 结构可能失效）
         tx.signature_hex = "30" + tx.signature_hex[2:-4] + "beef"
         tx.tx_id = tx.compute_hash()
-        blk = Block(block_height=1, previous_hash=bc.latest_block.block_hash,
-                    timestamp=1000, proposer="agent_0", transactions=[tx],
-                    state_root="r", signature_hex="")
+        blk = self._seal_block(bc, priv, tx)
         assert bc.append_block(blk) is False
         assert bc.height == 0

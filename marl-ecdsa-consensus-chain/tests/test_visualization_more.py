@@ -21,7 +21,8 @@ class TestDashboardRender:
     def test_index_renders(self):
         """首页渲染返回 200 + HTML"""
         app = dash._create_app()
-        client = app.test_client()
+        from tests.conftest import make_auth_client
+        client = make_auth_client(app.test_client(), 'f08_vis')
         r = client.get('/')
         assert r.status_code == 200
         assert b'<!DOCTYPE html>' in r.data or b'<html' in r.data
@@ -29,22 +30,26 @@ class TestDashboardRender:
     def test_index_contains_tabs(self):
         """首页含导航标签"""
         app = dash._create_app()
-        client = app.test_client()
+        from tests.conftest import make_auth_client
+        client = make_auth_client(app.test_client(), 'f08_vis')
         r = client.get('/')
         html = r.data.decode('utf-8')
         assert 'data-tab' in html or 'tab' in html
 
-    def test_index_contains_demo_button(self):
+    def test_demo_button_removed(self):
+        """F4 设计决策（dashboard.js:221 登记）：演示轮播入口已删除，不得回归。"""
         """首页含演示模式按钮"""
         app = dash._create_app()
-        client = app.test_client()
+        from tests.conftest import make_auth_client
+        client = make_auth_client(app.test_client(), 'f08_vis')
         r = client.get('/')
-        assert b'toggleDemoMode' in r.data or b'demo-btn' in r.data
+        assert b'toggleDemoMode' not in r.data and b'demo-btn' not in r.data
 
     def test_index_contains_export(self):
         """首页含导出报告入口"""
         app = dash._create_app()
-        client = app.test_client()
+        from tests.conftest import make_auth_client
+        client = make_auth_client(app.test_client(), 'f08_vis')
         r = client.get('/')
         assert b'showExportModal' in r.data or b'export' in r.data.lower()
 
@@ -53,7 +58,8 @@ class TestTemplateData:
     def test_template_variables_injected(self):
         """首页渲染含动态数据（_dashboard_data 注入）"""
         app = dash._create_app()
-        client = app.test_client()
+        from tests.conftest import make_auth_client
+        client = make_auth_client(app.test_client(), 'f08_vis')
         # 注入测试数据
         dash._dashboard_data['episode_rewards'] = [-30.0, -25.0]
         r = client.get('/')
@@ -65,7 +71,8 @@ class TestTemplateData:
     def test_render_with_empty_data(self):
         """空数据渲染不崩溃"""
         app = dash._create_app()
-        client = app.test_client()
+        from tests.conftest import make_auth_client
+        client = make_auth_client(app.test_client(), 'f08_vis')
         dash._dashboard_data['episode_rewards'] = []
         r = client.get('/')
         assert r.status_code == 200

@@ -3,9 +3,9 @@
 # =============================================================================
 #
 # 两种清单的用途差异：
-#   * requirements.txt   —— 宽松下界式（如 cryptography>=41.0.0）。用于「灵活安装」，
+#   * requirements.txt   —— 宽松下界式（如 cryptography>=43.0.0）。用于「灵活安装」，
 #                           允许 pip 解析较新的兼容版本，适合日常开发 / CI 宽泛环境。
-#   * requirements.lock.txt —— 精确锁定式（如 cryptography==49.0.0）。由本机实际可运行
+#   * requirements.lock.txt —— 精确锁定式（如 cryptography==46.0.7）。由本机实际可运行
 #                           环境的 pip freeze 导出，仅含项目实际依赖。用于「可复现安装」，
 #                           锁定提交时验证通过的精确版本，避免下游解析到不兼容的新版本。
 #   推荐复现：pip install -r requirements.lock.txt
@@ -13,7 +13,7 @@
 #
 
 # --- 核心密码学（必需）---
-cryptography>=41.0.0
+cryptography>=43.0.0
 
 # --- 后量子密码（可选，ML-DSA-44/Dilithium2，抗量子签名）---
 dilithium-py>=1.4.0          # FIPS 204 后量子数字签名，与 ECDSA 可替换

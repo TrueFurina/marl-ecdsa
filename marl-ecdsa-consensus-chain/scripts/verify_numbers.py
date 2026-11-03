@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -97,7 +99,17 @@ def _check_n(entry: Dict[str, Any], role: str, n: int, errors: List[str]) -> Non
 
 
 def _recompute_two_sample(entry, data_root, errors):
-    srcs = {s["role"]: s for s in entry["sources"]}
+    # 登记完整性前置校验（2026-10-22）：sources 缺 role=a/b 时记 error 而非让
+    # KeyError 抛出 —— 门禁必须 fail-closed（判该条 FAIL、脚本继续跑完其余条目），
+    # 不得因一条登记不完整而整体崩溃、使全部条目失去校验。
+    # 实测触发：NR-197~200 以 role=summary/raw 登记但 analysis 仍为 two_sample。
+    srcs = {s["role"]: s for s in entry.get("sources", []) if isinstance(s, dict)}
+    missing = [r for r in ("a", "b") if r not in srcs]
+    if missing:
+        errors.append(
+            f"sources 缺 role={'/'.join(missing)}（现有 role: {sorted(srcs)}），"
+            f"条目登记不完整，无法复算")
+        return {}, 0
     fa, va = _collect_source(data_root, srcs["a"])
     fb, vb = _collect_source(data_root, srcs["b"])
     _check_n(entry, "a", len(va), errors)
@@ -386,6 +398,193 @@ def _recompute_attack_batch(entry, data_root, errors):
     return computed, 1
 
 
+# P0 加权法定人数（NR-197~200）：cell 选择器只允许数据里真实存在的定位键。
+# 限定键集是为了让"选择器写错"变成可诊断错误，而不是静默匹配到 0 格后被误读成
+# 数据缺失（后者会把登记缺陷伪装成"本数据包不含该结果"）。
+_P0_SELECTOR_KEYS = ("profile", "n_nodes", "R_actual", "fault_ratio", "control")
+
+
+def _p0_filter(cells, sel, where, errors):
+    """按选择器过滤 cell；命中数必须恰为 1，否则记 error 并返回 None（fail-closed）。"""
+    hits = []
+    for c in cells:
+        ok = True
+        for k in _P0_SELECTOR_KEYS:
+            if k not in sel:
+                continue
+            want, got = sel[k], c.get(k)
+            if isinstance(want, (int, float)) and not isinstance(want, bool):
+                if got is None or abs(float(got) - float(want)) > 1e-9:
+                    ok = False
+            elif got != want:
+                ok = False
+            if not ok:
+                break
+        if ok:
+            hits.append(c)
+    if len(hits) != 1:
+        errors.append(f"{where}: 选择器 {sel} 命中 {len(hits)} 格（须恰为 1）")
+        return None
+    return hits[0]
+
+
+def _recompute_p0_scores(spec, data_root, computed, errors):
+    """Profile B 的贡献分离散度（真实 MARL 训练分）。
+
+    🔴 口径必须与 ``scripts/p0_weighted_quorum/make_b_weights.py`` 逐字一致：
+    先把同一 agent 跨种子求均值（消掉种子间波动），再对 agent 均值取**总体 SD**
+    （ddof=0）。换成 ddof=1 或直接对全部 100 个值求 SD 都会得到不同数字
+    （14.53 / 40.19 vs 13.78），因此这里显式钉住 ddof=0 并在 docstring 说明。
+    """
+    pat = spec.get("glob") or spec.get("file")
+    n_agents = int(spec.get("n_agents") or 10)
+    if not pat:
+        errors.append("p0_summary.score_source 缺 glob")
+        return
+    files = ac.resolve_glob(data_root, pat)
+    if not files:
+        errors.append(f"贡献分文件缺失: {pat}")
+        return
+    per_agent: Dict[str, List[float]] = {}
+    for f in files:
+        doc = ac.load_json(f)
+        runs = (doc.get("runs_by_n") or {}) if isinstance(doc, dict) else {}
+        arm = runs.get(str(n_agents)) or runs.get(n_agents) or {}
+        sc = arm.get("bc_scores") or {}
+        if not sc:
+            errors.append(f"{Path(f).name}: 缺 runs_by_n[{n_agents}].bc_scores")
+            continue
+        for a, v in sc.items():
+            per_agent.setdefault(str(a), []).append(float(v))
+    if not per_agent:
+        errors.append("贡献分文件均未取到 bc_scores")
+        return
+    avg = [ac.mean(v) for v in per_agent.values()]
+    mean = ac.mean(avg)
+    computed["raw_score_mean"] = mean
+    computed["raw_score_sigma"] = ac.variance(avg, 0) ** 0.5   # ddof=0（同 make_b_weights）
+    computed["raw_score_span_pct"] = (max(avg) - min(avg)) / mean * 100.0 if mean else 0.0
+    computed["raw_score_seeds"] = len(files)
+    computed["raw_score_agents"] = len(avg)
+
+
+def _recompute_p0_summary(entry, data_root, errors):
+    """P0 加权法定人数汇总（NR-197~200）：从 ``p0_summary.json`` 的 cell 阵列复算。
+
+    为什么不能只读汇总自报值：``p0_summary.json`` 是**派生文件**，一旦它与逐格
+    原始结论脱钩（手工改过 / 换了算法但没重跑），材料里引用的 16/50、12/15 这类
+    计数就变成无源数字。故本复算器一律从 cells 逐格重算 ``n_cells`` /
+    ``holm_sig_total``，并把汇总自报值当**被核对对象**（不一致即报错），而不是
+    当答案。
+
+    输出键：
+    - ``n_cells`` / ``holm_sig_total`` / ``n_rounds``：全局重算值
+    - ``cw_<label>`` / ``std_<label>`` / ``diff_<label>`` / ``holm_<label>`` /
+      ``R_actual_<label>``：``cell_selectors`` 逐格
+    - ``holm_sig_<label>`` / ``holm_sig_<label>_total``：``aggregates`` 剖面聚合
+      （显著格数 / 格数），label 命名与既有登记保持一致
+    """
+    src = (entry.get("sources") or [{}])[0]
+    rel = src.get("file") or src.get("glob")
+    if not rel:
+        errors.append("p0_summary: sources[0] 缺少 file/glob")
+        return {}, 0
+    p = _resolve_file(data_root, rel)
+    if not p.exists():
+        errors.append(f"P0 汇总缺失: {rel}")
+        return {}, 0
+    doc = ac.load_json(p)
+    if not isinstance(doc, dict):
+        errors.append(f"P0 汇总结构异常（顶层非对象）: {rel}")
+        return {}, 0
+    cells = doc.get("cells") or []
+    if not cells:
+        errors.append("p0_summary: cells 为空")
+        return {}, 0
+
+    computed: Dict[str, Any] = {}
+
+    # 全局重算 + 自报值交叉核对
+    n_cells = len(cells)
+    holm_sig = sum(1 for c in cells if c.get("holm_rejected_0.05") is True)
+    computed["n_cells"] = n_cells
+    computed["holm_sig_total"] = holm_sig
+    for key, recomputed in (("n_cells", n_cells), ("n_holm_significant", holm_sig)):
+        claimed = doc.get(key)
+        if isinstance(claimed, (int, float)) and not isinstance(claimed, bool):
+            if int(claimed) != int(recomputed):
+                errors.append(
+                    f"P0 汇总自报 {key}={claimed} ≠ 逐格重算 {recomputed}"
+                    f"（汇总与原始结论脱钩）")
+
+    rounds = {c.get("cw_pbft", {}).get("n_rounds") for c in cells}
+    rounds.discard(None)
+    if len(rounds) == 1:
+        computed["n_rounds"] = rounds.pop()
+    elif len(rounds) > 1:
+        errors.append(f"P0 各格 n_rounds 不一致：{sorted(rounds)}")
+    else:
+        errors.append("P0 各格缺 cw_pbft.n_rounds")
+
+    # 逐格自洽：success_rate 必须严格等于 successes/n_rounds。这是**全 50 格**的
+    # 检查（不是只查被 selector 选中的格）——只查选中格会让未被引用的格静默腐坏，
+    # 而 Holm 计数恰恰依赖全量格。
+    for c in cells:
+        where = (f"{c.get('profile')}/n{c.get('n_nodes')}/R{c.get('R_actual')}"
+                 f"/f{c.get('fault_ratio')}/{c.get('control')}")
+        for arm in ("cw_pbft", "standard_pbft"):
+            blk = c.get(arm) or {}
+            s, n = blk.get("successes"), blk.get("n_rounds")
+            rate = blk.get("success_rate")
+            if isinstance(s, int) and isinstance(n, int) and n > 0 and rate is not None:
+                if abs(s / n - float(rate)) > 1e-9:
+                    errors.append(
+                        f"{where}/{arm}: success_rate={rate} ≠ {s}/{n}={s / n:.6f}")
+
+    # 单格：读数
+    for sel in entry.get("cell_selectors") or []:
+        label = sel.get("label")
+        if not label:
+            errors.append("p0_summary: cell_selectors 项缺 label")
+            continue
+        cell = _p0_filter(cells, {k: v for k, v in sel.items() if k != "label"},
+                          f"cell[{label}]", errors)
+        if cell is None:
+            continue
+        cw = cell.get("cw_pbft") or {}
+        std = cell.get("standard_pbft") or {}
+        computed[f"cw_{label}"] = cw.get("success_rate")
+        computed[f"std_{label}"] = std.get("success_rate")
+        computed[f"diff_{label}"] = cell.get("success_rate_diff")
+        computed[f"holm_{label}"] = bool(cell.get("holm_rejected_0.05"))
+        computed[f"R_actual_{label}"] = cell.get("R_actual")
+
+    # 剖面聚合：显著格数 / 格数
+    for agg in entry.get("aggregates") or []:
+        label = agg.get("label")
+        if not label:
+            errors.append("p0_summary: aggregates 项缺 label")
+            continue
+        pick = {k: v for k, v in agg.items() if k != "label"}
+        hits = [c for c in cells if all(
+            (abs(float(c.get(k)) - float(v)) <= 1e-9
+             if isinstance(v, (int, float)) and not isinstance(v, bool)
+             else c.get(k) == v)
+            for k, v in pick.items())]
+        if not hits:
+            errors.append(f"agg[{label}]: 选择器 {pick} 命中 0 格")
+            continue
+        computed[f"holm_sig_{label}"] = sum(
+            1 for c in hits if c.get("holm_rejected_0.05") is True)
+        computed[f"holm_sig_{label}_total"] = len(hits)
+
+    score = entry.get("score_source")
+    if isinstance(score, dict):
+        _recompute_p0_scores(score, data_root, computed, errors)
+
+    return computed, 1
+
+
 def _recompute_formula_verify(entry, data_root, errors):
     """判据类：从 ``r_scan``/``exp3_reproduction`` 复算 f_max(R)=R/(R+2) 边界与自检总状态。"""
     rel = (entry.get("sources") or [{}])[0].get("file")
@@ -424,7 +623,12 @@ def _recompute_pytest(entry, data_root, errors):
             cwd=str(ac.REPO_ROOT), capture_output=True, text=True,
         )
         if not xml.exists():
-            errors.append(f"pytest 未产出 junit xml（退出码 {proc.returncode}）")
+            # 带 stderr 末行：解释器缺 pytest / 采集错误等一眼可诊断
+            # （2026-10-17：PATH 上的 python 3.13 无 pytest，子进程秒败，
+            #  没有这行 hint 时只能看到一句光秃秃的"未产出 junit xml"）。
+            tail = [ln for ln in (proc.stderr or "").strip().splitlines() if ln.strip()]
+            hint = f"；stderr 末行: {tail[-1][:200]}" if tail else ""
+            errors.append(f"pytest 未产出 junit xml（退出码 {proc.returncode}{hint}）")
             return {}, 0
         root = ET.parse(xml).getroot()
         suites = [root] if root.tag == "testsuite" else list(root)
@@ -435,6 +639,82 @@ def _recompute_pytest(entry, data_root, errors):
             skipped += int(s.get("skipped", 0))
     return {"collected": total, "passed": total - failed - skipped,
             "failed": failed, "skipped": skipped}, 1
+
+
+def _recompute_e41_longrun(entry, data_root, errors):
+    """E41 端到端长跑一致性（NR-174）：读 e41_ledger_consistency.json 的 summary。
+
+    产出键（与 declared 一一对应，全部为标量）：
+      success_count / n_rounds / success_rate / n_divergence_checks /
+      n_checks / latency_ms_mean / latency_ms_max / total_msg_sent
+    ⚠ divergences 是 list，**不进 declared**（verify 的 _compare_value 对
+    「declared 是 list 而 computed 无对应 key」直接判 False）；一致性结论
+    由 n_divergence_checks == 0 表达。
+    """
+    src0 = (entry.get("sources") or [{}])[0]
+    rel = src0.get("file") or src0.get("glob")
+    if not rel:
+        errors.append("e41_longrun: sources[0] 缺少 file/glob")
+        return {}, 0
+    p = Path(data_root) / rel
+    if not p.exists():
+        errors.append(f"E41 长跑报告缺失: {rel}")
+        return {}, 0
+    doc = ac.load_json(p)
+    summ = doc.get("summary") or {}
+    lat = summ.get("latency_ms") or {}
+    computed = {
+        "success_count": summ.get("success_count"),
+        "n_rounds": summ.get("n_rounds"),
+        "success_rate": summ.get("success_rate"),
+        "n_checks": summ.get("n_checks"),
+        "n_divergence_checks": summ.get("n_divergence_checks"),
+        "latency_ms_mean": lat.get("mean"),
+        "latency_ms_max": lat.get("max"),
+        "total_msg_sent": summ.get("total_msg_sent"),
+    }
+    return computed, 1
+
+
+def check_parameters(entry: Dict[str, Any], data_root: Path) -> List[str]:
+    """E20 / REA #106：条目声明 ``parameters`` 时，逐文件核对 ``config.<key>``。
+
+    为什么需要：数字对得上不等于**同配置**跑出来的。同一份结果目录里混入
+    不同 λ / n_agents / algorithm 的批次时，均值可能仍落在容差内，但结论
+    已经不可比。声明式核对把「这批文件确实是该参数的产物」变成可验证断言。
+
+    纪律：
+    - 只核对**声明过**的键；未声明不猜、不推断。
+    - 文件里缺该键 → 记错（"配置里没有" 无法证实声明，不是"没关系"）。
+    - 无匹配文件 → 返回空（数据缺失由 DATA_MISSING 通道处理，不重复报）。
+    """
+    params = entry.get("parameters")
+    if not isinstance(params, dict) or not params:
+        return []
+    errors: List[str] = []
+    seen = 0
+    for src in entry.get("sources") or []:
+        if not isinstance(src, dict):
+            continue
+        for pat in _source_patterns(src):
+            for f in ac.resolve_glob(data_root, pat):
+                seen += 1
+                try:
+                    doc = ac.load_json(f)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{Path(f).name}: 读取失败（{exc.__class__.__name__}），参数无法证实")
+                    continue
+                cfg = doc.get("config", {}) if isinstance(doc, dict) else {}
+                if not isinstance(cfg, dict):
+                    cfg = {}
+                for key, want in params.items():
+                    got = cfg.get(key, "<missing>")
+                    if got != want:
+                        errors.append(
+                            f"{Path(f).name}: config.{key}={got!r} ≠ 声明 {want!r}")
+    if seen == 0:
+        return []
+    return errors
 
 
 def recompute(entry: Dict[str, Any], data_root: Path) -> Tuple[Dict[str, Any], int, List[str]]:
@@ -451,10 +731,14 @@ def recompute(entry: Dict[str, Any], data_root: Path) -> Tuple[Dict[str, Any], i
         computed, files = _recompute_consensus(entry, data_root, errors)
     elif analysis == "e2e_closing":
         computed, files = _recompute_e2e_closing(entry, data_root, errors)
+    elif analysis == "e41_longrun":
+        computed, files = _recompute_e41_longrun(entry, data_root, errors)
     elif analysis == "attack_report":
         computed, files = _recompute_attack(entry, data_root, errors)
     elif analysis == "attack_batch":
         computed, files = _recompute_attack_batch(entry, data_root, errors)
+    elif analysis == "p0_summary":
+        computed, files = _recompute_p0_summary(entry, data_root, errors)
     elif analysis == "formula_verify":
         computed, files = _recompute_formula_verify(entry, data_root, errors)
     elif analysis == "benchmark":
@@ -525,13 +809,21 @@ def _compare_value(key: str, dec: Any, comp: Any, tol: Dict[str, Any]) -> Tuple[
 # 注意 ``failed`` **不是**计数键，仍精确比对（必须为 0），回归照旧会被抓住。
 _FLOOR_COMPARE_KEYS = frozenset({"passed", "collected"})
 
+# test_count 类条目里，``skipped`` 同样是构建产物特性——哪些用例被 skip 随
+# 环境/依赖漂移（如缺 torch 跳 GPU 用例、缺 sklearn 跳 ML 用例），既可能增
+# 也可能减，下限/精确比对都不成立。故设为**信息键**：不计入判定，仅记录
+# delta 供人读。（2026-10-17：declared skipped=8 vs 实测 2，精确比对使
+# NR-19 无故 FAIL——与「测试数不应触发全链更新」的设计动因自相矛盾。）
+_INFO_COMPARE_KEYS = frozenset({"skipped"})
+
 
 def compare(entry: Dict[str, Any], computed: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """逐条比对 declared↔computed；返回 ``(all_ok, deltas)``。
 
     * 常规条目：按 key 的容差**精确**比对。
     * ``evidence_kind == "test_count"``：``passed`` / ``collected`` 按**下限**比对
-      （只增不减）；``failed`` 等其余键仍精确比对。见 ``_FLOOR_COMPARE_KEYS``。
+      （只增不减）；``skipped`` 为**信息键**（环境相关、不计判定）；
+      ``failed`` 等其余键仍精确比对。见 ``_FLOOR_COMPARE_KEYS`` / ``_INFO_COMPARE_KEYS``。
     """
     tol = entry.get("tolerance", {})
     floor_mode = entry.get("evidence_kind") == "test_count"
@@ -548,6 +840,10 @@ def compare(entry: Dict[str, Any], computed: Dict[str, Any]) -> Tuple[bool, Dict
                 good = False
             ok = ok and good
             deltas[key] = ">= %s（下限式，实测 %s）" % (dec, computed[key])
+            continue
+        if floor_mode and key in _INFO_COMPARE_KEYS:
+            # 信息键：环境相关的构建产物特性，不计入判定（见 _INFO_COMPARE_KEYS 注释）
+            deltas[key] = "信息键（declared %s，实测 %s，不计判定）" % (dec, computed[key])
             continue
         o, dl = _compare_value(key, dec, computed[key], tol)
         ok = ok and o
@@ -599,19 +895,56 @@ def check_mirror(registry: Dict[str, Any], data_root: Path, mirror_root: Path) -
 # --------------------------------------------------------------------------- #
 # 报告
 # --------------------------------------------------------------------------- #
+def _git_head() -> str:
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ac.REPO_ROOT,
+                           capture_output=True, text=True, encoding="utf-8", timeout=10)
+        out = r.stdout.strip()
+        return out if r.returncode == 0 and len(out) == 40 else "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _editorial_target(target: str) -> Dict[str, Any]:
+    """编辑目标 pin（REA #126）：这份报告描述的是哪一批字节。
+
+    target 为空 → sha="" / match=None，报告抬头显式写「未 pin」；
+    给了但不是 40 位 SHA → ValueError（fail-closed，不猜、不截断、不比对缩写）。
+    """
+    target = (target or "").strip()
+    head = _git_head()
+    if not target:
+        return {"sha": "", "current_head": head, "match": None}
+    if not re.fullmatch(r"[0-9a-f]{40}", target):
+        raise ValueError(
+            f"--target-sha 必须是 40 位小写十六进制 SHA，收到 {target!r}——"
+            "缩写或大写无法与 HEAD 逐位比对，拒绝猜测")
+    return {"sha": target, "current_head": head, "match": target == head}
+
+
 def _render_markdown(report: Dict[str, Any]) -> str:
     s = report["summary"]
+    et = report.get("editorial_target") or {}
+    if et.get("sha"):
+        pin = (f"`{et['sha']}`（当前 HEAD `{et.get('current_head', 'unknown')}`，"
+               + ("一致" if et.get("match") else "**与当前 HEAD 不一致——报告描述的是拟提交版本，"
+                  "复算时工作区已前进，引用前先确认**") + "）")
+    else:
+        pin = "**未 pin**（上传/答辩前用 `--target-sha <拟提交版本SHA>` 指定，否则无法证明报告对应哪批字节）"
     lines = [
         "# 数字复算报告（number_verification_report）",
         "",
         f"- 生成时间：{report['generated_at']}",
+        f"- 编辑目标：{pin}",
         f"- 注册表：`{report['registry_ref']}`",
         f"- 数据源：`{report['data_root']}`（镜像：`{report['mirror_root']}`，commit `{report['commit']}`）",
         f"- 汇总：total={s['total']} PASS={s['pass']} FAIL={s['fail']} PENDING={s['pending']} INVALID={s['invalid']}"
         + (f" DATA_MISSING={s['data_missing']}" if s.get("data_missing") else ""),
-        f"- 双源一致：{'是' if report.get('mirror_consistent') else '**否**'}"
-        + (f"（比较 {report['mirror']['files_compared']} 个文件，{len(report['mirror']['diffs'])} 处差异）"
-           if report.get("mirror") else ""),
+        (f"- 双源一致：{'是' if report.get('mirror_consistent') else '**否**'}"
+         + (f"（比较 {report['mirror']['files_compared']} 个文件，{len(report['mirror']['diffs'])} 处差异）"
+            if report.get("mirror") else "")
+         if report.get("mirror_consistent") is not None
+         else "- 双源一致：**未检查**（未启用 --check-mirror；未判定 ≠ 不一致）"),
         "",
         "| ID | 状态 | 复算值（摘要） | 差异 | 备注 |",
         "|---|---|---|---|---|",
@@ -667,6 +1000,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="仅校验 code_check 类条目（架构审查 D4：把「口径 vs 代码」一致性"
                          "做成可独立跑的原子，供提交前门禁调用）")
     ap.add_argument("--overwrite", action="store_true", help="允许覆盖同名报告（默认防覆盖另存）")
+    ap.add_argument("--target-sha", default="",
+                    help="拟提交/编辑目标版本 SHA（40 位小写十六进制）；写入报告抬头 "
+                         "editorial_target，证明报告对应哪批字节（不给则显式「未 pin」）")
     ap.add_argument("--report", default=str(ac.REPORTS_DIR / "number_verification_report.json"))
     return ap
 
@@ -692,6 +1028,27 @@ def _sources_present(entry: Dict[str, Any], data_root: Path) -> bool:
         except Exception:  # noqa: BLE001 - glob 解析异常不阻断，交由复算阶段处理
             continue
     return False
+
+
+def _data_missing_applies(analysis: str, errors: List[str], files: int,
+                          sources_present: bool) -> bool:
+    """「数据源缺失」判定是否适用于本次复算失败。
+
+    数据缺失 ≠ 数字错误：缺文件必须变成**可诊断的状态**（DATA_MISSING），
+    既不能让复算器抛栈崩溃（评委照 REPRODUCE.md 跑会只看到 traceback），
+    也绝不能计入 PASS 或伪装成 FAIL（避免"缺数据"被读成"数字算错了"）。
+
+    🔴 **pytest 类条目（NR-19）永不适用**（2026-10-17 踩坑）：其复算不读
+    data-root，而是子进程真实复跑 pytest；sources 只是历史 junit xml 的
+    `file#testsuite@attr` 引用（无 glob 键）⇒ `_sources_present` 恒 False。
+    若沿用通用判据，pytest 子进程的任何失败（如解释器缺 pytest、采集错误）
+    都会被吞成误导性的「数据源缺失：本数据包不含该条目所需的任何结果文件」
+    （exit 3）——把**门禁失败**伪装成**数据缺失**，正是最危险的误诊形态。
+    此类错误必须带真实原因走 FAIL（exit 1）。
+    """
+    if analysis == "pytest":
+        return False
+    return bool(errors) and files == 0 and not sources_present
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -764,9 +1121,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # 复算报错了，才回溯判断：是不是因为数据源根本不存在。
                 # 放在报错之后再判，是为了不干扰「复算本就不依赖 data-root」的条目
                 # （如源码口径类），避免把本来能 PASS 的条目误判成缺失。
-                if errors and files == 0 and not _sources_present(entry, data_root):
+                # 🔴 pytest 类条目除外（_data_missing_applies）：子进程失败是门禁
+                # 失败而非数据缺失，必须带真实原因走 FAIL（2026-10-17）。
+                if _data_missing_applies(analysis, errors, files,
+                                         _sources_present(entry, data_root)):
                     missing = "数据源缺失：本数据包不含该条目所需的任何结果文件"
                     errors = []
+                # E20：数值在容差内 ≠ 同一配置跑出来的。声明了 parameters 才核对。
+                if not missing and entry.get("parameters"):
+                    errors.extend(check_parameters(entry, data_root))
 
         if declared_status in ("INVALID", "PLANNED"):
             status = declared_status
@@ -819,6 +1182,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         mirror_info = check_mirror(registry, data_root, mirror_root)
         mirror_consistent = mirror_info["consistent"]
 
+    try:
+        ed_target = _editorial_target(getattr(args, "target_sha", "") or os.environ.get("GITHUB_SHA", ""))
+    except ValueError as e:
+        logger.error("%s", e)
+        return 2
+
     report = {
         "schema_version": "1.0",
         "generated_at": ac.now_iso(),
@@ -826,6 +1195,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "data_root": ac.rel_to_workspace(data_root),
         "mirror_root": ac.rel_to_workspace(mirror_root),
         "commit": registry.get("commit", ""),
+        "editorial_target": ed_target,
         "primary_metric": registry.get("primary_metric", ""),
         "summary": counts,
         "mirror_consistent": mirror_consistent,

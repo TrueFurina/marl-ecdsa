@@ -228,7 +228,8 @@ class ECDSAUtils:
         :return: DER 格式签名字节
         """
         # P1-12修复: 显式启用 RFC 6979 确定性 nonce，同一私钥+同一消息必须产生相同签名
-        # （cryptography >= 38 支持 deterministic_signing；旧版签名默认随机 nonce 会破坏确定性承诺）
+        # （deterministic_signing 参数口径以实测为准：requirements.txt 下界 cryptography>=43，
+        #   交付运行库锁定 46.0.7——勿引用未经验证的旧版本号）
         signature = private_key.sign(
             message,
             ec.ECDSA(hashes.SHA256(), deterministic_signing=True),
@@ -310,73 +311,35 @@ class ECDSAUtils:
     ) -> bool:
         """
         验证智能体行为签名包
-
-        P0 安全修复（11-02）：签名必须与**载荷**绑定，不能只验一段由调用方
-        自带的字节串。原实现只对 package['message_hex'] 里的字节验签，而
-        message_hex 是交易/消息里自带字段 —— 于是任何人拿到某 agent 一条公开
-        的历史签名（链上 tx.extra['message_hex'] 就存着），就能把它贴到一笔
-        完全不同的交易上（换 action / timestamp / nonce），验签照样通过，
-        从而以该 agent 的名义写入任意行为。
-        已实测：受害者对 {"type":"idle"} 的签名可被复用，伪造出
-        {"type":"transfer","amount":999999} 并通过 Blockchain._validate_new_block。
-
-        现在：若 package 同时携带 agent_id / action / timestamp / nonce，
-        则要求 message_hex 里真正被签的内容与这些字段一致 —— 逐项比对签名
-        消息中的 agent_id / nonce / timestamp / action_hash（action_hash 由
-        action 重算）。不一致即拒绝，签名与载荷不可能再解绑。
-
-        仅携带 message_hex + signature_hex 的旧式调用（纯字节验签）保持原语义，
-        但**账本/签名服务路径必须传全字段**（blockchain.py 与 signing_service.py
-        均已传全）。
+        :param package: sign_action() 返回的签名包
+        :param public_key: 发送方的公钥
+        :return: True=合法，False=非法
         """
         try:
             message = bytes.fromhex(package['message_hex'])
             signature = bytes.fromhex(package['signature_hex'])
-        except Exception as e:
-            logger.debug(f"ECDSA验签异常: {e}")
-            return False
 
-        if all(k in package for k in ('agent_id', 'action', 'timestamp', 'nonce')):
-            if not ECDSAUtils._message_matches_fields(message, package):
-                logger.warning(
-                    "[ECDSAUtils] 签名与载荷不匹配：message_hex 不是由 "
-                    "agent_id/action/timestamp/nonce 构造的"
-                    "（疑似签名重用或载荷篡改），已拒绝"
+            # 安全加固（2026-10-15）：校验「签名承诺的业务字段」与「包内明文字段」
+            # 是否一致。
+            # 原实现只校验 (message_hex, signature_hex) 这一对，二者自洽即通过，
+            # 导致攻击者可篡改 action / nonce / timestamp 明文而保留原签名，
+            # 验签仍然通过（业务字段与签名承诺脱钩）。此处用包内明文重新构造
+            # message 并与 message_hex 逐位比对，不一致即拒绝。
+            expected = ECDSAUtils.build_message(
+                package.get('agent_id'),
+                package.get('action'),
+                package.get('timestamp'),
+                package.get('nonce'),
+                package.get('extra'),
+            )
+            if expected != message:
+                logger.debug(
+                    "[ECDSAUtils] 签名包业务字段与签名承诺不一致，拒绝 "
+                    f"(agent={package.get('agent_id')})"
                 )
                 return False
 
-        return ECDSAUtils.verify(public_key, message, signature)
-
-    @staticmethod
-    def _message_matches_fields(message: bytes, package: Dict[str, Any]) -> bool:
-        """校验「已签名的消息体」是否真的由 package 声明的字段构造。
-
-        :return: True=一致；False=不一致或消息体不可解析（一律按不一致处理）
-        """
-        try:
-            signed = json.loads(message.decode('utf-8'))
-        except Exception:
+            return ECDSAUtils.verify(public_key, message, signature)
+        except Exception as e:
+            logger.debug(f"ECDSA验签异常: {e}")
             return False
-        if not isinstance(signed, dict):
-            return False
-
-        if signed.get('agent_id') != package['agent_id']:
-            return False
-        # 直接比较即可：Python 中 123 == 123.0，兼容 int/float 时间戳写法差异；
-        # 而 "123" != 123，字符串与数值不会被误判为一致。
-        if signed.get('nonce') != package['nonce']:
-            return False
-        if signed.get('timestamp') != package['timestamp']:
-            return False
-
-        try:
-            expected_action_hash = hashlib.sha256(
-                json.dumps(
-                    package['action'], sort_keys=True, ensure_ascii=False
-                ).encode('utf-8')
-            ).hexdigest()
-        except Exception:
-            return False
-
-        return signed.get('action_hash') == expected_action_hash
-

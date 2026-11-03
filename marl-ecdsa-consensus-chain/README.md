@@ -2,16 +2,22 @@
 # MARL-ECDSA Consensus Chain
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-1600%2B%20passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-2%2C183%20passed-brightgreen)](tests/)
 [![Consensus](https://img.shields.io/badge/Consensus-CW--PBFT-00d4ff)](blockchain/consensus/cw_pbft.py)
 
 **中文版**: [README.zh.md](README.zh.md)
+
+## 口径声明（Caliber Statement · 2026-10-18 起）
+
+> 📌 **现行主口径为 n=101 种子/组**（`number_registry.json` → NR-129 末 50 / NR-134 全程 / NR-135 合作率）：末 50 `env_reward` **+25.75%**（Welch p=0.003348，Cohen d=0.42）、全程 **+7.70%**（p=1.1×10⁻¹⁴）、合作率 **+1.92%**（p=1.5×10⁻¹⁴）。**三口径在 Bonferroni / BH-FDR / Holm 下均显著，必须同报**。
+> ⚠️ **必须同报的披露**：新增 30 对独立种子（2001-2030）**单独不显著**（Welch p=0.169，点估计 +20.5%，power≈0.42）；⛔ 禁只报末 50 +25.75%。
+> 🗂 **历史基线（仍登记、仍可引用，但不得作为「现行主口径」单独出现）**：n=71 口径 **+28.17% / +7.92%**（NR-1 / NR-2；p=0.0095 —— BH-FDR 显著 / Bonferroni 不显著）。
 
 ## 中文摘要（Chinese Summary）
 
 > 本项目面向**多智能体强化学习（MARL）**场景，构建一套**区块链–AI 协同的可信共识与激励机制**：共识层为 **CW-PBFT**（贡献加权拜占庭容错共识），身份层为 **ECDSA(secp256r1) 无 CA 身份锚定 + SecurityGuard 三层防护**（时间戳窗口 / nonce 单调 / k 值重用检测），激励层为**链上激励合约**。
 >
-> 项目 **1600+ 项自动化测试全部通过（0 失败）**；对**6 类签名层攻击**（观测伪造 / 消息篡改 / 重放 / Sybil / k 值重用 / 长程）每类 50 次、共 300 次批量测试**全部拦截**（Wilson 95% 置信区间 [92.9%, 100%]）。
+> 项目 **2,183 项自动化测试通过（0 失败，9 项跳过；共 2,192 项收集）**；对**6 类签名层攻击**（观测伪造 / 消息篡改 / 重放 / Sybil / k 值重用 / 长程）每类 50 次、共 300 次批量测试**全部拦截**（Wilson 95% 置信区间 [92.9%, 100%]）。
 >
 > **诚实口径声明**：贡献度加权共识的有效性依赖投票权重的真实异质性。在真实 MARL 行为贡献度分布下（权重带宽比 **R≈1.007**），其表现与标准 PBFT **逐种子相同**；本项目以闭式判据 **f_max = R/(R+2)** 给出该机制的**适用边界**，并如实报告各项不显著结果。详见 `docs/` 与实验登记表。
 
@@ -43,7 +49,7 @@
 - **Parameter-boundary derivation & numerical verification of strict-dominant-strategy Nash (NOT machine-checked formal proof)**: strict proof with parameter bounds and 50% safety margin; **post-quantum ML-DSA-44 (CRYSTALS-Dilithium2) adapter IMPLEMENTED** via `dilithium-py` — real keygen/sign/verify (pure-Python backend, no native acceleration); signature 2420 B / public key 1312 B / private key 2560 B; cold-mean sign 44.64 ms (SD 32.40) / verify 10.40 ms, warm-median sign 17.04 ms / verify 4.15 ms — jitter is large, cite only intervals or dual values, never a single point; ~2 orders of magnitude slower than ECDSA; **adapter ready but NOT wired into main chain (P2, independent module) — default signing path still ECDSA**, so the system as a whole is not yet quantum-resistant.
 - **Self-built Gossip discovery**: asyncio-based dynamic peer discovery tuned for MARL scenarios.
 - **Full-chain cryptographic auditability**: sign → Guard → Tx → Block → consensus.
-- **Rigorous experiments**: ablation matrix, λ-sensitivity and multi-seed statistics, reported under an honest caliber (**current headline: n=101 seeds/group — NR-129 / NR-134 / NR-135, significant under Bonferroni, BH-FDR and Holm**; the registered n=71 baseline — p=0.0095, BH-FDR significant / Bonferroni non-significant, d=0.441 — is retained below for traceability; see [Experiments & Results](#-experiments--results)).
+- **Rigorous experiments**: ablation matrix, λ-sensitivity and multi-seed statistics, reported under an honest caliber (current headline: **n=101 seeds, +25.75%, p=0.003348, d=0.42 — significant under Bonferroni / BH-FDR / Holm**, with the 30 added pairs disclosed as non-significant on their own; historical n=71 baseline +28.17%, p=0.0095. See [Experiments & Results](#-experiments--results)).
 
 ---
 
@@ -106,7 +112,7 @@ pip install -r requirements.txt
 # PowerShell: $env:MARL_ECDSA_KEY_PASSPHRASE = "replace-with-a-strong-secret"
 export MARL_ECDSA_KEY_PASSPHRASE="replace-with-a-strong-secret"
 
-# 2. Run full test suite (1600+ 项自动化测试全部通过（0 失败）)
+# 2. Run full test suite (2,183 项通过 / 0 失败 / 9 跳过，共 2,192 收集)
 # ⚠️ Windows 用户请先启用 UTF-8 模式（默认 GBK 下 13 个编码相关用例会失败，
 #    均为环境问题非逻辑缺陷；Linux/macOS CI 无此问题）:
 # PowerShell: $env:PYTHONUTF8 = "1"
@@ -136,24 +142,26 @@ Set `consensus_mode` in `config.json`: `cw_pbft` (default) / `standard_pbft` / `
 
 ## Experiments & Results
 
-> ⚠️ **Caliber note**: the block below is the **registered n=71 baseline** (NR-1 / NR-2). The current headline caliber is **n=101/group** — last-50 `env_reward` **+25.7%** (Welch p=0.0034, d=0.42; NR-129), whole-run **+7.70%** (p=1.1e-14; NR-134), cooperation rate **+1.92%** (p=1.5e-14; NR-135); all three remain significant under Bonferroni / BH-FDR / Holm.
-> **Must be reported alongside** (mandated by NR-129): the 30 new seed pairs alone are **not significant** (Welch p=0.169, point estimate +20.5%, n=30, post-hoc power≈0.42). Do not report last-50 +25.7% alone. The n=71 figures below are kept verbatim for traceability.
+**Headline metric (current authoritative caliber, n=101/group).** After **3000-episode** full convergence, BC-MARL improves the **pure environment reward (`env_reward`, excluding the BC incentive)** by **+25.75%** over Pure-MARL on the last-50-episode caliber. This is based on **n = 101 independent seeds per group** (71 baseline + 30 added pairs, seeds 2001-2030); Welch **p = 0.003348**, Cohen's **d = 0.42** (small-to-medium effect), bootstrap 95% CI [0.8236, 4.08] (excludes 0). The effect is **significant under Bonferroni / BH-FDR / Holm** — but the **30 newly added pairs alone are NOT significant** (Welch p=0.169, point estimate +20.5%, power≈0.42), and this must always be co-reported. Do **not** quote the last-50 figure alone.
 
-**Baseline metric (n=71).** After **3000-episode** full convergence, BC-MARL improves the **pure environment reward (`env_reward`, excluding the BC incentive)** by **+28.17%** over Pure-MARL. This is based on **n = 71 independent random seeds per group**; Welch **p = 0.0095 (BH-FDR significant / Bonferroni non-significant)**, Cohen's **d = 0.441** (small-to-medium effect), 95% CI [0.648, 4.576] (excludes 0), post-hoc power = 0.74.
+**Historical baseline (n=71/group — still registered in `number_registry.json`, kept for traceability only; NOT the current headline).** The table below is the original n=71 baseline: **+28.17%**, Welch p=0.0095 (**BH-FDR significant / Bonferroni non-significant**), d=0.441, 95% CI [0.648, 4.576], post-hoc power = 0.74.
 
 | Mode | env_reward last-50 (mean ± std) | Whole-run coop. rate (mean ± std) | Seeds | Welch p |
 |---|---|---|---|---|
 | **BC-MARL** | **-6.658 ± 6.045** | 62.46% ± 0.94% | 71 | (baseline) |
 | Pure-MARL | -9.270 ± 5.792 | 61.27% ± 1.07% | 71 | 0.0095 (**) |
 
-- **BC vs Pure (`env_reward`)**: +28.17% relative, **n=71, p=0.0095, d=0.441 — BH-FDR significant / Bonferroni non-significant** (95% CI [0.648, 4.576] excludes 0).
+*Table above = historical n=71 baseline. Current n=101 authoritative readings: last-50 `env_reward` **+25.75%** (p=0.003348, d=0.42); whole-run `env_reward` **+7.70%** (p=1.1×10⁻¹⁴, d=1.17); whole-run cooperation rate **0.6250 vs 0.6132 = +1.92%** (p=1.5×10⁻¹⁴, d=1.17).*
+
+- **BC vs Pure (`env_reward`, current n=101)**: **+25.75%** relative, **p=0.003348, d=0.42 — significant under Bonferroni / BH-FDR / Holm** (bootstrap 95% CI [0.8236, 4.08] excludes 0). ⚠️ The 30 newly added seed pairs alone are **not** significant (p=0.169, +20.5%) and must be co-reported.
+- **BC vs Pure (`env_reward`, historical n=71)**: +28.17% relative, **n=71, p=0.0095, d=0.441 — BH-FDR significant / Bonferroni non-significant** (95% CI [0.648, 4.576] excludes 0). Kept for traceability; not the headline.
 - **Retired historical calibers**: earlier revisions cited two comparison calibers — V3.7 (500 episodes, not converged) and V2 (1000 episodes, BC incentive included). Both are **retired and no longer referenced**: neither is comparable with the competition's unified `env_reward` caliber (a `total_reward` that bundles the BC incentive is not the same quantity). See the caliber registry in `number_registry.json`.
-- **Whole-run cooperation rate**: over the full 3000-episode run, BC-MARL averages **0.6246 ± 0.0094** vs Pure-MARL **0.6127 ± 0.0107** (n=71/group), i.e. **+1.95%, Welch p < 0.0001, Cohen d = 1.19** — a highly significant, large-effect improvement. Note this is a *different caliber* from the `env_reward` headline above (whole-run average vs last-50 average) and the two must not be mixed.
+- **Whole-run cooperation rate**: over the full 3000-episode run, at **n=101/group** BC-MARL averages **0.6250** vs Pure-MARL **0.6132**, i.e. **+1.92%, Welch p = 1.5×10⁻¹⁴, Cohen d = 1.17** — a highly significant, large-effect improvement. (Historical n=71 reading: 0.6246 ± 0.0094 vs 0.6127 ± 0.0107, **+1.95%**, d=1.19.) Note this is a *different caliber* from the `env_reward` headline above (whole-run average vs last-50 average) and the two must not be mixed.
 - **Anti-betrayal**: `avg_betrayal_rate` is **exactly 0.000 in all 142 runs** (71 seeds × 2 modes, 3000 episodes each); the `selfish` control mode averages 0.35. The BC incentive/penalty design therefore prevents defection collapse.
 - **CW-PBFT vs PBFT — scope of the advantage (honest reporting)**: with **synthetic** weights that already encode the fault prior (spread ratio R≈8), CW-PBFT reaches 97–99% success where standard PBFT collapses to 0% at 40% Byzantine. However, a 5-seed × 2000-round repetition experiment shows that under **uniform weights (R=1)** or weights derived from **real MARL contribution scores (R≈1.007)**, CW-PBFT is **exactly equivalent** to standard PBFT. Weighted voting therefore adds no fault tolerance on its own; the safety bound is `b < n/(2R+1)`, which for R≈1.007 reduces to the classical `n/3`. All CW-PBFT > standard-PBFT success-rate gains come from **controlled weight-broadening configs (R≈15)**; under real MARL contribution weights (R≈1.01) contribution-weighted voting is **identical** to standard PBFT (NR-39~44 verdict=IDENTICAL), and we do **not** claim contribution-weighting improves fault tolerance.
 - **Attack defense**: 100% interception for the **6** signature-layer attacks (observation forgery / message tampering / replay / sybil / k-reuse / long-range) recorded in `attack_defense_report.json` and the E6 batch report `results/attack_defense_batch_report.json` (6 classes × 50 trials = 300, 100% blocked (Wilson 95% CI [92.9%, 100%] per class)); 主节点故障（不健康/被标记）触发视图切换的 failover 路径已测试通过（标记驱动模拟，未注入真实矛盾提案/equivocation），由 failover 测试套件覆盖。
 
-> **Positioning**: the value proposition is **trust augmentation** — 容错共识（PBFT 族；实验覆盖省略/崩溃故障，不建模任意拜占庭/矛盾投票）, cryptographic identity anchoring, 100% interception of the signature-layer attacks and verifiable incentive fairness — rather than RL performance optimization. The BC effect on `env_reward` is **BH-FDR significant / Bonferroni non-significant** at n=71 (p=0.0095, d=0.441 small-to-medium effect). The incentive was designed to shape **cooperation**, and there the effect is highly significant (whole-run cooperation rate p<0.0001, d=1.19). Cross-algorithm comparison reveals strong algorithm selectivity: QMIX shows significant positive effect (p=0.035, d=0.695, n=20) while MAPPO is non-significant with negative direction (p=0.625, d=-0.222, n=10). Note also the bounded scope of the CW-PBFT advantage documented above.
+> **Positioning**: the value proposition is **trust augmentation** — 容错共识（PBFT 族；实验覆盖省略/崩溃故障，不建模任意拜占庭/矛盾投票）, cryptographic identity anchoring, 100% interception of the signature-layer attacks and verifiable incentive fairness — rather than RL performance optimization. The BC effect on `env_reward` is **+25.75% at n=101 (p=0.003348, d=0.42; significant under Bonferroni / BH-FDR / Holm, but the 30 added pairs alone are not)**; the historical n=71 baseline was **BH-FDR significant / Bonferroni non-significant** (p=0.0095, d=0.441). The incentive was designed to shape **cooperation**, and there the effect is highly significant (whole-run cooperation rate +1.92%, p=1.5×10⁻¹⁴, d=1.17 at n=101). Cross-algorithm comparison reveals strong algorithm selectivity: QMIX shows significant positive effect (p=0.035, d=0.695, n=20) while MAPPO is non-significant with negative direction (p=0.625, d=-0.222, n=10). Note also the bounded scope of the CW-PBFT advantage documented above.
 
 ---
 
@@ -173,14 +181,14 @@ marl-ecdsa-consensus-chain/
 │ └── integration/ # Bridge, SelfishAgent, CooperationDetector, AdaptiveLambda
 ├── visualization/ # Flask Dashboard (attack demo, consensus animation)
 ├── scripts/ # export_dataset.py, benchmark, ablation, one-click launchers
-└── tests/ # 144 test modules (1600+ 项自动化测试全部通过（0 失败）)
+└── tests/ # test modules (2,183 passed / 0 failed / 9 skipped of 2,192 collected)
 ```
 
 ---
 
 ## Testing
 
-- **1600+ 项自动化测试全部通过（0 失败）**：consensus, crypto security (RFC 6979, k-reuse, replay), blockchain, MARL integration, P2P network, dashboard attack API.
+- **2,183 项自动化测试通过（0 失败，9 项跳过；共 2,192 项收集）**：consensus, crypto security (RFC 6979, k-reuse, replay), blockchain, MARL integration, P2P network, dashboard attack API.
 - Static checks: `python -m compileall -q blockchain/ marl/ visualization/`.
 
 ---

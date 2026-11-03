@@ -2,7 +2,6 @@
 世界状态模型
 链上维护的全局状态：身份状态、积分状态、行为记录、系统状态
 """
-import math
 import time
 import logging
 from dataclasses import dataclass, field
@@ -120,27 +119,9 @@ class WorldState:
     # -------------------------------------------------------------------------
 
     def add_score(self, agent_id: str, delta: float):
-        """为智能体添加/扣除积分
-
-        11-03 修复：拒绝非有限 delta。`NaN + x` 恒为 NaN，一旦写进去，该智能体
-        的积分会被**永久污染**（后续任何加减都救不回来，已实测），而且会污染
-        `cumulative_contribution` 与排行榜排序。账本写入按「无效值即拒收」
-        处理（fail-closed），不做静默钳位。
-        """
+        """为智能体添加/扣除积分"""
         if agent_id not in self._scores:
             logger.warning(f"[WorldState] {agent_id} 未注册，无法更新积分")
-            return
-        try:
-            delta = float(delta)
-        except (TypeError, ValueError):
-            logger.warning(
-                f"[WorldState] {agent_id} 的积分增量不是数值（{delta!r}），已拒收"
-            )
-            return
-        if not math.isfinite(delta):
-            logger.warning(
-                f"[WorldState] {agent_id} 的积分增量为非有限值（{delta!r}），已拒收"
-            )
             return
         self._scores[agent_id].score += delta
         if delta > 0:
@@ -238,7 +219,18 @@ class WorldState:
             logger.warning(f"[WorldState] {agent_id} 未注册，无法设置状态")
             return
         self._identities[agent_id].status = status
-        logger.info(f"[WorldState] {agent_id} 状态更新为 {status}")
+        # F05（2026-11-02 赛后）：状态与共识权重单一来源同步——此前本接口只改
+        # status 不同步 consensus_weight，封禁身份仍带满权重（状态/权重失同步）。
+        weight_map = {AgentStatus.BANNED: 0.0, AgentStatus.DEMOTED: 0.3}
+        self._identities[agent_id].consensus_weight = weight_map.get(status, 1.0)
+        logger.info(f"[WorldState] {agent_id} 状态更新为 {status}"
+                    f"（共识权重={self._identities[agent_id].consensus_weight}）")
+
+    def get_consensus_weight(self, agent_id: str) -> float:
+        """F05：读取身份当前共识权重（封禁 0 / 降级 0.3 / 其余 1.0）。
+        未注册 = 0.0（fail-closed，与老仓正典语义一致：无身份不得投票）。"""
+        identity = self._identities.get(agent_id)
+        return identity.consensus_weight if identity is not None else 0.0
 
     def get_all_agent_ids(self) -> List[str]:
         """获取所有已注册的智能体 ID（公共接口，替代 _identities.keys()）"""

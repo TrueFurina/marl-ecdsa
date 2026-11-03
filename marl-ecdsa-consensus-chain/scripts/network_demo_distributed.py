@@ -9,16 +9,16 @@ MARL-ECDSA Consensus Chain — 跨物理主机分布式 P2P 共识部署演示�
 
 用法（每台主机各执行一条，地址表必须全网一致）：
 
-  主节点所在主机（假设 agent_0 / agent_1 在本机 172.27.4.71）：
+  主节点所在主机（假设 agent_0 / agent_1 在本机 <HOST-A>）：
     python scripts/network_demo_distributed.py \
       --node-ids agent_0,agent_1 \
-      --addrs agent_0=172.27.4.71:17001,agent_1=172.27.4.71:17002,agent_2=172.16.222.99:17003,agent_3=172.16.222.99:17004 \
+      --addrs agent_0=<HOST-A>:17001,agent_1=<HOST-A>:17002,agent_2=<HOST-B>:17003,agent_3=<HOST-B>:17004 \
       --rounds 10
 
-  其余主机（agent_2 / agent_3 在服务器 172.16.222.99）：
+  其余主机（agent_2 / agent_3 在服务器 <HOST-B>）：
     python scripts/network_demo_distributed.py \
       --node-ids agent_2,agent_3 \
-      --addrs agent_0=172.27.4.71:17001,agent_1=172.27.4.71:17002,agent_2=172.16.222.99:17003,agent_3=172.16.222.99:17004 \
+      --addrs agent_0=<HOST-A>:17001,agent_1=<HOST-A>:17002,agent_2=<HOST-B>:17003,agent_3=<HOST-B>:17004 \
       --rounds 10
 
 要点：

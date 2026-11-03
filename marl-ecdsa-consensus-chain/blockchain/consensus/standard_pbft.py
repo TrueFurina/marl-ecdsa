@@ -13,7 +13,6 @@ Standard Practical Byzantine Fault Tolerance
 """
 import logging
 import time
-from dataclasses import replace
 from typing import Dict, List, Optional, Set
 
 from .cw_pbft import ConsensusState, ConsensusVote
@@ -48,11 +47,19 @@ class StandardPBFTConsensus:
         # 等权重：每个节点权重 = 1.0
         self._weights: Dict[str, float] = {nid: 1.0 for nid in consensus_nodes}
         self._total_weight: float = float(self.n)
+        # 共识开始时间（单调时钟毫秒，2026-10-12 代码审查 S5 修复；0 = 未开始）
         self._consensus_start_ms: int = 0
         self.consensus_success_count: int = 0
         self.consensus_fail_count: int = 0
 
     def get_primary(self, block_height: int) -> str:
+        """获取指定区块高度的主节点。
+
+        边界（2026-10-12 代码审查 S6 修复）：空节点集（n=0）无合法主节点可轮换，
+        返回空串而非抛 ZeroDivisionError。与 CW-PBFT 同口径。
+        """
+        if self.n == 0:
+            return ""
         primary_index = (block_height // self.BLOCKS_PER_ROTATION) % self.n
         return self.consensus_nodes[primary_index]
 
@@ -62,7 +69,7 @@ class StandardPBFTConsensus:
     def start_consensus(self, block_hash: str) -> ConsensusVote:
         self._state = ConsensusState.PRE_PREPARE
         self._current_block_hash = block_hash
-        self._consensus_start_ms = int(time.time() * 1000)
+        self._consensus_start_ms = int(time.monotonic() * 1000)
         self._votes = {'prepare': {}, 'commit': {}}
 
         vote = ConsensusVote(
@@ -77,7 +84,7 @@ class StandardPBFTConsensus:
     def receive_pre_prepare(self, block_hash: str, primary_id: str) -> ConsensusVote:
         self._state = ConsensusState.PREPARE
         self._current_block_hash = block_hash
-        self._consensus_start_ms = int(time.time() * 1000)
+        self._consensus_start_ms = int(time.monotonic() * 1000)
 
         vote = ConsensusVote(
             voter_id=self.node_id,
@@ -91,36 +98,19 @@ class StandardPBFTConsensus:
         if vote.block_hash != self._current_block_hash:
             return None
 
-        # 11-03 修复：把 CW-PBFT 早已具备的「女巫门控」同步到等权基线。
-        #
-        # CW-PBFT 在 09-28（全检 #2）就加了「非共识成员身份一律拒收」，但等权
-        # 基线漏了同一个门控。而 `_check_vote_threshold` 是按
-        # `len(self._votes[phase])`（投票者个数）计数的 —— 只要塞进任意伪造的
-        # voter_id，就能凭空凑够 ceil(2n/3)。
-        #
-        # 已实测：n=4（阈值 3）时，单个节点在**零个真实对等节点**参与的情况下，
-        # 用 ghost_1/ghost_2/ghost_3 三个捏造身份即可跑完 PREPARE→COMMIT 并宣布
-        # 共识达成；同一组伪造投票在 CW-PBFT 下被全部拒收。等权基线是对比实验
-        # 的对照组（factory 用 `mode='standard_pbft'` 创建），它的共识安全属性
-        # 不应弱于被对照的对象。
+        # 女巫门控（2026-11-02 审查修复）：与 CW-PBFT 对齐——非共识成员身份一律拒收。
+        # 此前等权基线不做成员校验，任意伪造 voter_id 亦可写入 _votes 并计入
+        # _check_vote_threshold 的 len()，导致"等权"对照组的 2/3 阈值可被
+        # 女巫身份凭空凑满；对照组守卫强度与实验组不对等会直接污染对比结论。
         if vote.voter_id not in self._weights:
             logger.warning(
                 f"[PBFT] 拒收非成员投票（女巫门控）: voter={vote.voter_id}"
             )
             return None
 
-        # 自报 weight 不作为第二个可信通道：等权模式下权威值恒为 1.0。
-        # 存副本而非就地改写入参，避免对调用方持有的对象产生隐式副作用。
-        stored = vote if vote.weight == 1.0 else replace(vote, weight=1.0)
-        if stored.weight != vote.weight:
-            logger.warning(
-                f"[PBFT] 投票权重纠偏（等权）: voter={vote.voter_id} "
-                f"自报={vote.weight:.4f} → 权威=1.0000"
-            )
-
         phase = vote.phase
         if phase in self._votes:
-            self._votes[phase][vote.voter_id] = stored
+            self._votes[phase][vote.voter_id] = vote
 
         if phase == 'prepare' and self._state == ConsensusState.PREPARE:
             if self._check_vote_threshold('prepare'):
@@ -148,9 +138,11 @@ class StandardPBFTConsensus:
         return self._state
 
     def is_timed_out(self) -> bool:
+        """超时检查（2026-10-12 代码审查 S5 修复：改用单调时钟，
+        与 _consensus_start_ms 的写入口径一致；NTP 回拨不再影响判定）"""
         if self._consensus_start_ms == 0:
             return False
-        elapsed = int(time.time() * 1000) - self._consensus_start_ms
+        elapsed = int(time.monotonic() * 1000) - self._consensus_start_ms
         return elapsed > self.CONSENSUS_TIMEOUT_MS
 
     def reset(self):
@@ -199,7 +191,7 @@ class StandardPBFTConsensus:
         # PRE-PREPARE
         self._state = ConsensusState.PRE_PREPARE
         self._current_block_hash = block_hash
-        self._consensus_start_ms = int(time.time() * 1000)
+        self._consensus_start_ms = int(time.monotonic() * 1000)
         self._votes = {'prepare': {}, 'commit': {}}
 
         # PREPARE：非拜占庭节点投票
@@ -281,7 +273,7 @@ class StandardPBFTConsensus:
             'prepare_votes': len(self._votes.get('prepare', {})),
             'commit_votes': len(self._votes.get('commit', {})),
             'current_block_hash': self._current_block_hash,
-            'weights': self._weights,
+            'weights': dict(self._weights),   # S1 修复（2026-10-12）：返回副本而非内部引用
             'consensus_success_rate': consensus_success_rate,
             'consensus_type': 'standard_pbft',
         }

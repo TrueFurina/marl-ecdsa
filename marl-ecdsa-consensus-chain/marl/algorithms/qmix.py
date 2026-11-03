@@ -6,7 +6,6 @@ QMIX 算法实现（轻量版）
 import numpy as np
 import random
 import logging
-import hashlib
 from collections import deque
 from typing import List, Tuple, Optional, Dict
 
@@ -157,6 +156,12 @@ if HAS_TORCH:
         """
         VDN (Value Decomposition Networks) 混合网络
         Q_total = sum(Q_i) — 最简单的值分解，无额外参数
+
+        S9 登记（2026-10-12 代码审查）：本类为"装配但不参与计算"的装饰性属性——
+        ``_train_step_vdn`` 手工 ``torch.stack(...).sum(0)`` 完成等价的精确求和，
+        数学上与本类 forward 等价。刻意保持现状：改由 mixer 参与计算即便数学等价，
+        也会因浮点求和顺序变化破坏既有 VDN 实验数据复现（项目数据铁律）。
+        该契约由 tests/test_algorithm_family_contract.py 守护（含调用签名差异断言）。
         """
 
         def forward(self, agent_qs: torch.Tensor) -> torch.Tensor:
@@ -405,6 +410,10 @@ if HAS_TORCH:
             值分解网络：个体 Q 通过求和得到全局 Q，梯度自动反向传播到各 agent
 
             P1批量forward修复：改为真正的批量forward，减少GPU kernel launch开销
+
+            S9 登记（2026-10-12 代码审查）：本路径手工求和（下方 q_total 计算），
+            **不经过** trainer 的 mixer 属性（VDNMixer 仅装配不参与）——浮点求和顺序
+            与既有 VDN 实验数据复现绑定，勿改走 mixer（见 VDNMixer 类注释）。
             """
             batch = self.replay_buffer.sample(batch_size)
             bs = len(batch)
@@ -592,28 +601,17 @@ else:
         def init_hidden(self):
             return np.zeros(self.hidden_dim)
 
-        def _state_index(self, obs) -> int:
-            """确定性状态离散化（sha256），**不用**内建 hash()。
-
-            内建 hash() 对字符串按 PYTHONHASHSEED 随机加盐：同一观测在不同进程
-            会落到不同 Q 表行 —— 同一 seed/config 复跑结果不一致，与项目"可复现"
-            的口径冲突（dashboard 的 _demo_hash 已因同款问题改掉 hash()）。
-            """
-            payload = repr(obs.tolist() if hasattr(obs, "tolist") else obs)
-            digest = hashlib.sha256(payload.encode("utf-8")).digest()
-            return int.from_bytes(digest[:8], "big") % self.hidden_dim
-
         def get_action(self, obs, hidden=None, epsilon: float = 0.1):
             if random.random() < epsilon:
                 return random.randint(0, self.n_actions - 1), hidden
             # 简易Q表查表策略（比纯随机略好）
-            state_idx = self._state_index(obs)
+            state_idx = int(abs(hash(str(obs.tolist() if hasattr(obs, 'tolist') else obs))) % self.hidden_dim)
             return int(np.argmax(self._q_table[state_idx])), hidden
 
         def train(self, obs, action, reward, next_obs, done, lr=0.01, gamma=0.8):
             """简易Q-learning更新（单步更新）"""
-            state_idx = self._state_index(obs)
-            next_state_idx = self._state_index(next_obs)
+            state_idx = int(abs(hash(str(obs.tolist() if hasattr(obs, 'tolist') else obs))) % self.hidden_dim)
+            next_state_idx = int(abs(hash(str(next_obs.tolist() if hasattr(next_obs, 'tolist') else next_obs))) % self.hidden_dim)
             td_target = reward + (0 if done else gamma * np.max(self._q_table[next_state_idx]))
             td_error = td_target - self._q_table[state_idx, action]
             self._q_table[state_idx, action] += lr * td_error

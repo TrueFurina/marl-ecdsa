@@ -1,0 +1,39 @@
+/* V22: one task-oriented evidence workflow; all data originates from existing APIs. */
+.v22-workbench{margin:18px 0 24px;padding:24px;border:1px solid #c9e0d7;border-radius:18px;background:#fcfefd;box-shadow:0 6px 28px rgba(27,79,73,.05);color:#1c3336;scroll-margin-top:80px}
+.v22-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:20px}
+.v22-heading h2{font-size:25px;line-height:1.3;margin:6px 0;color:#123e3a}
+.v22-heading p{margin:0;line-height:1.7;max-width:660px;color:#537069;font-size:14px}
+.v22-overline{font-size:11px;letter-spacing:.09em;font-weight:700;color:#127c70}
+.v22-workbench button,.v22-inline button{border:1px solid #b4d5cd;background:#fff;color:#145d56;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:600;font-size:13px;min-height:40px}
+.v22-workbench button:hover,.v22-inline button:hover{background:#e6f6f1}
+.v22-workbench button:focus-visible{outline:3px solid #2cafa0;outline-offset:2px}
+.v22-selectrow{display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap;background:#edf7f3;border-radius:12px;padding:15px;margin-bottom:16px;font-size:13px}
+.v22-selectrow label{font-weight:700}
+.v22-selectrow select{flex:1 1 250px;border:1px solid #abcac1;border-radius:8px;padding:10px 12px;background:#fff;color:#193c39;min-width:180px;max-width:550px;font-size:14px}
+#v22-summary{color:#526d65;flex:1 1 210px;overflow-wrap:anywhere}
+.v22-stages{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:16px}
+.v22-stage{border:1px solid #dae5e0;padding:12px 13px;border-radius:11px;background:#f7faf9;min-width:0;display:flex;flex-direction:column;gap:5px}
+.v22-stage strong{font-size:14px;color:#1c3638}
+.v22-stage small{font-size:12px;color:#6d7d79;line-height:1.6;overflow-wrap:anywhere}
+.v22-stage-number{font-size:11px;font-weight:800;letter-spacing:.06em;color:#82948f}
+.v22-done{border-color:#a8d9c9;background:#eef8f3}.v22-done .v22-stage-number{color:#087664}
+.v22-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.v22-metric{background:#fff;border:1px solid #d9e9e2;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.v22-metric span{font-size:12px;color:#6a817b}.v22-metric strong{font-size:18px;color:#153e3b;white-space:normal;overflow-wrap:anywhere}
+.v22-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.v22-box{border-radius:13px;padding:17px 18px;border:1px solid #d3e5dd;background:#fff;min-width:0}
+.v22-box h3{margin:0 0 13px;font-size:16px;color:#173d3b}
+.v22-weight-row,.v22-proof-check{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #edf1ee;padding:9px 0;font-size:13px;overflow-wrap:anywhere}
+.v22-weight-row strong,.v22-proof-check strong{text-align:right}
+.v22-proof-line{font-size:13px;font-weight:700;color:#0d776d;padding-bottom:10px}
+.v22-ok{color:#0f8068}.v22-warn{color:#956a2d}
+.v22-muted{font-size:13px;line-height:1.7;color:#6a807a}
+.v22-commands{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.v22-next{padding:13px 15px;margin:16px 0 0;color:#23544f;background:#f1f7f4;border-radius:10px;font-size:13px;line-height:1.65}
+.v22-secondary{border:1px solid #dfebea;border-radius:11px;padding:8px 18px;margin:22px 0}
+.v22-secondary>summary{cursor:pointer;font-size:14px;font-weight:600;color:#47645e;padding:12px 0}
+.v22-secondary-note{font-size:12px;color:#657e76;line-height:1.6}
+.v22-inline{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #cddfd9;background:#f1f8f4;padding:12px 15px;border-radius:10px;font-size:13px;margin:8px 0 14px;line-height:1.6}
+@media(max-width:1080px){.v22-stages{grid-template-columns:repeat(3,minmax(0,1fr))}.v22-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.v22-workbench{padding:15px}.v22-heading{flex-direction:column}.v22-stages,.v22-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.v22-panels{grid-template-columns:1fr}.v22-inline{flex-direction:column;align-items:stretch}}
+@media(max-width:420px){.v22-stages,.v22-metrics{grid-template-columns:1fr}}

@@ -6,14 +6,16 @@ Post-Quantum Signature Adapter — ECDSA ↔ CRYSTALS-Dilithium (ML-DSA-44)
   2. 混合双签名（ECDSA + Dilithium，AND 策略）—— 迁移期纵深防御
   3. 性能对比：**本机实测**（不再有硬编码估计值）
 
-后端：`dilithium-py`（纯 Python 的 ML-DSA 实现，无编译依赖）
-  未安装时 DilithiumAdapter 按 use_fallback 决定回落 ECDSA 或直接报错；
-  真实可用性由 get_migration_readiness() 动态查询，**不再硬编码**。
+后端：`dilithium-py`（纯 Python 的 ML-DSA 实现，无编译依赖，**已 vendored 至本仓库**
+  `marl-ecdsa-consensus-chain/dilithium_py/`，离线自包含；亦可通过 `pip install dilithium-py` 获取）。
+  后端缺失时 DilithiumAdapter 按 use_fallback 决定回落 ECDSA 或直接报错；
+  真实可用性由 `DILITHIUM_AVAILABLE`（导入期探测）与 get_migration_readiness() 动态查询，**不硬编码**。
 
-状态（2026-09-18）：**已实现**。后端可用时执行真实后量子签名与验签，
-签名为 2420 字节（ML-DSA-44），具备 NIST Level 2 抗量子能力。
+状态（2026-10-15）：**真实后端已接入**。DILITHIUM_AVAILABLE=True，执行真实后量子签名与验签，
+签名为 2420 字节（ML-DSA-44），具备 NIST Level 2 抗量子能力；并随 `tests/test_dilithium_adapter.py`
+的 TestRealDilithium 在 CI 中真跑（防静默降级）。
 
-CCF 5th Blockchain Competition | V4.2 | Phase 2: Post-Quantum Migration (implemented)
+CCF 5th Blockchain Competition | V5.0 | Phase 2: Post-Quantum Migration (real backend)
 """
 import logging
 import time

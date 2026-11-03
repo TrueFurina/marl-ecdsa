@@ -10,6 +10,9 @@
 **两套扫描范围（F14）**：
 
 * ``include_ext``（文档层：.md/.txt/.html/.pdf/.pptx）→ 两类规则**都**跑；
+  ``.html/.htm`` 先经 ``strip_html_markup()`` 屏蔽 ``<style>/<script>`` 区段与
+  标签内部（保行号）——markup 数字（CSS 色标、SVG 坐标、锚点 id）不再误报
+  （F6「跨文件类型误扫」），文本节点照常扫描；
 * ``semantic_scan_ext``（源码层，默认 ``['.py']``）→ **只跑 semantic_rules**。
   源码会随交付包发出（``03_源代码``），注释里的撤回表述同样是风险；但数字令牌
   （``void_tokens``）**不能**扫源码 —— 数字在代码里遍地，会产生数千条误报、
@@ -137,6 +140,10 @@ def scan_paths(paths, cfg: Dict[str, Any], blacklist: Dict[str, Any]):
         elif suffix == ".pptx":
             lines = [(i, ln) for i, (_, t) in enumerate(ac.extract_pptx_strings(path), 1)
                      for ln in t.splitlines()]
+        elif suffix in (".html", ".htm"):
+            # F6：先屏蔽 <style>/<script> 区段与标签内部（保行号），markup 数字
+            # （CSS 色标、SVG 坐标、锚点 id）不再误报；标签间文本节点照常扫描。
+            lines = list(ac.scan_html_text_lines(path))
         else:
             lines = list(ac.scan_text_lines(path))
         for lineno, line in lines:
@@ -211,7 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--cached", action="store_true",
                     help="只扫描 git 暂存区文件（pre-commit 门禁用，避免历史残留拦死所有提交）")
     ap.add_argument("--paths", nargs="*", default=None,
-                    help="显式指定要扫描的文件/目录（相对 WORKSPACE_ROOT 或绝对），覆盖 --root/--cached；任一不存在则跳过")
+                    help="显式指定要扫描的文件/目录（相对 WORKSPACE_ROOT 或绝对）；"
+                         "目录会按扩展名递归展开（服从 exclude_dirs/exclude_globs），覆盖 --root/--cached；任一不存在则跳过")
     ap.add_argument("--config", default=str(ac.SCAN_TARGETS_PATH))
     ap.add_argument("--blacklist", default=str(ac.BLACKLIST_PATH))
     ap.add_argument("--overwrite", action="store_true", help="允许覆盖同名报告")
@@ -245,10 +253,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("配置读取错误：%s", exc)
         return ac.EXIT_USAGE
     if args.paths is not None:
-        paths = [Path(p) if Path(p).is_absolute() else (ac.WORKSPACE_ROOT / p) for p in args.paths]
-        paths = [p for p in paths if p.exists()]
-        if not paths:
+        raw = [Path(p) if Path(p).is_absolute() else (ac.WORKSPACE_ROOT / p) for p in args.paths]
+        raw = [p for p in raw if p.exists()]
+        if not raw:
             logger.info("指定路径均不存在，跳过扫描")
+            return ac.EXIT_OK
+        # 目录递归展开（F6 / 工具缺陷修复，2026-10-17）：此前目录原样传给
+        # scan_paths()，而后者按**文件后缀**分派 → 目录（suffix 为空）被静默
+        # 跳过、0 命中——"目录模式扫得干净"实为假象。现与 scan() 同口径展开：
+        # 扩展名取 include_ext ∪ semantic_scan_ext，并服从 exclude_dirs/exclude_globs。
+        exts = list(dict.fromkeys(
+            list(cfg.get("include_ext", [])) + list(cfg.get("semantic_scan_ext", []))
+        ))
+        expanded: List[Path] = []
+        for p in raw:
+            if p.is_dir():
+                expanded.extend(ac.iter_files(
+                    [p], exts,
+                    cfg.get("exclude_dirs", []), cfg.get("exclude_globs", [])))
+            else:
+                expanded.append(p)
+        seen: set = set()
+        paths: List[Path] = []
+        for p in expanded:
+            key = str(p.resolve())
+            if key not in seen:
+                seen.add(key)
+                paths.append(p)
+        if not paths:
+            logger.info("指定目录内无匹配扩展名的文件，跳过扫描")
             return ac.EXIT_OK
         hits, files_scanned = scan_paths(paths, cfg, blacklist)
     elif args.cached:

@@ -165,3 +165,80 @@ def test_semantic_rule_in_doc_layer():
     assert any(h["rule"].startswith("semantic_rule:") for h in hits), f"文档层语义规则应命中：{hits}"
     assert all(h["severity"] == "block" for h in hits if h["rule"].startswith("semantic_rule:")), \
         f"文档层语义命中应 block：{hits}"
+
+
+# ── 7. HTML markup 屏蔽（F6）：style/script 区段与标签内部不参与匹配 ────────
+# 背景：CSS 色标（radial-gradient 的 88%）、SVG 坐标（x="406"）、锚点 id（"312"）
+# 等 markup 内数字此前被当申报值误报（架构审查 F6「跨文件类型误扫」）。
+# 契约：markup 区段屏蔽（保行号）；标签间文本节点照常命中。
+
+def _html_lines(lines):
+    """把 lines 写进 .html 临时文件（include_ext 增补 .html），跑 scan_paths。"""
+    return _scan_lines(lines, cfg=_cfg(include_ext=[".md", ".txt", ".html"]), ext=".html")
+
+
+def test_html_style_block_not_matched():
+    hits = _html_lines([
+        "<style>",
+        f".bg{{background:radial-gradient(at {NUM}% {NUM}%);}}",
+        "</style>",
+    ])
+    assert not any(h["match"] == NUM for h in hits), f"style 区段（CSS 色标）不应命中：{hits}"
+
+
+def test_html_script_block_not_matched():
+    hits = _html_lines(["<script>", f'const n = "{NUM}";', "</script>"])
+    assert not any(h["match"] == NUM for h in hits), f"script 区段不应命中：{hits}"
+
+
+def test_html_tag_attribute_not_matched():
+    hits = _html_lines([f'<text x="{NUM}" y="48">本行文本</text>'])
+    assert not any(h["match"] == NUM for h in hits), f"标签属性值（SVG 坐标等）不应命中：{hits}"
+
+
+def test_html_text_node_still_matched():
+    hits = _html_lines([f"<div>样本 {NUM} 个</div>"])
+    assert any(h["match"] == NUM for h in hits), f"标签间文本节点应照常命中：{hits}"
+
+
+def test_html_inline_style_attr_but_text_kept():
+    # 注意：值必须以非 \w 字符结尾（此处用 `%`）——若写成 `px` 后缀，数字
+    # 边界正则 `(?![\w.])` 会让该串本就不命中，使本用例在「屏蔽被摘除」的
+    # 变异下 SURVIVED（M2 首轮实测教训：测试输入须让两条路径都有区分度）。
+    hits = _html_lines([f'<div style="width:{NUM}%">样本 {NUM} 个</div>'])
+    ms = [h for h in hits if h["match"] == NUM]
+    assert len(ms) == 1, f"内联 style 属性应屏蔽、文本节点应保留（恰好 1 条）：{hits}"
+
+
+def test_html_multiline_blanking_preserves_lineno():
+    hits = _html_lines([
+        "<style>",
+        f"  .a{{content:'{NUM}';}}",
+        "</style>",
+        f"<p>样本 {NUM} 个</p>",
+    ])
+    ms = [h for h in hits if h["match"] == NUM]
+    assert len(ms) == 1 and ms[0]["line"] == 4, \
+        f"屏蔽区段后行号应保持（唯一命中应在第 4 行）：{hits}"
+
+
+# ── 8. --paths 目录递归（F6 / 工具缺陷）：目录参数必须展开而非静默跳过 ──────
+# 背景：此前目录原样传给 scan_paths()，按后缀分派时被静默跳过、0 命中
+# （"目录模式扫得干净"的假象，2026-10-16 质检发现）。
+
+def test_paths_directory_recurses(tmp_path):
+    import json as _json
+    cfgp, blp = tmp_path / "cfg.json", tmp_path / "bl.json"
+    cfgp.write_text(_json.dumps(_cfg()), encoding="utf-8")
+    blp.write_text(_json.dumps(_blacklist()), encoding="utf-8")
+    sub = tmp_path / "docroot" / "thesis_drafts" / "sub"
+    sub.mkdir(parents=True)
+    (sub / "doc.md").write_text(f"样本 {NUM} 个\n", encoding="utf-8")
+    rep = tmp_path / "r.json"
+    rc = svt.main(["--paths", str(tmp_path / "docroot"),
+                   "--config", str(cfgp), "--blacklist", str(blp),
+                   "--report", str(rep), "--overwrite"])
+    assert rc == 1, "目录递归展开后应命中 external 作废令牌（block → exit 1）"
+    data = _json.loads(rep.read_text(encoding="utf-8"))
+    assert data["summary"]["files_scanned"] >= 1, f"目录内文件未被展开扫描：{data['summary']}"
+    assert any(h["match"] == NUM for h in data["hits"]), f"目录内文件命中缺失：{data['hits']}"

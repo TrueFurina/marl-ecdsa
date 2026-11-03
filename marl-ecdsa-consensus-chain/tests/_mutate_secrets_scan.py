@@ -28,7 +28,7 @@ MUTATED = re.compile(r'[0-9a-zA-Z/+]{40}')
 
 # 三个"应豁免"的非密钥样本
 EXEMPT_SAMPLES = {
-    "绝对路径": "PY = 'C:/Users/Lenovo/AppData/Local/Programs/Python/python.exe'",
+    "绝对路径": "PY = 'C:/Users/SomeUser/AppData/Local/Programs/Python/python.exe'",
     "纯40hex": "seed = '36727819239baabaf4634d93f1e98668de254a20'",
 }
 
@@ -61,7 +61,7 @@ def main() -> int:
         mut_path = Path(td) / "secrets_scan_mutated.py"
         sample = Path(td) / "sample.py"
         mut_path.write_text(mutated_src, encoding="utf-8")
-        sample.write_text("PY = 'C:/Users/Lenovo/AppData/Local/Programs/Python/python.exe'\n",
+        sample.write_text("PY = 'C:/Users/SomeUser/AppData/Local/Programs/Python/python.exe'\n",
                           encoding="utf-8")
         proc = subprocess.run([PY, str(mut_path), str(sample)],
                               capture_output=True, text=True, encoding="utf-8", errors="replace")

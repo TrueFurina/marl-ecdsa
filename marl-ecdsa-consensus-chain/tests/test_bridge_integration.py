@@ -36,7 +36,8 @@ def bridge_components():
 
     # 构建区块链
     from blockchain.ledger.blockchain import Blockchain
-    bc = Blockchain()
+    # R1 收紧后：本管线测试用 stub 放行（identity_contract 未走签名断言路径）
+    bc = Blockchain(allow_unsigned_stub=True)
     node_ids = ["agent_0", "agent_1", "agent_2"]
     cw_pbft = CWPBFTConsensus(node_id="agent_0", consensus_nodes=node_ids)
     incentive = IncentiveContract(ws)

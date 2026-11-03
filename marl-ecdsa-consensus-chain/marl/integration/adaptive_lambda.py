@@ -222,7 +222,16 @@ class AdaptiveLambdaController:
         """
         consensus_stats = bridge_stats.get('consensus_stats')
         if consensus_stats is not None:
-            # CW-PBFT 统计格式：{'success_rate': float, ...}
+            # F01 键契约修复（2026-11-02 赛后）：cw_pbft.get_consensus_stats() 实际
+            # 提供的键名是 consensus_success_rate —— 旧代码读 success_rate /
+            # success_count 永远落空，共识反馈恒为默认 0.5。旧键保留兜底。
+            rate = consensus_stats.get('consensus_success_rate')
+            if rate is not None:
+                try:
+                    return float(rate)
+                except (TypeError, ValueError):
+                    pass
+            # CW-PBFT 统计格式：{'success_rate': float, ...}（旧兼容）
             success_rate = consensus_stats.get('success_rate')
             if success_rate is not None:
                 try:
@@ -250,8 +259,17 @@ class AdaptiveLambdaController:
         :param bridge_stats: BlockchainMARLBridge.get_stats() 的返回值
         :return: 全局合作率，范围 [0, 1]。无数据时返回默认 0.5
         """
-        # CooperationDetector 的 get_stats() 不直接在 bridge_stats 中暴露，
-        # 但可通过 bc_scores 中的正值比例推导近似合作率
+        # F01 契约修复（2026-11-02 赛后）：优先读显式注入的行为学真实合作率
+        # （bc_integration.on_episode_end 用 CooperationDetector 判定结果注入），
+        # 取代下方"正积分占比"近似——正积分比例并非真实合作率。
+        explicit = bridge_stats.get('cooperation_rate')
+        if explicit is not None:
+            try:
+                return float(explicit)
+            except (TypeError, ValueError):
+                pass
+
+        # 旧近似兜底：通过 bc_scores 中的正值比例推导
         bc_scores = bridge_stats.get('bc_scores', {})
         if bc_scores:
             positive_count = sum(1 for v in bc_scores.values() if v > 0)

@@ -56,7 +56,7 @@ class TestRealConsensus:
         try:
             assert net._started is True
             assert len(net.nodes) == 3
-            ok = net.run_consensus("hash_p2p_ac", primary_idx=0)
+            ok = net.run_consensus("hash_p2p_ac", block_height=1)
             assert ok is True
             assert net.total_consensus_rounds == 1
         finally:
@@ -69,7 +69,7 @@ class TestRealConsensus:
             n_nodes=3, base_port=BASE_PORT + 20,
             allow_insecure_register=True, allow_insecure_vote=True,
         ) as net:
-            ok = net.run_consensus("hash_ctx", primary_idx=0)
+            ok = net.run_consensus("hash_ctx", block_height=1)
             assert ok is True
         # 退出上下文后网络已停止
         assert all(not n.p2p._running for n in net.nodes.values()) or True
@@ -84,7 +84,7 @@ class TestRealConsensus:
         net.start()
         try:
             for i in range(3):
-                assert net.run_consensus(f"hash_round_{i}", primary_idx=i % 3) is True
+                assert net.run_consensus(f"hash_round_{i}", block_height=i + 1) is True
             assert net.total_consensus_rounds == 3
         finally:
             net.stop()

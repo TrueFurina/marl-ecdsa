@@ -7,6 +7,7 @@ import os
 import json
 import logging
 import threading
+import contextlib
 from pathlib import Path
 from typing import Optional, Dict, Tuple
 
@@ -15,6 +16,45 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from .ecdsa_utils import ECDSAUtils, resolve_key_passphrase
 
 logger = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def _file_lock(lock_path: Path):
+    """F11：跨进程文件锁（best-effort）。Windows 用 msvcrt.locking，POSIX 用 fcntl.flock。
+    获取失败时不阻断（记 debug）——进程内已由 KeyManager._init_lock 兜底，文件锁仅补跨进程
+    并发生成同一 agent 密钥时的写文件竞态。"""
+    fd = None
+    got = False
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+        if os.name == 'nt':
+            import msvcrt
+            msvcrt.setmode(fd, os.O_BINARY)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # 阻塞式，失败重试有限次
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        got = True
+    except Exception as e:
+        logger.debug(f"[KeyManager] 文件锁获取失败（回退仅进程内锁）: {e}")
+    try:
+        yield
+    finally:
+        try:
+            if got:
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 class KeyManager:
@@ -67,9 +107,16 @@ class KeyManager:
         为指定智能体生成或加载密钥对
         如果本地已有密钥文件则加载，否则生成新密钥对并保存
         线程安全：P3-2 类级锁保证并发调用同一 agent 得到一致密钥
+        F11：再叠加跨进程文件锁（best-effort），防多进程同时首生成同一 agent 密钥的写文件竞态
         """
         with KeyManager._init_lock:
-            return self._generate_or_load_locked(agent_id)
+            try:
+                with _file_lock(self.key_dir / f".{agent_id}.lock"):
+                    return self._generate_or_load_locked(agent_id)
+            except Exception as e:
+                # 文件锁本身失败不应影响密钥可用性（进程内锁已持有）
+                logger.debug(f"[KeyManager] 文件锁不可用，回退进程内锁: {e}")
+                return self._generate_or_load_locked(agent_id)
 
     def _generate_or_load_locked(self, agent_id: str) -> Tuple[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]:
         """加锁后的实现（供 generate_or_load 调用）"""

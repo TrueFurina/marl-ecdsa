@@ -72,7 +72,8 @@ def sample_transaction():
 def block_chain_instance():
     """创建区块链实例"""
     from blockchain.ledger.blockchain import Blockchain
-    return Blockchain()
+    # R1 收紧后 stub 路径需显式开关：本 fixture 服务于链完整性/世界状态等非签名语义测试
+    return Blockchain(allow_unsigned_stub=True)
 
 
 @pytest.fixture(scope="function")
@@ -89,3 +90,42 @@ def signed_package(key_pair):
         nonce=1,
         timestamp=int(time.time() * 1000)
     )
+
+
+# ── F08（2026-11-02 赛后）：G4 登录门禁时代的共享认证客户端 ──
+# 六个门禁前时代写的 API 测试文件（attack_api_parametrized / dashboard_* /
+# visualization_more）从不登录，G4 的 before_request 一律 401/302。
+# 本助手：注册（幂等，重跑用户已存在时继续登录）+ 登录 + 提取现行 APP_CSRF
+# 并包装 client 使所有 POST 自动带 X-CSRF-Token 头。
+def make_auth_client(client, username):
+    import re as _re
+
+    def _csrf_of(html):
+        m = _re.search(r'name="([^"]*csrf[^"]*)"[^>]*value="([^"]+)"', html)
+        return (m.group(1), m.group(2)) if m else ('_csrf', '')
+
+    f1, v1 = _csrf_of(client.get('/register').get_data(as_text=True))
+    client.post('/register', data={'username': username, 'password': 'probe123abc',
+                                   'confirm': 'probe123abc', f1: v1})
+    f2, v2 = _csrf_of(client.get('/login').get_data(as_text=True))
+    client.post('/login', data={'username': username, 'password': 'probe123abc', f2: v2})
+    home = client.get('/').get_data(as_text=True)
+    m3 = _re.search(r'APP_CSRF=(?:"([^"]+)"|([^;<\s]+))', home)
+    token = (m3.group(1) or m3.group(2)) if m3 else ''
+
+    class _CSRFClient:
+        def __init__(self, c, t):
+            self._c, self._t = c, t
+
+        def post(self, path, **kw):
+            h = {'X-CSRF-Token': self._t}
+            h.update(kw.pop('headers', None) or {})
+            return self._c.post(path, headers=h, **kw)
+
+        def get(self, path, **kw):
+            return self._c.get(path, **kw)
+
+        def __getattr__(self, name):
+            return getattr(self._c, name)
+
+    return _CSRFClient(client, token)

@@ -62,10 +62,14 @@ class IdentityContract:
         status = self._ws.get_agent_status(agent_id)
         return status.value if status else None
 
-    def update_status(self, agent_id: str, new_status: str, caller: ContractCaller = ContractCaller.PENALTY) -> Dict:
+    def update_status(self, agent_id: str, new_status: str, caller: ContractCaller) -> Dict:
         """
         更新智能体状态（仅授权调用方可调用）
-        :param caller: 调用方枚举，必须为 ContractCaller.PENALTY 或 ContractCaller.ADMIN
+
+        :param caller: 调用方枚举，必须显式传入 ContractCaller.PENALTY 或
+            ContractCaller.ADMIN。**刻意不设默认值**——此前默认值就是
+            ContractCaller.PENALTY，任何调用方只要省略该参数就自动获得
+            封禁/降级权限，下方鉴权分支形同虚设。
         """
         if caller not in (ContractCaller.PENALTY, ContractCaller.ADMIN):
             return {'success': False, 'error': f'无权限：调用方 {caller} 不允许调用 updateStatus'}
@@ -87,6 +91,10 @@ class IdentityContract:
     def is_active(self, agent_id: str) -> bool:
         """检查智能体是否处于活跃状态"""
         return self._ws.is_active(agent_id)
+
+    def get_consensus_weight(self, agent_id: str) -> float:
+        """F05：身份当前共识权重（封禁 0 / 降级 0.3 / 其余 1.0；未注册 0.0 fail-closed）"""
+        return self._ws.get_consensus_weight(agent_id)
 
     @staticmethod
     def _validate_public_key(hex_str: str) -> bool:

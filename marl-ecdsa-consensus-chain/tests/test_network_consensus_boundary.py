@@ -98,8 +98,9 @@ class TestVerifyVoteSignatureStrict:
             "phase": "prepare",
             "weight": 1.0,
             "timestamp": 1000,
+            "block_height": 1,  # F13：签名体/验签体对称含轮次高度
         }
-        verify_data = {k: data[k] for k in ["voter_id", "block_hash", "phase", "weight", "timestamp"]}
+        verify_data = {k: data[k] for k in ["voter_id", "block_hash", "phase", "weight", "timestamp", "block_height"]}
         message = hashlib.sha256(json.dumps(verify_data, sort_keys=True).encode()).digest()
         priv = km.get_private_key("node_1")
         data["signature_hex"] = ECDSAUtils.sign(priv, message).hex()

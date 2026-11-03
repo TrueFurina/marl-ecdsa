@@ -37,6 +37,19 @@ from blockchain.network.network_consensus import NetworkConsensusNode
 NODES = ['node_0', 'node_1', 'node_2']
 
 
+def _free_port() -> int:
+    """取一个当前空闲的本地端口。
+
+    硬编码端口（如 7932）会与本机恰好占用该端口的其他程序冲突，用例以
+    Errno 10048 假失败 —— 与被测代码逻辑无关（2026-11-03 实测：本机有常驻
+    程序监听 7932）。凡真正 bind 的用例都应改用本函数，与 b4c 的 port=0 同口径。
+    """
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 # =============================================================================
 # A. 密码模块（P1-16）
 # =============================================================================
@@ -237,7 +250,7 @@ class TestTls:
     def test_b4a_start_server_receives_ssl_context(self, tmp_path, monkeypatch):
         """P2PNode.start() 必须把 TLS 上下文真正传给监听套接字（不能只是字段置 True）"""
         d = str(tmp_path / "tls_a")
-        node = P2PNode("n0", "127.0.0.1", 7931, tls_dir=d)
+        node = P2PNode("n0", "127.0.0.1", _free_port(), tls_dir=d)
         captured = {}
 
         real_start_server = asyncio.start_server
@@ -264,7 +277,7 @@ class TestTls:
     def test_b4b_connect_to_receives_ssl_context(self, tmp_path, monkeypatch):
         """start() 之后，P2PNode.connect_to() 必须把 TLS 上下文传给出站连接"""
         d = str(tmp_path / "tls_b")
-        node = P2PNode("n0", "127.0.0.1", 7932, tls_dir=d)
+        node = P2PNode("n0", "127.0.0.1", _free_port(), tls_dir=d)
         captured = {}
 
         async def _spy(*a, **k):

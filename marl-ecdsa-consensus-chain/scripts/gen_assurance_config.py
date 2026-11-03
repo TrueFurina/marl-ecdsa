@@ -150,14 +150,33 @@ def main(argv=None):
         return 0
 
     # 出库前自检：public 产物不得含身份串 / 机器路径（fail-closed，先验后写）
+    import os
     import re
+    from pathlib import Path as _HomePath
+
     blob = json.dumps(exp_r, ensure_ascii=False) + json.dumps(exp_t, ensure_ascii=False)
-    leaks = [name for name, pat in (
+
+    # ⚠️ 用户名必须**运行时派生**，绝不可写字面量。
+    #    2026-10-17 实测此处写死为 ("用户名", r"<机器名>")：
+    #      · 它自己就是身份泄漏 —— 本文件会随 public 产物与提交包外发；
+    #      · 它躲过全部既有门禁 —— check_submission_anonymity 只识别
+    #        C:/Users/<name> 这类**路径形态**，裸用户名不在识别范围内，
+    #        secrets_scan 按设计不管路径/用户名；
+    #      · README §三附 当时已宣称这一处「已修复」，而代码未动 —— 属于提交材料的不实陈述。
+    #     guard: tests/test_gen_assurance_config.py（TDD 红→绿，含端到端拦截验证）
+    _rules = [
         ("绝对路径", r"[A-Za-z]:[\\/]"),
-        ("用户名", r"Lenovo"),
         ("邮箱", r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
         ("UNC", r"\\\\[A-Za-z0-9_-]{1,15}(?=\\\\)"),
-    ) if re.search(pat, blob)]
+    ]
+    _machine_user = _HomePath(os.path.expanduser("~")).name
+    if _machine_user and _machine_user.lower() not in {
+        "user", "public", "default", "administrator", "root", "ubuntu", "runner", "anon",
+    }:
+        _rules.append(("用户名", re.escape(_machine_user)))
+
+    leaks = [name for name, pat in _rules
+             if re.search(pat, blob, re.IGNORECASE if name == "用户名" else 0)]
     if leaks:
         print(f"[FAIL] public 产物含敏感串 {leaks} —— 拒绝写盘（派生逻辑需先修正）。")
         return 1

@@ -78,10 +78,15 @@ class TrainingConfig:
         self.weight_broadening: bool = kwargs.get('weight_broadening', False)
         # 训练内省略故障注入（默认0=关闭；与NR-82省略故障模型一致）
         self.omission_ratio: float = kwargs.get('omission_ratio', 0.0)
+        # C2：按 Shapley 贡献分配激励（默认关）
+        self.use_shapley_incentive: bool = kwargs.get('use_shapley_incentive', False)
         self.omission_seed: int = kwargs.get('omission_seed', 0)
         self.ablate_incentive: bool = kwargs.get('ablate_incentive', False)
         # ── P2-E 新增：自适应λ / Nash验证开关 ──
         self.adaptive_lambda: bool = kwargs.get('adaptive_lambda', True)  # 默认启用
+        # E40：自适应λ灵敏度 β（sigmoid 陡度），默认 2.0 与 AdaptiveLambdaController
+        # 原默认一致——行为保持型透传，仅当显式传入非 2.0 时才改变机制行为
+        self.adaptive_beta: float = kwargs.get('adaptive_beta', 2.0)
         self.verify_nash: bool = kwargs.get('verify_nash', True)  # 默认启用
         # ── Tier1 新增：算法选择 iql/vdn/qmix ──
         self.algorithm: str = kwargs.get('algorithm', 'iql')
@@ -123,17 +128,32 @@ class TrainingStats:
         recent_r = self.episode_rewards[-window:] if len(self.episode_rewards) >= window else self.episode_rewards
         recent_c = self.cooperation_rates[-window:] if len(self.cooperation_rates) >= window else self.cooperation_rates
         recent_env = self.env_rewards[-window:] if len(self.env_rewards) >= window else self.env_rewards
-        return {
+        # 布局不兼容时 coop 记为 None（不可测），均值只在可测值上算，绝不拿 0 冒充
+        valid_coop = [x for x in self.cooperation_rates
+                      if isinstance(x, (int, float)) and not isinstance(x, bool)]
+        out = {
             'total_episodes': len(self.episode_rewards),
             'avg_reward': float(np.mean(self.episode_rewards)) if self.episode_rewards else 0.0,
             'avg_reward_last_{}'.format(window): float(np.mean(recent_r)) if recent_r else 0.0,
             'avg_env_reward': float(np.mean(self.env_rewards)) if self.env_rewards else 0.0,  # [v3.7]
             'avg_env_reward_last_{}'.format(window): float(np.mean(recent_env)) if recent_env else 0.0,  # [v3.7]
-            'avg_cooperation_rate': float(np.mean(self.cooperation_rates)) if self.cooperation_rates else 0.0,
+            'avg_cooperation_rate': (
+                float(np.mean(valid_coop)) if valid_coop else None
+            ),
+            'cooperation_metric_status': (
+                'ok' if valid_coop
+                else ('unavailable_layout_mismatch' if self.cooperation_rates else 'not_recorded')
+            ),
             'avg_betrayal_rate': float(np.mean(self.betrayal_rates)) if self.betrayal_rates else 0.0,
             'total_losses': len(self.losses),
             'elapsed_time': self.elapsed_time,
         }
+        # E40：λ 轨迹摘要由 MARLBlockchainTrainer.train() 结尾写入 self.lambda_trace
+        # （bridge 引用在 Trainer 上，TrainingStats 不持有 bridge）
+        trace = getattr(self, 'lambda_trace', None)
+        if trace:
+            out.update(trace)
+        return out
 
 
 class MARLBlockchainTrainer:
@@ -203,11 +223,15 @@ class MARLBlockchainTrainer:
         if self.config.use_p2p and self.config.mode != 'pure_marl':
             try:
                 from blockchain.network.network_consensus import P2PConsensusNetwork
-                self.p2p_network = P2PConsensusNetwork(n_nodes=self.config.n_agents, base_port=7001)
+                # F13（2026-11-02 赛后）：注入 key_manager——网络投票验签 fail-closed
+                # 依赖它；不注入则节点全部拒绝签名票，P2P 共识等于不可用。
+                self.p2p_network = P2PConsensusNetwork(
+                    n_nodes=self.config.n_agents, base_port=7001,
+                    key_manager=self.key_manager)
                 self.p2p_network.start()
                 logger.info(f"[Trainer] P2P网络共识已启用 - {self.config.n_agents} 节点")
             except Exception as e:
-                logger.warning(f"[Trainer] P2P网络启动失败: {e}")
+                logger.warning(f"[Trainer] P2P网络启动失败，**回落本地模拟共识（P2P 未启用）**: {e}")
                 self.p2p_network = None
 
     def _init_bridge(self):
@@ -224,6 +248,7 @@ class MARLBlockchainTrainer:
             lambda_weight=c.lambda_weight, ablate_consensus=c.ablate_consensus,
             weight_broadening=c.weight_broadening,
             omission_ratio=c.omission_ratio, omission_seed=c.omission_seed,
+            adaptive_beta=c.adaptive_beta,
         )
         if c.weight_broadening:
             logger.info("[Trainer] 参与率权重展宽已启用（路线C，纪元=%d轮）",
@@ -249,6 +274,15 @@ class MARLBlockchainTrainer:
                 n_agents=c.n_agents, eta=c.shaping_eta, gamma=c.gamma, n_landmarks=c.n_landmarks,
             )
             logger.info(f"[Trainer] 共识感知奖励塑形已启用 (eta={c.shaping_eta})")
+
+        # C1 贡献度记录器（不改变训练，只记录）
+        from marl.analysis.contribution import ContributionLogger
+        contrib_dir = Path(__file__).parent / "results" / "contribution"
+        self.contrib_logger = ContributionLogger(
+            n_agents=c.n_agents, agent_ids=self.agent_ids,
+            log_dir=contrib_dir, enabled=True,
+        )
+        logger.info(f"[Trainer] 贡献度记录已启用 -> {contrib_dir}")
 
     def _register_agents(self):
         for agent_id in self.agent_ids:
@@ -310,6 +344,19 @@ class MARLBlockchainTrainer:
                 self._log_progress(episode)
 
         self.stats.elapsed_time = time.time() - start_time
+        # E40：λ 轨迹摘要挂到 stats（bridge 引用只在 Trainer 上，TrainingStats 不持有它；
+        # adaptive_lambda=False 时 controller 为 None，不写 lambda_trace，summary 不含该字段）
+        al = getattr(self.bridge, '_adaptive_lambda', None)
+        if al is not None and getattr(al, '_history', None):
+            lams = [h.get('lambda') or h.get('new_lambda') for h in al._history]
+            lams = [x for x in lams if x is not None]
+            if lams:
+                self.stats.lambda_trace = {
+                    'lambda_mean': float(np.mean(lams)),
+                    'lambda_final': float(lams[-1]),
+                    'lambda_min': float(min(lams)),
+                    'lambda_max': float(max(lams)),
+                }
         logger.info("=" * 60)
         logger.info(f"训练完成 | 耗时={self.stats.elapsed_time:.1f}s")
         logger.info(f"最终统计: {json.dumps(self.stats.summary(), indent=2, default=str)}")
@@ -419,11 +466,42 @@ class MARLBlockchainTrainer:
                     ep_avg_rewards[i] += lr_list[i]
             ep_avg_rewards = [r / len(episode_local_rewards) for r in ep_avg_rewards]
 
+        # F01 修复（2026-11-02 赛后）：快照"本回合生效"的 λ。自适应更新发生在
+        # on_episode_end 末尾（属于下一回合），激励分配必须用结算时的 λ——
+        # 此前固定读 config.lambda_weight，自适应 λ 从未真正进入训练梯度。
+        lambda_in_effect = (
+            self.bridge.lambda_weight if self.bridge is not None else config.lambda_weight
+        )
         self.bridge.on_episode_end(episode, self.agent_ids, ep_avg_rewards)
 
-        # BC激励均匀分配到每一步
+        # C1：记录本回合贡献度（不改变奖励）
+        self.contrib_logger.log_episode(episode, ep_avg_rewards)
+
+        # BC激励分配到每一步
         if total_steps > 0 and not config.ablate_incentive:
             bc_deltas = self.bridge.get_bc_rewards()
+            # C2：按 Shapley 贡献分配激励池（默认关，保持旧实验可复现）
+            if getattr(config, "use_shapley_incentive", False):
+                total_pool = sum(bc_deltas.values())
+                r = np.array(ep_avg_rewards, dtype=float)
+                # F06：leave-one-out 边际 = r[i]，再做「移位归一」(r_i − min(r) + eps)
+                # 消除负奖励区间 `shap/shap.sum()` 把最差者放大成大份额的反转，
+                # 与 ContributionLogger._contribution_share 保持同一公平性定义。
+                shifted = r - r.min() + 1e-9
+                s = shifted.sum()
+                shap = shifted / s if s > 1e-12 else np.full(config.n_agents, 1.0 / config.n_agents)
+                # 自私 agent 不拿激励，其份额按权重再分给非自私 agent
+                non_selfish = [i for i in range(config.n_agents)
+                               if not (self.selfish_wrappers is not None and self.selfish_wrappers[i].is_selfish)]
+                pool_ns = sum(shap[i] for i in non_selfish)
+                weighted = {}
+                for i in range(config.n_agents):
+                    aid = self.agent_ids[i]
+                    if i in non_selfish and pool_ns > 1e-9:
+                        weighted[aid] = total_pool * (shap[i] / pool_ns)
+                    else:
+                        weighted[aid] = 0.0
+                bc_deltas = weighted
             for t in range(total_steps):
                 step_rewards = list(episode_rewards[t])
                 for i, aid in enumerate(self.agent_ids):
@@ -433,8 +511,33 @@ class MARLBlockchainTrainer:
                     )
                     if not is_selfish:
                         delta = bc_deltas.get(aid, 0.0)
-                        step_rewards[i] += config.lambda_weight * delta / float(total_steps)
+                        step_rewards[i] += lambda_in_effect * delta / float(total_steps)
                 episode_rewards[t] = step_rewards
+
+        return lambda_in_effect
+
+    def _record_payoff_sample(self, coop_status, local_rewards):
+        """F16（2026-11-02 赛后）：Nash 报告实测四格采样。
+
+        种群级风格化分桶（SimpleSpread 非严格二人博弈，2×2 为报告的抽象模型）：
+        cc=全合作、dd=全背叛、cd=合作方在混合步、dc=背叛方在混合步；
+        每步每智能体的局部环境奖励入桶。判定不全（None=布局不可测）的步跳过。
+        """
+        cells = getattr(self, '_payoff_cells', None)
+        if cells is None:
+            cells = self._payoff_cells = {'cc': [], 'cd': [], 'dc': [], 'dd': []}
+        flags = [bool(v) for v in coop_status.values()]
+        all_c, any_d = all(flags), any(not c for c in flags)
+        for i, c in enumerate(flags):
+            r = float(local_rewards[i]) if i < len(local_rewards) else 0.0
+            if all_c:
+                cells['cc'].append(r)
+            elif not any_d:
+                cells['dd'].append(r)
+            elif c:
+                cells['cd'].append(r)
+            else:
+                cells['dc'].append(r)
 
     def _run_episode(self, episode: int):
         """执行一个训练回合"""
@@ -480,6 +583,9 @@ class MARLBlockchainTrainer:
                     step, episode, observations, actions, local_rewards)
                 # 合作 = 行为学判定（距任意路标 < 阈值），与"是否被标记背叛"无关
                 coop_count += sum(1 for v in coop_status.values() if v is True)
+                # F16：Nash 报告实测四格采样（判定齐全的步才计）
+                if coop_status and all(v is not None for v in coop_status.values()):
+                    self._record_payoff_sample(coop_status, local_rewards)
                 # 背叛 = 本步实际被标记背叛的智能体数（独立记账，不再混入合作率）
                 betrayal_count += sum(1 for v in step_betray_flags if v)
             else:
@@ -500,8 +606,9 @@ class MARLBlockchainTrainer:
             if done:
                 break
 
-        # 5. 回合结束：结算激励
-        self._episode_end_settlement(episode, episode_rewards, episode_local_rewards, total_steps)
+        # 5. 回合结束：结算激励（返回本回合实际生效的 λ，见 _episode_end_settlement）
+        lambda_in_effect = self._episode_end_settlement(
+            episode, episode_rewards, episode_local_rewards, total_steps)
 
         # 6. 存入经验回放
         episode_total_reward = sum(sum(r) for r in episode_rewards)
@@ -517,15 +624,21 @@ class MARLBlockchainTrainer:
         # 7. 统计
         bc_scores = self.bridge.get_bc_scores() if self.bridge else {}
         n_total = max(1, config.n_agents * total_steps)
+        # 布局不兼容 → 合作率不可测：记 None，不记 0（见 CooperationDetector.check_layout）
+        detector = getattr(self.bridge, "_detector", None) if self.bridge is not None else None
+        layout_ok = not bool(getattr(detector, "layout_mismatch", False))
 
         return {
             'total_reward': episode_total_reward,
             'env_reward_sum': episode_env_reward_sum,
             'length': total_steps,
             'bc_scores': bc_scores,
-            'cooperation_rate': coop_count / n_total,
+            'cooperation_rate': (coop_count / n_total) if layout_ok else None,
             'betrayal_rate': betrayal_count / n_total,
-            'lambda_value': self.bridge.lambda_weight if self.bridge else None,
+            'lambda_value': (
+                lambda_in_effect if lambda_in_effect is not None
+                else (self.bridge.lambda_weight if self.bridge else None)
+            ),
             'shaping_stats': self.consensus_shaper.get_stats() if self.consensus_shaper else None,
         }
 
@@ -540,11 +653,14 @@ class MARLBlockchainTrainer:
             avg_reward = float(np.mean(list(rewards.values()))) if rewards else 0.0
             bc_info = f"  BC奖励={avg_reward:.1f}"
 
+        _coop = summary.get('avg_cooperation_rate')
+        coop_txt = f"{_coop:.1%}" if _coop is not None else "不可测(布局不兼容)"
+
         logger.info(
             f"[E{episode:4d}/{self.config.n_episodes}] "
             f"ε={eps:.3f} "
             f"AvgR({window})={summary.get(f'avg_reward_last_{window}', summary.get('avg_reward', 0.0)):.2f} "
-            f"合作={summary['avg_cooperation_rate']:.1%}"
+            f"合作={coop_txt}"
             + bc_info
         )
 
@@ -640,7 +756,17 @@ class MARLBlockchainTrainer:
                 verifier = NashEquilibriumVerifier(
                     lambda_weight=self.config.lambda_weight,
                 )
-                report = verifier.generate_report(n_agents=self.config.n_agents)
+                # F16（2026-11-02 赛后）：实测四格接入报告——此前恒用理论默认矩阵
+                # {'cc':5,'cd':2,'dc':6,'dd':1}。空桶回落理论值（短跑全D场景等）。
+                cells = getattr(self, '_payoff_cells', {}) or {}
+                measured = {k: sum(v) / len(v) for k, v in cells.items() if v}
+                env_payoffs = {**{'cc': 5.0, 'cd': 2.0, 'dc': 6.0, 'dd': 1.0}, **measured}
+                logger.info(
+                    f"[Trainer] Nash 报告 env_payoffs：实测格={sorted(measured)}，"
+                    f"理论回退格={sorted(set(env_payoffs) - set(measured))}"
+                )
+                report = verifier.generate_report(env_payoffs=env_payoffs,
+                                                  n_agents=self.config.n_agents)
                 nash_report_path = os.path.join(
                     os.path.dirname(filepath) or '.', 
                     'nash_equilibrium_report.md'
@@ -657,6 +783,18 @@ class MARLBlockchainTrainer:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(result, f, indent=2, ensure_ascii=False, default=str)
         logger.info(f"[Trainer] 结果已导出: {filepath}")
+
+        # C1：flush 贡献度记录
+        try:
+            tag = Path(filepath).stem
+            import hashlib
+            with open(filepath, 'rb') as trained_file:
+                result_digest = hashlib.sha256(trained_file.read()).hexdigest()
+            out = self.contrib_logger.flush(tag=tag, training_result_sha256=result_digest)
+            if out:
+                logger.info(f"[Trainer] 贡献度记录已导出: {out}")
+        except Exception as e:
+            logger.warning(f"贡献度 flush 失败: {e}")
 
         # 自动生成图表
         try:
@@ -755,6 +893,8 @@ def parse_args():
                         help='省略故障节点采样种子（默认0）')
     parser.add_argument('--ablate-incentive', action='store_true',
                         help='消融：禁用激励合约（无链上激励，纯行为记录）')
+    parser.add_argument('--use-shapley-incentive', action='store_true', default=False,
+                        help='C2：按 Shapley 贡献分配激励池（默认均匀分配）')
     # ── P2-E 新增：自适应λ / Nash验证开关 ──
     parser.add_argument('--adaptive-lambda', action='store_true', default=True,
                         help='启用自适应λ控制器（BC→MARL双向反馈，默认启用）')
@@ -816,6 +956,7 @@ def main():
         ablate_incentive=args.ablate_incentive,
         weight_broadening=args.weight_broadening,       # 路线C：参与率驱动权重展宽
         omission_ratio=args.omission_ratio,
+        use_shapley_incentive=args.use_shapley_incentive,
         omission_seed=args.omission_seed,
         # ── P2-E：自适应λ / Nash验证 ──
         adaptive_lambda=not args.no_adaptive_lambda,  # 默认启用，--no-adaptive-lambda 禁用

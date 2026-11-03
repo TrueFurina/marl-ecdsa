@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from blockchain.contracts.incentive_contract import ContributionScore, clamp_finite
+from blockchain.contracts.incentive_contract import ContributionScore
 
 logger = logging.getLogger(__name__)
 
@@ -155,13 +155,7 @@ class SettlementCoordinator:
             # P1-5：区间边界改由 config.json 的 blockchain.env_reward_normalization
             # 提供（默认 min=-1.5, max=2.0，与此处历史值等价）
             _norm_span = self.env_reward_max - self.env_reward_min
-            # 11-03 修复：非有限奖励（NaN/±inf）按「无有效贡献」归一化为 0，
-            # 不得钳成 1.0。旧写法 max(0.0, min(1.0, x)) 对 NaN 返回上界 1.0，
-            # 实测让「奖励算崩的智能体」拿到最高贡献分与最高链上激励。
-            norm_env_r = clamp_finite(
-                (env_r - self.env_reward_min) / _norm_span, 0.0, 1.0,
-                field="norm_env_reward", agent_id=agent_id,
-            )
+            norm_env_r = max(0.0, min(1.0, (env_r - self.env_reward_min) / _norm_span))
 
             if self.incentive_contract is not None:
                 cs = self.incentive_contract.compute_contribution(
@@ -224,11 +218,7 @@ class SettlementCoordinator:
         bc_reward = self._bc_rewards.get(agent_id, 0.0)
         # 归一化：将 bc_reward 裁剪到 [_BC_REWARD_CLIP_MIN, _BC_REWARD_CLIP_MAX] 防止主导奖励
         # （边界由 config.json 的 blockchain.bc_reward_clip 提供，默认 -20.0 / 20.0）
-        # 11-03 修复：非有限值按 0 处理（不再钳成上界 +20 → 静默送 λ*20 的分）
-        bc_reward_clipped = clamp_finite(
-            bc_reward, _BC_REWARD_CLIP_MIN, _BC_REWARD_CLIP_MAX,
-            fallback=0.0, field="bc_reward", agent_id=agent_id,
-        )
+        bc_reward_clipped = max(_BC_REWARD_CLIP_MIN, min(_BC_REWARD_CLIP_MAX, bc_reward))
         total = env_reward + self.lambda_weight * bc_reward_clipped
         return total
 
@@ -264,24 +254,32 @@ class SettlementCoordinator:
         """获取本回合积分变化（用于奖励计算）"""
         return dict(self._bc_rewards)
 
+    def clear_episode_rewards(self) -> None:
+        """F02（2026-11-02 赛后）：区块未确认时清空本回合奖励——防止上一回合的
+        陈旧 delta 经 compute_total_reward 混入下一回合的融合奖励。"""
+        for aid in list(self._bc_rewards.keys()):
+            self._bc_rewards[aid] = 0.0
+
     def _simulate_settlement(
         self, scores: List[ContributionScore]
     ) -> Dict[str, float]:
-        """模拟模式：直接计算激励 delta（温和惩罚策略，降方差）"""
+        """模拟模式：直接计算激励 delta（温和惩罚策略，降方差）
+
+        ⚠️ 仅用于展示/导出（`_bc_scores`、`bc_scores_final`、`BC奖励=` 日志）。
+        ablate_incentive 消融时本返回值**不会进入训练梯度**——train.py 的
+        `if total_steps > 0 and not config.ablate_incentive:` 会整块跳过激励注入
+        （已由冠军归档核实：ablate 臂 `episode_rewards == env_rewards`，max 差=0.0；
+        baseline 臂 max 差=5.74）。故本方法不构成实验变量，改动它不影响任何 NR。
+        """
         deltas = {}
         for cs in scores:
             aid = cs.agent_id
-            # 11-03 修复：加权贡献非有限时按 0 计，避免 NaN delta 流入下游
-            ws_score = clamp_finite(
-                cs.weighted_score, 0.0, 1.0,
-                field="weighted_score", agent_id=aid,
-            )
             if cs.compliance_score == 0.0:
                 # 背叛：温和惩罚（降至-8，避免方差爆炸）
                 delta = -8.0
             else:
                 # 合作：基础奖励 + 贡献加成
-                delta = 10.0 + 5.0 * ws_score
+                delta = 10.0 + 5.0 * cs.weighted_score
             deltas[aid] = delta
         return deltas
 

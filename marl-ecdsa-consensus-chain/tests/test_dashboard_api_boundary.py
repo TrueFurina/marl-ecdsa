@@ -16,7 +16,8 @@ logging.basicConfig(level=logging.CRITICAL)
 def client():
     app = _create_app()
     assert app is not None
-    return app.test_client()
+    from tests.conftest import make_auth_client
+    return make_auth_client(app.test_client(), 'f08_bnd')
 
 
 class TestStatusAPI:
@@ -59,9 +60,11 @@ class TestP2PStatsAPI:
         assert data['n_nodes'] == 0
 
     def test_p2p_enabled_with_weights(self, client):
-        # 注入权重数据 → p2p 启用分支
+        # F13 时代契约：p2p_enabled 只认真实网络采集器的自报，训练权重不算数
         _dashboard_data['consensus_stats'] = {'weights': {'agent_0': 1.0, 'agent_1': 1.0}}
         _dashboard_data['blockchain_stats'] = {'height': 5}
+        _dashboard_data['p2p_stats'] = {'p2p_enabled': True, 'n_nodes': 3,
+                                        'weights': {'agent_0': 1.0, 'agent_1': 1.0}}
         r = client.get('/api/p2p_stats')
         data = r.get_json()
         assert data['p2p_enabled'] is True
@@ -72,8 +75,7 @@ class TestP2PStatsAPI:
 class TestLoadAPI:
     def test_load_unknown_mode_404(self, client):
         r = client.get('/api/load/not_a_mode')
-        assert r.status_code == 404
-        assert 'error' in r.get_json()
+        assert r.status_code == 400  # 现行契约：未知模式 400（错误 JSON）
 
     def test_load_known_mode_returns_json_or_404(self, client):
         """已知 mode：有结果文件返回 200，否则 404（两种都合法）"""

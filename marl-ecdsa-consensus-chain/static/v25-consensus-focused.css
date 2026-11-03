@@ -1,0 +1,21 @@
+/* V25: only task-bound consensus/governance evidence on chain page */
+#tab-chain{--v25-ink:#172f31;--v25-teal:#087e72;--v25-line:#d4e4de;--v25-bg:#f6faf8}
+#tab-chain .v22-workbench{margin-bottom:22px}
+.v25-chain-flow{display:grid;gap:18px;grid-template-columns:minmax(0,1fr)}
+.v25-step-card{background:#fff;border:1px solid var(--v25-line);border-radius:17px;box-shadow:0 4px 22px rgba(19,64,58,.04);padding:23px;min-width:0;scroll-margin-top:90px}
+.v25-step-marker{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--v25-teal);font-weight:800;margin-bottom:12px}
+.v25-step-card h2{font-size:21px;color:var(--v25-ink);margin:0 0 13px}
+.v25-step-hint{font-size:13px;color:#54716b;line-height:1.7;margin:0 0 14px}
+#tab-chain #v10-consensus{border:none!important;background:transparent!important;padding:0!important;box-shadow:none!important;margin:0!important}
+#tab-chain #v10-consensus>h2{font-size:21px;margin-bottom:18px}
+#tab-chain #v10-consensus .v10-actions{gap:10px;align-items:center}
+#tab-chain .v20-evidence-panel{border:none;background:transparent;padding:0;margin:0;box-shadow:none}
+#tab-chain .v20-evidence-panel h3{font-size:21px;color:var(--v25-ink)}
+#tab-chain .v9-node-grid{margin:12px 0 17px}
+#tab-chain .v25-node-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:15px 0}
+#tab-chain .v25-node-actions input{width:100px}
+#tab-chain .v9-output{max-height:260px;overflow:auto;background:#f3f8f6;border:1px solid var(--v25-line)}
+.v25-advanced{margin-top:15px;border:1px solid #deebe5;border-radius:12px;padding:10px 15px;background:#fafcfb}
+.v25-advanced summary{cursor:pointer;color:#46675f;font-size:13px;font-weight:650;padding:7px 0}
+.v25-scope-note{margin:18px 0 0;font-size:12px;line-height:1.7;color:#687d77;border-left:3px solid #91cdbb;padding:9px 13px;background:var(--v25-bg)}
+@media(max-width:760px){.v25-step-card{padding:16px}.v25-step-card h2{font-size:19px}.v25-node-actions{align-items:stretch}}

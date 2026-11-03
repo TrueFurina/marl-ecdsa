@@ -1,0 +1,1 @@
+(()=>{const b=document.getElementById('v11-epochs');if(!b)return;b.onclick=async()=>{const output=document.getElementById('v10-detail');try{const r=await fetch('/api/distributed/epochs',{credentials:'same-origin'});const data=await r.json();if(!r.ok)throw Error(data.error||'请求失败');output.textContent=JSON.stringify(data,null,2)}catch(e){output.textContent=e.message}}})();

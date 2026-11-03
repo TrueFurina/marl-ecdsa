@@ -76,7 +76,10 @@ class TestTrainingStats:
         summary = stats.summary()
         assert summary['total_episodes'] == 0
         assert summary['avg_reward'] == 0.0
-        assert summary['avg_cooperation_rate'] == 0.0
+        # 契约对齐（F08 修复 2026-11-02）：summary() 对空/不可测合作率返回 None
+        # 并带 cooperation_metric_status 标注，绝不拿 0 冒充
+        assert summary['avg_cooperation_rate'] is None
+        assert summary['cooperation_metric_status'] == 'not_recorded'
 
     def test_summary_with_data(self):
         stats = TrainingStats()

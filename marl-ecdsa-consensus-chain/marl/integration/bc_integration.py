@@ -21,8 +21,6 @@ v2 集成内容（堵住评委可能质疑的核心缺口）：
 完整流水线：动作决策 → ECDSA签名 → SecurityGuard校验 → Transaction上链
            → 回合结算 → Block打包 → CW-PBFT共识 → 链式追加
 """
-import hashlib
-import json
 import logging
 import time
 from typing import Dict, List, Optional, Any
@@ -67,6 +65,7 @@ class BlockchainMARLBridge:
         weight_broadening: bool = False,
         omission_ratio: float = 0.0,
         omission_seed: int = 0,
+        adaptive_beta: float = 2.0,  # E40：自适应λ sigmoid 灵敏度（默认 2.0 = 原行为）
     ):
         if n_agents <= 0:
             raise ValueError(f"n_agents 必须大于 0，实得 {n_agents}")
@@ -116,7 +115,7 @@ class BlockchainMARLBridge:
         )
 
         # ── P2-E 新增：自适应λ控制器（BC→MARL双向反馈）──
-        self._adaptive_lambda = AdaptiveLambdaController(lambda_base=lambda_weight)
+        self._adaptive_lambda = AdaptiveLambdaController(lambda_base=lambda_weight, beta=adaptive_beta)
 
         # ── 编排层计数器 ──
         self._step_count = 0
@@ -258,9 +257,10 @@ class BlockchainMARLBridge:
         1. ActionRecorder: flush_pending() → 刷新剩余行为到交易池
         2. SigningService: verify_episode_transactions() → ECDSA验签
         3. CooperationDetector: get_episode_cooperation() → 合作判定
-        4. SettlementCoordinator: compute + settle + update → 激励结算
+        4. SettlementCoordinator: compute_contribution_scores() → 纯计算评分
         5. Bridge: _create_and_confirm_block() → Block打包 + 共识 + 追加
-        6. CooperationDetector: reset_episode() → 重置回合累积
+        6. SettlementCoordinator: settle + update → 激励结算（F02：仅区块确认后）
+        7. CooperationDetector: reset_episode() → 重置回合累积
 
         :return: Dict[str, float] 各智能体的本回合激励变化量（deltas）
         """
@@ -277,21 +277,42 @@ class BlockchainMARLBridge:
         for agent_id in agent_ids:
             coop_results[agent_id] = self._detector.get_episode_cooperation(agent_id)
 
-        # ── 4. 贡献度评分 + 激励结算 + 积分更新 ──
+        # ── 4. 贡献度评分（纯计算，不改任何状态）──
         scores = self._settlement.compute_contribution_scores(
             agent_ids, env_rewards, coop_results
         )
-        deltas = self._settlement.settle(episode, scores)
-        self._settlement.update_rewards_and_scores(deltas)
 
         # ── 5. Block打包 + CW-PBFT共识 + 链式追加 + 权重更新 ──
+        # F02（2026-11-02 赛后）：结算移到链上确认之后（"仅在网络最终确认后结算"）。
+        # 旧实现先 settle 后出块、共识/追加失败不回滚——交易拒收/出块失败不阻止
+        # 积分增加，收益支付语义脱离共识结果。现：无链/无共识模式（ablate）或
+        # 无待上链交易（无事可确认）照常结算；其余仅在区块确认后结算，失败时
+        # 清空本回合奖励（无需回滚任何状态——因为尚未写入）。
+        confirmed = True
         if self.bc_node is not None and self.cw_pbft is not None:
-            self._create_and_confirm_block(episode, scores)
+            confirmed = self._create_and_confirm_block(episode, scores)
+
+        # ── 5.5 激励结算（仅区块确认后；F02 原子语义）──
+        if confirmed:
+            deltas = self._settlement.settle(episode, scores)
+            self._settlement.update_rewards_and_scores(deltas)
+        else:
+            deltas = {}
+            self._settlement.clear_episode_rewards()
+            logger.warning(
+                f"[Bridge] Episode {episode} 区块未确认，本回合激励不结算（F02 原子语义）"
+            )
 
         # ── 6. P2-E：自适应λ更新（BC→MARL双向反馈）──
         # 基于本回合区块链性能指标动态调节λ（如果启用了自适应λ）
         if self._adaptive_lambda is not None:
             bridge_stats = self.get_stats()
+            # F01 契约修复（2026-11-02 赛后）：注入行为学真实合作率
+            # （CooperationDetector 判定，None=布局不可测不计数），
+            # 取代 adaptive_lambda._extract_coop_rate 的"正积分占比"近似
+            coop_judged = [v for v in coop_results.values() if v is not None]
+            if coop_judged:
+                bridge_stats['cooperation_rate'] = sum(1 for v in coop_judged if v) / len(coop_judged)
             new_lambda = self._adaptive_lambda.compute_adaptive_lambda(bridge_stats)
             self.lambda_weight = new_lambda
             self._settlement.lambda_weight = new_lambda
@@ -315,27 +336,31 @@ class BlockchainMARLBridge:
     # Block打包 + CW-PBFT共识（编排层保留，需访问跨组件资源）
     # -------------------------------------------------------------------------
 
-    def _create_and_confirm_block(self, episode: int, scores: List):
-        """Block打包 + CW-PBFT共识确认 + Blockchain链式追加 + 权重更新"""
+    def _create_and_confirm_block(self, episode: int, scores: List) -> bool:
+        """Block打包 + CW-PBFT共识确认 + Blockchain链式追加 + 权重更新
+
+        F02：返回 True=已确认（或无事可确认，此时结算不受共识结果约束），
+        False=区块未确认（调用方须跳过结算并清空本回合奖励）。
+        """
         if self.bc_node is None:
-            return
+            return True  # 无链模式（ablate）：结算不受区块结果约束（登记边界）
         pending_txs = self.bc_node.get_pending_transactions()
         if not pending_txs:
-            return
+            return True  # F02：无待上链交易 = 无事可确认，不存在确认失败路径
 
         block = self._build_block(episode, pending_txs)
         if block is None:
-            return
+            return False
 
         proposer = block.proposer
         self._sign_block(proposer, block)
         consensus_ok = self._run_consensus(episode, block, proposer)
         if not consensus_ok:
-            return
+            return False
 
         if not self.bc_node.append_block(block):
             logger.warning(f"[Bridge] Block #{block.block_height} 链式追加失败")
-            return
+            return False
 
         logger.info(f"[Bridge] Episode {episode}: Block #{block.block_height} 确认追加 "
                     f"| proposer={proposer} | txs={len(pending_txs)} "
@@ -343,23 +368,32 @@ class BlockchainMARLBridge:
                     f"| hash={block.block_hash[:16]}...")
 
         self._update_consensus_weights(scores)
+        return True
 
     def _build_block(self, episode, pending_txs):
-        """构建新区块"""
+        """构建新区块
+
+        2026-11-02 审查修复：state_root 语义统一为**交易 Merkle 根**
+        （与 Block.compute_state_root() / evidence_verifier 口径一致）。
+        此前生产路径把 state_root 写成"结算分哈希"，与 block.py 的 Merkle
+        语义分裂：既无法被重算校验，也无法承诺交易集合完整性。
+        现改为构造区块后调用 finalize()——由交易 tx_id 计算 Merkle 根并据其
+        重算 block_hash（签名在此之后进行，见 _sign_block）。
+        """
         from blockchain.ledger.block import Block
-        scores_for_root = self._settlement.get_bc_scores()
-        state_root = hashlib.sha256(json.dumps(scores_for_root, sort_keys=True).encode()).hexdigest()
         block_height = self.bc_node.height + 1
         previous_hash = self.bc_node.latest_block.block_hash
         if self.cw_pbft is not None:
             proposer = self.cw_pbft.get_primary(block_height)
         else:
             proposer = f"agent_{(episode - 1) % self.n_agents}"
-        return Block(
+        block = Block(
             block_height=block_height, previous_hash=previous_hash,
             timestamp=int(time.time() * 1000), proposer=proposer,
-            transactions=list(pending_txs), state_root=state_root, signature_hex="",
+            transactions=list(pending_txs), state_root="", signature_hex="",
         )
+        block.finalize()  # state_root = 交易 Merkle 根，并重算 block_hash
+        return block
 
     def _sign_block(self, proposer, block):
         """签名区块"""
@@ -375,7 +409,9 @@ class BlockchainMARLBridge:
         if self.use_p2p_consensus and self.p2p_network is not None:
             self._consensus_count += 1
             self._block_count += 1
-            ok = self.p2p_network.run_consensus(block.block_hash, primary_idx)
+            # F13 连带修正：run_consensus 第二参数现为 block_height（按高度轮换主节点），
+            # 位置传参的 primary_idx 会静默落进 block_height 形参
+            ok = self.p2p_network.run_consensus(block.block_hash, block_height=block.block_height)
             if not ok:
                 logger.warning(f"[Bridge] P2P网络共识失败: Block #{block.block_height}")
             return ok
@@ -418,6 +454,11 @@ class BlockchainMARLBridge:
                 continue  # 省略节点无共识层参与事件，权重仅由纪元展宽衰减
             w = (CWPBFTConsensus.WEIGHT_BASE
                  + CWPBFTConsensus.WEIGHT_GAIN * cs.weighted_score)
+            # F05（2026-11-02 赛后）：身份状态进入共识权重——封禁 0 / 降级按
+            # consensus_weight 缩放。此前世界状态的惩罚状态只写不读，封禁身份
+            # 仍带满权重投票（引擎对权重 0 不计票，故清零即真实禁入）。
+            if self.identity_contract is not None:
+                w *= self.identity_contract.get_consensus_weight(cs.agent_id)
             if self.cw_pbft is not None:
                 self.cw_pbft.update_weight(cs.agent_id, w)
             if self.use_p2p_consensus and self.p2p_network is not None:
@@ -537,8 +578,12 @@ class BlockchainMARLBridge:
             'ecdsa_verify_count': self._signing._verify_count,
             'security_pass_count': self._signing._security_pass_count,
             'security_fail_count': self._signing._security_fail_count,
-            # P2-E：自适应λ统计
-            'adaptive_lambda_stats': self._adaptive_lambda.get_stats(),
+            # P2-E：自适应λ统计（F01 修复：禁用自适应时 _adaptive_lambda 为 None，
+            # 此前无守卫直接调 get_stats() 抛 AttributeError，被 train.py 的宽捕获
+            # 吞掉后整套签名/链统计被改写为零值）
+            'adaptive_lambda_stats': (
+                self._adaptive_lambda.get_stats() if self._adaptive_lambda is not None else None
+            ),
             # 行为上链统计（来自 ActionRecorder）
             'tx_count': self._recorder._tx_count,
             # Block/共识统计（编排层）

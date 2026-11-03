@@ -6,7 +6,8 @@
 #      登记簿 glob 自动纳入；跑完必须重跑 verify_numbers.py 更新 declared 值。
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-export PY="C:/Users/Lenovo/AppData/Local/Programs/Python/Python312/python.exe"
+# Python 定位：优先环境变量 PY，否则回退 PATH 上的 python3/python（不写死本机路径，匿名合规）
+export PY="${PY:-$(command -v python3 || command -v python)}"
 export OUT=results/e14_expand_n20_20260930
 mkdir -p "$OUT"
 LOG="$OUT/run_all.log"

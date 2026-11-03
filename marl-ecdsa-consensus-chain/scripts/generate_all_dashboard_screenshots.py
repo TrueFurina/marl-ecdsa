@@ -16,7 +16,7 @@ BASE = Path(__file__).resolve().parent.parent
 OUT = BASE / 'ppt_screenshots'
 OUT.mkdir(exist_ok=True)
 
-# ---- 口径真值：从权威登记簿程序化读取，禁手抄（防 n=22→n=71 口径漂移复发）----
+# ---- 口径真值：从权威登记簿程序化读取，禁手抄（防 n=22→n=71→n=101 口径漂移复发）----
 def _registry_declared(nid, fallback):
     """读登记簿 declared；优先权威源（工作区 deliverables/），仓库镜像兜底。"""
     for cand in (BASE.parent / 'deliverables' / 'number_registry.json',
@@ -30,11 +30,34 @@ def _registry_declared(nid, fallback):
             continue
     return dict(fallback), 'fallback（登记簿不可读）'
 
-_CAL, _CAL_SRC = _registry_declared('NR-1', {
-    'improvement_pct': 28.17, 'welch_p': 0.009524, 'cohens_d': 0.4412,
-    'mean_a': -6.6584, 'sd_a': 6.0447, 'mean_b': -9.2703, 'sd_b': 5.7916, 'n_a': 71})
-_CAL3, _ = _registry_declared('NR-3', {
-    'improvement_pct': 1.95, 'mean_a': 0.6246, 'mean_b': 0.6127, 'n_a': 71})
+# 2026-10-17 主口径升级：NR-1(28.17/n=71) → NR-129（合并 n=101/组）；NR-3 → NR-135。
+# NR-129/135 declared 无 improvement_pct → 由合并均值派生相对提升；
+# 渲染处按材料口径位数取位（末50 1 位 / 合作率 2 位），并内置一致性断言防静默漂移。
+_CAL_RAW, _CAL_SRC = _registry_declared('NR-129', {
+    'mean_bc_all': -7.071, 'sd_bc_all': 5.9188,
+    'mean_pure_all': -9.5228, 'sd_pure_all': 5.8159,
+    'p_merged_env50': 0.00335, 'd_merged_env50': 0.4179})
+_CAL = {
+    'mean_a': _CAL_RAW['mean_bc_all'], 'sd_a': _CAL_RAW['sd_bc_all'],
+    'mean_b': _CAL_RAW['mean_pure_all'], 'sd_b': _CAL_RAW['sd_pure_all'],
+    'welch_p': _CAL_RAW['p_merged_env50'],
+    'cohens_d': _CAL_RAW['d_merged_env50'],
+    'improvement_pct': (_CAL_RAW['mean_bc_all'] - _CAL_RAW['mean_pure_all'])
+                       / abs(_CAL_RAW['mean_pure_all']) * 100.0,
+    'n_a': 101, 'n_b': 101,
+}
+_CAL3_RAW, _ = _registry_declared('NR-135', {
+    'mean_bc_all': 0.625, 'mean_pure_all': 0.6132,
+    'p_merged': 1.5040080868798247e-14})
+_CAL3 = {
+    'mean_a': _CAL3_RAW['mean_bc_all'], 'mean_b': _CAL3_RAW['mean_pure_all'],
+    'improvement_pct': (_CAL3_RAW['mean_bc_all'] - _CAL3_RAW['mean_pure_all'])
+                       / abs(_CAL3_RAW['mean_pure_all']) * 100.0,
+    'n_a': 101, 'n_b': 101,
+}
+# 口径锚定断言（防静默漂移；不符即中止出错图）
+assert f"{_CAL['improvement_pct']:.1f}" == '25.7', 'NR-129 派生提升与材料口径不符'
+assert f"{_CAL3['improvement_pct']:.2f}" == '1.92', 'NR-135 派生提升与材料口径不符'
 
 # 加载数据
 PLOT_DIR = BASE / 'plots'
@@ -64,7 +87,7 @@ if bc and not bc.get('episodes_rewards'):
 if selfish and not selfish.get('episodes_rewards'):
     selfish = load_json('smoke_test_results.json') or selfish
 
-# ---- 回退数据源：results/convergence_3000 聚合（诚实口径，n=71 收敛验证，登记簿 NR-1）----
+# ---- 回退数据源：results/convergence_3000 聚合（诚实口径；n=71 逐回合曲线仅示训练过程，口径数字见 NR-129/134/135）----
 def _agg_convergence(prefix):
     """把 results/convergence_3000/<prefix>_seed*.json 逐回合聚合为一条平均曲线。"""
     import glob as _glob
@@ -135,7 +158,7 @@ ax.text(7, 6.0, 'Blockchain-AI Collaborative Consensus for Multi-Agent Reinforce
 
 # 数据卡片
 metrics = [
-    (f"+{_CAL['improvement_pct']:.2f}%", 'BC env_reward 提升', '#22c55e'),
+    (f"+{_CAL['improvement_pct']:.1f}%", 'BC env_reward 提升', '#22c55e'),
     ('3000', '总训练回合', '#3b82f6'),
     ('3', '协同智能体数', '#f59e0b'),
     ('1,000', 'CW-PBFT 共识轮次', '#818cf8'),
@@ -163,10 +186,10 @@ for j, h in enumerate(headers):
 
 # 数据行
 rows = [
-    ['后50回合 env_reward', f"{_CAL['mean_b']:.2f}±{_CAL['sd_b']:.2f}", f"{_CAL['mean_a']:.2f}±{_CAL['sd_a']:.2f}", '—', f"+{_CAL['improvement_pct']:.2f}%"],
+    ['后50回合 env_reward', f"{_CAL['mean_b']:.2f}±{_CAL['sd_b']:.2f}", f"{_CAL['mean_a']:.2f}±{_CAL['sd_a']:.2f}", '—', f"+{_CAL['improvement_pct']:.1f}%"],
     ['合作率(全程)', f"{_CAL3['mean_b']*100:.1f}%", f"{_CAL3['mean_a']*100:.1f}%", '—', f"+{_CAL3['improvement_pct']:.2f}%"],
     ['背叛率', '0%', '0%', '—', '—'],
-    ['Welch p-value', f"{_CAL['welch_p']:.4f}", '-', '-', f"BH-FDR显著(n={_CAL['n_a']})"],
+    ['Welch p-value', f"{_CAL['welch_p']:.5f}", '-', '-', f"三校正均显著(n={_CAL['n_a']})"],
 ]
 for i, row in enumerate(rows):
     y = 1.8 - i * 0.35
@@ -183,7 +206,7 @@ for i, row in enumerate(rows):
 
 # 底部提示
 ax.text(7, 0.2, f'注：数据基于 {_CAL["n_a"]} 种子 × 3000 回合 收敛验证（env_reward 公平口径，末50回合，不含BC激励）；'
-                f'Welch p={_CAL["welch_p"]:.4f}（BH-FDR 显著 / Bonferroni 下不显著），须与全程口径 NR-2（+7.92%，p<1e-10）同报；'
+                f'Welch p={_CAL["welch_p"]:.5f}（Bonferroni、BH-FDR、Holm 下均显著），须与全程口径 NR-134（+7.70%，p<1e-10）同报；'
                 f'口径出处：{_CAL_SRC}', fontsize=8,
         color='#64748b', ha='center', va='center')
 
@@ -276,7 +299,7 @@ ax.text(7, 7.5, '对比分析 — Pure MARL vs BC-MARL', fontsize=18, fontweight
 
 # 三列卡片
 # 【口径修复 2026-09-29】原为硬编码 '-8.64'/'-6.12'（n=22 旧口径，源自 _CAL_SRC 之外的漏网手抄）
-# 现改为从登记簿 NR-1 程序化取数：mean_a=BC-MARL、mean_b=Pure-MARL（n=71 终局全样本）
+# 现改为从登记簿 NR-129 程序化取数：mean_a=BC-MARL、mean_b=Pure-MARL（合并 n=101/组）
 cards = [
     ('Pure MARL', f"{_CAL['mean_b']:.2f}", '#ef4444', ['无区块链激励', '纯环境奖励驱动', '信用分配困难', '收敛较慢']),
     ('BC-MARL', f"{_CAL['mean_a']:.2f}", '#22c55e', ['ECDSA签名认证', 'CW-PBFT共识', '贡献度加权奖励', '协作塑形趋势']),
@@ -311,7 +334,7 @@ fig.patch.set_facecolor('#040810')
 
 ax.text(7, 7.5, '三模式训练对比 — 详细数据', fontsize=18, fontweight='bold', color='#f1f5f9', ha='center')
 
-# 柱状图模拟（诚实口径：仅 BC / Pure 具备收敛数据；均值±std 取自登记簿 NR-1）
+# 柱状图模拟（诚实口径：仅 BC / Pure 具备收敛数据；均值±std 取自登记簿 NR-129）
 modes = ['Pure\nMARL', 'BC-MARL']
 means = [_CAL['mean_b'], _CAL['mean_a']]
 stds = [_CAL['sd_b'], _CAL['sd_a']]
@@ -325,7 +348,7 @@ for x, mean, std, color in zip(bars_x, means, stds, colors_bar):
     rect = mpatches.FancyBboxPatch((x-0.6, 2), 1.2, h, boxstyle="round,pad=0.05",
                                     facecolor=color, alpha=0.3, edgecolor=color, linewidth=2)
     ax.add_patch(rect)
-    ax.text(x, 2 + h + 0.2, f'{mean:.1f}±{std:.1f}', fontsize=12, ha='center', va='bottom', 
+    ax.text(x, 2 + h + 0.2, f'{mean:.2f}±{std:.2f}', fontsize=12, ha='center', va='bottom', 
             color=color, fontweight='bold')
     ax.text(x, 1.5, modes[bars_x.index(x)], fontsize=11, ha='center', va='center', color='#94a3b8')
 
@@ -338,7 +361,7 @@ ax.text(0.5, 4.5, '平均奖励', fontsize=9, color='#64748b', ha='center', va='
 
 # 统计显著性标注（诚实口径）
 ax.annotate('', xy=(9, 6.5), xytext=(5, 6.5), arrowprops=dict(arrowstyle='->', color='#22c55e', lw=1.5))
-ax.text(7, 6.7, f'Welch p={_CAL["welch_p"]:.4f} (n={_CAL["n_a"]}, BH-FDR显著/Bonferroni不显著)',
+ax.text(7, 6.7, f'Welch p={_CAL["welch_p"]:.5f} (n={_CAL["n_a"]}, Bonferroni/BH-FDR/Holm 均显著)',
         fontsize=10, ha='center', color='#22c55e', fontweight='bold')
 
 fig.savefig(OUT / 'dashboard_tri.png', dpi=150, bbox_inches='tight', facecolor='#040810')
@@ -438,10 +461,10 @@ ax.set_ylim(0, 8)
 ax.axis('off')
 fig.patch.set_facecolor('#040810')
 
-ax.text(7, 7.5, 'P2P 网络 — 纯去中心化共识演示', fontsize=18, fontweight='bold', color='#f1f5f9', ha='center')
+ax.text(7, 7.82, 'P2P 网络 — 纯去中心化共识演示', fontsize=18, fontweight='bold', color='#f1f5f9', ha='center')
 
-# 3节点拓扑
-nodes = [(4, 5), (10, 5), (7, 7.5)]
+# 3节点拓扑（下移避免与标题重叠）
+nodes = [(4, 4.55), (10, 4.55), (7, 6.6)]
 labels = ['Node-0\n(Primary)', 'Node-1\n(Replica)', 'Node-2\n(Replica)']
 colors = ['#22c55e', '#3b82f6', '#f59e0b']
 for (x, y), label, color in zip(nodes, labels, colors):

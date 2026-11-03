@@ -30,6 +30,7 @@ class PrimaryStatus(str, Enum):
     TIMEOUT = "timeout"
     BYZANTINE = "byzantine"
     OFFLINE = "offline"
+    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -65,13 +66,7 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
         self._primary_status: Dict[str, PrimaryStatus] = {
             nid: PrimaryStatus.HEALTHY for nid in consensus_nodes
         }
-        # 11-03 修复：心跳表在构造时以「当前时刻」初始化，而不是留空。
-        # 空表 + `get(primary_id, 0)` 的缺省值 0 会被当成「纪元 0 发过心跳」，
-        # 于是 `now_ms - 0 > HEARTBEAT_TIMEOUT_MS` 恒真 —— 从未发过心跳的节点
-        # 一律被判超时（详见 check_primary_health 的说明）。
-        self._last_heartbeat: Dict[str, int] = {
-            nid: int(time.time() * 1000) for nid in consensus_nodes
-        }
+        self._last_heartbeat: Dict[str, int] = {}
         self._failover_history: List[FailoverRecord] = []
         self._view_change_count: int = 0
         self._current_view: int = 0
@@ -94,29 +89,36 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
     def check_primary_health(self, primary_id: str) -> PrimaryStatus:
         """Check if the current primary is healthy.
 
-        11-03 修复：心跳缺省值 0 曾被当成「纪元 0 发过心跳」，于是
-        `now_ms - 0 > HEARTBEAT_TIMEOUT_MS` 恒真 —— **从未发过心跳的节点一律
-        被判超时**。后果：全新引擎的第一轮（以及模拟循环里的每一轮，因为没人
-        补心跳）都会触发一次虚假视图切换，故障切换统计因此与真实拜占庭事件
-        完全脱钩。实测 20 轮只注入 3 次拜占庭，却报告 20 次 failover（100%）。
+        2026-11-02 审查修复：此前 `last_hb` 缺省为 0，`now_ms - 0` 恒大于
+        HEARTBEAT_TIMEOUT_MS，于是**任何从未收到过心跳的节点一律被判 TIMEOUT**——
+        包括刚初始化、尚未来得及记录首拍心跳的合法主节点，从而在无任何故障的
+        情况下凭空触发视图更换（自测标题写 "Normal consensus (no failover)"，
+        实际却必走 failover 分支，输出与注释相悖）。
 
-        现在的语义：从未收到心跳 = **监控刚开始**，记为当前时刻并按健康处理，
-        给一个 HEARTBEAT_TIMEOUT_MS 的宽限期；宽限期后仍无心跳才判超时。
+        现区分三态：
+        - 从未收到心跳 → UNKNOWN（信息缺失 ≠ 故障，不得据此判失败）；
+        - 收到过但已超时 → TIMEOUT；
+        - 心跳新鲜 → HEALTHY。
         """
         now_ms = int(time.time() * 1000)
 
         if primary_id in self._byzantine_primaries:
             return PrimaryStatus.BYZANTINE
 
-        last_hb = self._last_heartbeat.get(primary_id)
-        if last_hb is None:
-            # 未纳入监控（例如运行期新加入的节点）：从此刻开始计时并视为健康
-            self._last_heartbeat[primary_id] = now_ms
-            if primary_id in self._primary_status:
-                self._primary_status[primary_id] = PrimaryStatus.HEALTHY
-            return PrimaryStatus.HEALTHY
+        # 已被其他逻辑显式标记为故障（如 simulated_consensus_with_failover 的
+        # simulate_timeout / 手工置 OFFLINE）→ 直接尊重该标记，不被"无心跳"覆盖。
+        marked = self._primary_status.get(primary_id)
+        if marked in (PrimaryStatus.TIMEOUT, PrimaryStatus.BYZANTINE,
+                      PrimaryStatus.OFFLINE):
+            return marked
 
-        if now_ms - last_hb > self.HEARTBEAT_TIMEOUT_MS:
+        if primary_id not in self._last_heartbeat:
+            # 从未收到心跳：只代表"没信息"，不代表节点已故障。刻意不改写
+            # _primary_status，保持 HEALTHY，使 view change 的候选筛选
+            # 仍把该节点当作可信任候选，避免因缺信息而误剔除。
+            return PrimaryStatus.UNKNOWN
+
+        if now_ms - self._last_heartbeat[primary_id] > self.HEARTBEAT_TIMEOUT_MS:
             self._primary_status[primary_id] = PrimaryStatus.TIMEOUT
             return PrimaryStatus.TIMEOUT
 
@@ -261,7 +263,10 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
         health = self.check_primary_health(proposer)
 
         # Step 2: If primary unhealthy, trigger view change
-        if health != PrimaryStatus.HEALTHY:
+        # 仅在"存在故障证据"时切换：UNKNOWN（无心跳记录，信息缺失）不触发，
+        # 否则会在无任何故障时凭空产生 failover 记录，污染 failover 统计口径。
+        if health in (PrimaryStatus.TIMEOUT, PrimaryStatus.BYZANTINE,
+                      PrimaryStatus.OFFLINE):
             failover_start = time.perf_counter()
             reason = f"primary_{health.value}"
             new_primary = self.trigger_view_change(proposer, reason)
@@ -398,10 +403,7 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
     def reset_failover_state(self):
         """Reset failover state (for test repeatability)."""
         self._primary_status = {nid: PrimaryStatus.HEALTHY for nid in self.consensus_nodes}
-        # 重置后重新开始计时（清空会把「从未发心跳」重新变成超时，见 check_primary_health）
-        self._last_heartbeat = {
-            nid: int(time.time() * 1000) for nid in self.consensus_nodes
-        }
+        self._last_heartbeat.clear()
         self._failover_history.clear()
         self._view_change_count = 0
         self._current_view = 0

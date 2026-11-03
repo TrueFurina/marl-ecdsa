@@ -16,7 +16,8 @@
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-export PY="C:/Users/Lenovo/AppData/Local/Programs/Python/Python312/python.exe"
+# Python 定位：优先环境变量 PY，否则回退 PATH 上的 python3/python（不写死本机路径，匿名合规）
+export PY="${PY:-$(command -v python3 || command -v python)}"
 export OUT=results/dispatch_20260921
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4

@@ -1,4 +1,4 @@
-"""启动可视化平台 v3.9 - 共识投票 + 区块浏览器增强版（Werkzeug 直启）"""
+"""启动 MARL-ECDSA V27：协作训练、贡献治理、可信共识与证据审计。"""
 import sys
 
 from visualization.dashboard import _create_app
@@ -6,8 +6,8 @@ from visualization.dashboard import _create_app
 PORT = 9090
 
 print(f"\n{'='*60}")
-print(f"  MARL-ECDSA 共识链 — 全功能可视化平台 v3.9（共识投票+区块浏览器增强版）")
-print(f"  数据预加载 · 三模式对比 · 区块链流水线 · 攻防演示 · 演示模式(P键)")
+print(f"  MARL-ECDSA 共识链 — V27 可信协作治理平台")
+print(f"  协作训练 · 贡献治理 · 三节点可信共识 · 证据审计")
 print(f"  请在浏览器中打开: http://127.0.0.1:{PORT}")
 print(f"  Ctrl+C 退出")
 print(f"{'='*60}\n")

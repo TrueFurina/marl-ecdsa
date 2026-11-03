@@ -36,7 +36,8 @@ class TestBCRewardBoundary:
         """weighted_score>1 的越界输入：合作奖励仍按公式计算（不崩溃）"""
         v = NashEquilibriumVerifier()
         reward = v.compute_bc_reward(COOPERATE, weighted_score=1.5)
-        assert reward == 10.0 + 5.0 * 1.5
+        from blockchain.contracts.incentive_contract import IncentiveContract
+        assert reward == 10.0 + IncentiveContract.CONTRIB_GAIN * 1.5  # F16 对齐
 
     def test_weighted_score_negative(self):
         """weighted_score<0 的越界输入：不崩溃，返回合法值"""

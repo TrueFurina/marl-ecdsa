@@ -1,0 +1,42 @@
+[
+  {
+    "case": "C1_false_commitment",
+    "attack_successful": true,
+    "commit_signature_valid": true,
+    "rounds_blocked": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "note": "承诺绑定防中途改口，不防开局撒谎；无任何机制校验开局承诺的真伪",
+    "reachability": "real"
+  },
+  {
+    "case": "C2_subliminal_persistent",
+    "attack_successful": true,
+    "packages_sent": 100,
+    "fail_count": 0,
+    "risk_levels_seen": [
+      "NORMAL"
+    ],
+    "note": "fail_count 只统计安全检测失败，不统计作恶成功；MAX_FAIL_COUNT 形同虚设",
+    "reachability": "amplifier"
+  },
+  {
+    "case": "C3_omit_r",
+    "attack_successful": true,
+    "control_blocked": true,
+    "note": "security_guard.py:111-112 `if r is None: return True`。可达性受限于 sign_action 自动 extract_rs 填 r：攻击者须绕过签名服务直接构造包才能省略 r，且收益仅是让'私钥泄露检测'失效（伤害检测机制本身而非系统安全），故列为纵深缺口，不计入实时漏洞。",
+    "reachability": "depth_gap"
+  },
+  {
+    "case": "C4_fifo_eviction",
+    "attack_successful": true,
+    "max_r_entries": 1000,
+    "packages_to_evict": 1002,
+    "note": "r_registry 有上限，淘汰后历史 r 不再受检；攻击成本 = MAXN+2 个合法包",
+    "reachability": "depth_gap"
+  }
+]

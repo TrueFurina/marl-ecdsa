@@ -4,7 +4,7 @@ Nash均衡验证器 — 博弈论证明BC激励机制使合作成为优势策略
 核心定理
 ========
 在区块链辅助多智能体强化学习(BC-MARL)框架中，当激励参数满足
-λ ≥ λ_min 且背叛惩罚倍数 ≥ β_min 时，合作(C)是严格优势策略
+λ > λ_min 且背叛惩罚倍数 > β_min 时，合作(C)是严格优势策略（边界 λ=λ_min 处收益差为 0，仅弱优势）
 (strict dominant strategy)，(C,C)构成唯一Nash均衡。
 
 证明路径
@@ -97,8 +97,8 @@ class NashEquilibriumVerifier:
     """
     Nash均衡验证器 — 证明BC激励机制使合作成为优势策略
 
-    核心定理：在λ ≥ λ_min 且 BC惩罚倍数 ≥ β_min 的条件下，
-    合作是严格优势策略(strict dominant strategy)。
+    核心定理：在λ > λ_min 且 BC惩罚倍数 > β_min 的条件下，
+    合作是严格优势策略(strict dominant strategy)；边界处(λ=λ_min)仅为弱优势。
 
     证明路径：
     1. 定义博弈收益矩阵
@@ -112,7 +112,7 @@ class NashEquilibriumVerifier:
         lambda_weight: float = 0.1,
         base_reward: float = 10.0,
         betrayal_penalty_mult: float = 2.0,
-        top_tier_bonus: float = 5.0,
+        top_tier_bonus: float = 10.0,  # F16 对齐（2026-11-02 赛后）：与 IncentiveContract.CONTRIB_GAIN=10 同源，消除 5/10 系数漂移
     ) -> None:
         """
         初始化验证器
@@ -299,11 +299,7 @@ class NashEquilibriumVerifier:
         mixed_c = p_opp * payoff_matrix[0, 0] + (1 - p_opp) * payoff_matrix[0, 1]
         mixed_d = p_opp * payoff_matrix[1, 0] + (1 - p_opp) * payoff_matrix[1, 1]
         indifferent = abs(mixed_c - mixed_d) < 1e-8
-        # 对称博弈中双方混合概率相同：p_me 必须与 p_opp 用同一个公式。
-        # 旧实现用 (M[1,0]-M[1,1])/denom，当 M[0,1] != M[1,0]（如鹰鸽/猎鹿）时会
-        # 算出 >1 或 0 的无效值，导致**混合策略均衡被漏报**（实测鹰鸽 p=0.5、
-        # 猎鹿 p=0.75 都被判成非均衡）。
-        p_me = (payoff_matrix[0, 1] - payoff_matrix[1, 1]) / denom
+        p_me = (payoff_matrix[1, 0] - payoff_matrix[1, 1]) / denom
         p_me_valid = 0.0 < p_me < 1.0
         proof = (f"混合策略均衡: 对方以p={p_opp:.4f}选合作，我以p={p_me:.4f}选合作; "
                  f"C期望={mixed_c:.4f}, D期望={mixed_d:.4f}, 无差异={indifferent}"

@@ -16,7 +16,8 @@ logging.basicConfig(level=logging.CRITICAL)
 def client():
     app = _create_app()
     assert app is not None, "Flask 应用创建失败"
-    return app.test_client()
+    from tests.conftest import make_auth_client
+    return make_auth_client(app.test_client(), 'f08_atkapi')
 
 
 class TestAttackInjectAPI:

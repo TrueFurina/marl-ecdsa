@@ -1,0 +1,729 @@
+{
+  "params": {
+    "n_agents": 3,
+    "n_landmarks": 3,
+    "threshold": 0.5,
+    "dt": 1.0,
+    "v_max": 0.3,
+    "n_steps": 200,
+    "seeds": [
+      11,
+      23,
+      37,
+      41,
+      53
+    ],
+    "landmarks": [
+      [
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ],
+    "start": [
+      0.0,
+      0.0
+    ],
+    "s1_restarts": 4,
+    "surrogate_seed": 707,
+    "surrogate_queries": 8000,
+    "surrogate_val_queries": 2000,
+    "surrogate_max_depth": 8,
+    "grid": [
+      -0.5,
+      2.0,
+      0.05
+    ]
+  },
+  "design_flaw_v1": {
+    "claim": "v1 试图区分迁移(rule 反馈) vs 定向(ml 反馈)——空区分",
+    "reason": "run_adaptive 判定无关：反馈源即 judge_fn，mm 与 rm 同函数同参数",
+    "evidence": "mm≡rm、mr≡rr 逐位相等（5 种子 + 20 扩种，recovery 恒 0.0000）",
+    "caught_by": "预注册 C2 能力闸门（死攻击者证明不了防御）",
+    "correction": "盲区实验 ml_L2_adaptive 臂已是在线适应 ML；真实问题是搜索类上限"
+  },
+  "prior_readings": {
+    "adaptive_rule": 0.6729999999999999,
+    "adaptive_ml": 0.487,
+    "random_rule": 0.184,
+    "random_ml": 0.132,
+    "l1_ml": 0.9949999999999999,
+    "heldout": 0.9879,
+    "trusted_cells": 560,
+    "classifier": "ExtraTreesClassifier"
+  },
+  "model_fingerprint_ok": true,
+  "ml_defender": {
+    "trained": true,
+    "train_samples": 9600,
+    "heldout_samples": 2400,
+    "train_accuracy": 0.9882,
+    "heldout_accuracy": 0.9879,
+    "classifier": "ExtraTreesClassifier",
+    "benign_diag": {
+      "off_manifold_samples": 0,
+      "total_samples": 12000,
+      "off_manifold_frac": 0.0,
+      "label_positive_frac": 0.988167
+    },
+    "versions": {
+      "python": "3.13.14",
+      "numpy": "2.5.4",
+      "sklearn": "1.9.1",
+      "scipy": "1.18.1"
+    }
+  },
+  "trusted_cells": 560,
+  "surrogate": {
+    "classifier": "ExtraTreesClassifier(surrogate)",
+    "max_depth": 8,
+    "train_queries": 8000,
+    "train_positive_frac": 0.22775,
+    "val_queries": 2000,
+    "agreement": 0.9625,
+    "trusted_cells": 575,
+    "target_fidelity": 0.906087,
+    "target": [
+      0.6000000000000001,
+      0.0
+    ],
+    "target_real_trusted": true
+  },
+  "runs": {
+    "rr_adaptive": [
+      {
+        "seed": 11,
+        "coop_rate": 0.825,
+        "first_hit_step": 2,
+        "best_pos": [
+          1.3676,
+          0.3138
+        ]
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.845,
+        "first_hit_step": 1,
+        "best_pos": [
+          0.1315,
+          1.0506
+        ]
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.765,
+        "first_hit_step": 12,
+        "best_pos": [
+          -0.0328,
+          1.1735
+        ]
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.175,
+        "first_hit_step": 158,
+        "best_pos": [
+          1.0477,
+          0.4302
+        ]
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.755,
+        "first_hit_step": 17,
+        "best_pos": [
+          1.0075,
+          0.627
+        ]
+      }
+    ],
+    "rm_adaptive": [
+      {
+        "seed": 11,
+        "coop_rate": 0.78,
+        "first_hit_step": 2,
+        "best_pos": [
+          1.3223,
+          0.3184
+        ]
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.81,
+        "first_hit_step": 1,
+        "best_pos": [
+          0.6271,
+          -0.025
+        ]
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.125,
+        "first_hit_step": 167,
+        "best_pos": [
+          0.711,
+          -0.0251
+        ]
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.175,
+        "first_hit_step": 158,
+        "best_pos": [
+          1.0477,
+          0.4302
+        ]
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.545,
+        "first_hit_step": 30,
+        "best_pos": [
+          0.1467,
+          1.0188
+        ]
+      }
+    ],
+    "mm_adaptive": [
+      {
+        "seed": 11,
+        "coop_rate": 0.78,
+        "first_hit_step": 2,
+        "best_pos": [
+          1.3223,
+          0.3184
+        ]
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.81,
+        "first_hit_step": 1,
+        "best_pos": [
+          0.6271,
+          -0.025
+        ]
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.125,
+        "first_hit_step": 167,
+        "best_pos": [
+          0.711,
+          -0.0251
+        ]
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.175,
+        "first_hit_step": 158,
+        "best_pos": [
+          1.0477,
+          0.4302
+        ]
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.545,
+        "first_hit_step": 30,
+        "best_pos": [
+          0.1467,
+          1.0188
+        ]
+      }
+    ],
+    "mr_adaptive": [
+      {
+        "seed": 11,
+        "coop_rate": 0.825,
+        "first_hit_step": 2,
+        "best_pos": [
+          1.3676,
+          0.3138
+        ]
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.845,
+        "first_hit_step": 1,
+        "best_pos": [
+          0.1315,
+          1.0506
+        ]
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.765,
+        "first_hit_step": 12,
+        "best_pos": [
+          -0.0328,
+          1.1735
+        ]
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.175,
+        "first_hit_step": 158,
+        "best_pos": [
+          1.0477,
+          0.4302
+        ]
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.755,
+        "first_hit_step": 17,
+        "best_pos": [
+          1.0075,
+          0.627
+        ]
+      }
+    ],
+    "s1_restarts": [
+      {
+        "seed": 11,
+        "coop_rate": 0.77,
+        "first_hit_step": 4,
+        "restart_seeds": [
+          11013,
+          11110,
+          11207,
+          11304
+        ],
+        "restart_coop_rates": [
+          0.77,
+          0.54,
+          0.425,
+          0.63
+        ]
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.745,
+        "first_hit_step": 1,
+        "restart_seeds": [
+          23013,
+          23110,
+          23207,
+          23304
+        ],
+        "restart_coop_rates": [
+          0.745,
+          0.0,
+          0.695,
+          0.49
+        ]
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.745,
+        "first_hit_step": 11,
+        "restart_seeds": [
+          37013,
+          37110,
+          37207,
+          37304
+        ],
+        "restart_coop_rates": [
+          0.0,
+          0.245,
+          0.0,
+          0.745
+        ]
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.665,
+        "first_hit_step": 10,
+        "restart_seeds": [
+          41013,
+          41110,
+          41207,
+          41304
+        ],
+        "restart_coop_rates": [
+          0.57,
+          0.0,
+          0.665,
+          0.59
+        ]
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.725,
+        "first_hit_step": 4,
+        "restart_seeds": [
+          53013,
+          53110,
+          53207,
+          53304
+        ],
+        "restart_coop_rates": [
+          0.725,
+          0.0,
+          0.0,
+          0.61
+        ]
+      }
+    ],
+    "s2_surrogate": [
+      {
+        "seed": 11,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.6000000000000001,
+          0.0
+        ]
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.6000000000000001,
+          0.0
+        ]
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.6000000000000001,
+          0.0
+        ]
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.6000000000000001,
+          0.0
+        ]
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.6000000000000001,
+          0.0
+        ]
+      }
+    ],
+    "s3_whitebox": [
+      {
+        "seed": 11,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.55,
+          0.0
+        ]
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.55,
+          0.0
+        ]
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.55,
+          0.0
+        ]
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.55,
+          0.0
+        ]
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.995,
+        "first_hit_step": 1,
+        "target": [
+          0.55,
+          0.0
+        ]
+      }
+    ],
+    "random_rule": [
+      {
+        "seed": 11,
+        "coop_rate": 0.0,
+        "first_hit_step": null
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.05,
+        "first_hit_step": 4
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.39,
+        "first_hit_step": 2
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.29,
+        "first_hit_step": 18
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.19,
+        "first_hit_step": 34
+      }
+    ],
+    "random_ml": [
+      {
+        "seed": 11,
+        "coop_rate": 0.0,
+        "first_hit_step": null
+      },
+      {
+        "seed": 23,
+        "coop_rate": 0.01,
+        "first_hit_step": 11
+      },
+      {
+        "seed": 37,
+        "coop_rate": 0.185,
+        "first_hit_step": 8
+      },
+      {
+        "seed": 41,
+        "coop_rate": 0.28,
+        "first_hit_step": 50
+      },
+      {
+        "seed": 53,
+        "coop_rate": 0.185,
+        "first_hit_step": 34
+      }
+    ]
+  },
+  "invariants": {
+    "mm_equiv_rm": true,
+    "mr_equiv_rr": true
+  },
+  "aggregate": {
+    "ada_rr": 0.6729999999999999,
+    "ada_rm": 0.487,
+    "ada_mm": 0.487,
+    "ada_mr": 0.6729999999999999,
+    "s1": 0.73,
+    "s2": 0.9949999999999999,
+    "s3": 0.9949999999999999,
+    "rnd_rule": 0.184,
+    "rnd_ml": 0.132,
+    "wins_s1": 5,
+    "wins_s2": 5,
+    "prior_adaptive_ml": 0.487,
+    "prior_l1_ml": 0.9949999999999999,
+    "model_fp_ok": true,
+    "surrogate_agreement": 0.9625,
+    "surrogate_target_real_trusted": true
+  },
+  "checks": {
+    "D0_instrument": true,
+    "D1_random_not_full": true,
+    "D2_capability": true
+  },
+  "advantage_s1": 0.598,
+  "advantage_s2": 0.8629999999999999,
+  "best_strong": 0.9949999999999999,
+  "verdict": "🔴 更强攻击类恢复利用（S1=0.7300 / S2=0.9950 vs S0=0.4870）⇒ 0.4870 是 v3 搜索类上限而非 ML 稳健性",
+  "supplementary_sweep": {
+    "n_seeds": 20,
+    "post_registration": true,
+    "seeds": [
+      11,
+      23,
+      37,
+      41,
+      53,
+      61,
+      67,
+      71,
+      73,
+      79,
+      83,
+      89,
+      97,
+      101,
+      103,
+      107,
+      109,
+      113,
+      127,
+      131
+    ],
+    "rates": {
+      "rm_adaptive": [
+        0.78,
+        0.81,
+        0.125,
+        0.175,
+        0.545,
+        0.705,
+        0.71,
+        0.0,
+        0.54,
+        0.525,
+        0.74,
+        0.705,
+        0.235,
+        0.42,
+        0.285,
+        0.625,
+        0.69,
+        0.765,
+        0.675,
+        0.0
+      ],
+      "s1_restarts": [
+        0.77,
+        0.745,
+        0.745,
+        0.665,
+        0.725,
+        0.81,
+        0.755,
+        0.815,
+        0.725,
+        0.8,
+        0.67,
+        0.665,
+        0.365,
+        0.765,
+        0.79,
+        0.8,
+        0.825,
+        0.755,
+        0.81,
+        0.755
+      ],
+      "s2_surrogate": [
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995,
+        0.995
+      ],
+      "random_ml": [
+        0.0,
+        0.01,
+        0.185,
+        0.28,
+        0.185,
+        0.0,
+        0.035,
+        0.11,
+        0.03,
+        0.045,
+        0.01,
+        0.005,
+        0.045,
+        0.185,
+        0.135,
+        0.09,
+        0.03,
+        0.0,
+        0.0,
+        0.03
+      ]
+    },
+    "rm_adaptive_mean": 0.5028,
+    "rm_adaptive_se": 0.0604,
+    "s1_restarts_mean": 0.7378,
+    "s1_restarts_se": 0.0225,
+    "s2_surrogate_mean": 0.995,
+    "s2_surrogate_se": 0.0,
+    "random_ml_mean": 0.0705,
+    "random_ml_se": 0.0184,
+    "paired_s1_gain": [
+      -0.01,
+      -0.065,
+      0.62,
+      0.49,
+      0.18,
+      0.105,
+      0.045,
+      0.815,
+      0.185,
+      0.275,
+      -0.07,
+      -0.04,
+      0.13,
+      0.345,
+      0.505,
+      0.175,
+      0.135,
+      -0.01,
+      0.135,
+      0.755
+    ],
+    "paired_s1_gain_mean": 0.235,
+    "paired_s1_gain_se": 0.0602,
+    "s1_gain_wins": 15,
+    "paired_s2_gain": [
+      0.215,
+      0.185,
+      0.87,
+      0.82,
+      0.45,
+      0.29,
+      0.285,
+      0.995,
+      0.455,
+      0.47,
+      0.255,
+      0.29,
+      0.76,
+      0.575,
+      0.71,
+      0.37,
+      0.305,
+      0.23,
+      0.32,
+      0.995
+    ],
+    "paired_s2_gain_mean": 0.4923,
+    "paired_s2_gain_se": 0.0604,
+    "s2_gain_wins": 20
+  }
+}

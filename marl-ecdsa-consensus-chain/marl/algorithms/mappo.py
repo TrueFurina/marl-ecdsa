@@ -68,22 +68,6 @@ class MAPPOBuffer:
         return eps
 
 
-def _critic_targets(returns, n_agents: int, T: int) -> np.ndarray:
-    """Critic 的回归目标：逐时间步的团队回报，长度必须等于 v_pred 的 T。
-
-    历史 bug（2026-11-02）：曾用 ``np.repeat(returns, n_agents)[:T]``。
-    n_agents>1 时那是 ``[r0,r0,r1,...]``（agent 维重复后截断），与逐时间步的
-    v_pred 错位，critic 学到的是错位的目标。正确目标就是 returns 本身
-    （每个时间步一个团队回报）。
-
-    抽成模块级函数是为了能在无 PyTorch 的环境下单独回归这条形状不变量。
-    """
-    arr = np.asarray(returns, dtype=np.float32).reshape(-1)
-    if arr.shape[0] != T:
-        raise ValueError(f"returns 长度 {arr.shape[0]} != 时间步 T={T}")
-    return arr
-
-
 if HAS_TORCH:
 
     class MAPPOActor(nn.Module):
@@ -282,6 +266,7 @@ if HAS_TORCH:
                     if len(obs_flat) == 0:
                         continue
                     adv_flat = np.repeat(adv, self.n_agents)
+                    ret_flat = np.repeat(returns, self.n_agents)
 
                     obs_arr = obs_flat.reshape(T, self.n_agents, -1)
                     # 逐智能体前向（权重不同）
@@ -314,8 +299,7 @@ if HAS_TORCH:
 
                     v_pred = self.critic(torch.FloatTensor(
                         np.array(ep['states'], dtype=np.float32)))
-                    critic_loss = ((v_pred - torch.FloatTensor(
-                        _critic_targets(returns, self.n_agents, T))) ** 2).mean()
+                    critic_loss = ((v_pred - torch.FloatTensor(ret_flat[:T])) ** 2).mean()
 
                     self.actor_opt.zero_grad()
                     actor_loss.backward()

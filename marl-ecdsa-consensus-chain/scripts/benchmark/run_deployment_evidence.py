@@ -136,7 +136,12 @@ def _real_tps_bench(num_blocks=200, txs_per_block=20, n_agents=5):
 
     ws = WorldState()
     idc = IdentityContract(ws)
-    bc = Blockchain(identity_contract=idc)
+    # 2026-11-02 审查修复：本基准的**交易侧**走真实 ECDSA 签名+验签，但**区块侧**
+    # 仍是占位（state_root="evidence_state_root"、signature_hex=""）。启用区块级
+    # 完整性校验后此脚本的区块会被自身拒绝 → 上链率崩为 0。故显式声明 stub 模式：
+    # 测量口径保持为「交易级验签 + 账本追加」（与 NR-91 登记口径一致），
+    # 区块级签名/state_root 不在本基准的测量范围内。
+    bc = Blockchain(identity_contract=idc, allow_unsigned_stub=True)
 
     # ── 关键修复：先注册 agent 公钥（否则严格模式下全部拒绝）──
     keys = {}

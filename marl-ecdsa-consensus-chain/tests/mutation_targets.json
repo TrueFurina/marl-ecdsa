@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "note": "守卫承重变异目标登记（REA #153/#154/#157 映射）。每项目必须唯一定位；变异后关联检查必须承重（全红/断言失败），否则该守卫不承重 = 探针 FAIL。新增目标需带 why 与审计日期。",
+  "targets": [
+    {
+      "id": "signing-backend-value-domain",
+      "file": "marl/integration/signing_service.py",
+      "locator": "if signature_backend not in VALID_SIGNATURE_BACKENDS:",
+      "mutation": "if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_signing_service_contract.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "C2 值域契约：非法 backend 必须构造期 ValueError，堵 typo fail-open（audited 2026-10-19，曾以摘除方式手工验证 13 项变红）"
+    },
+    {
+      "id": "doctor-git-head-format",
+      "file": "scripts/doctor.py",
+      "locator": "return head if len(head) == 40 else \"unknown\"",
+      "mutation": "return head",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_doctor_git_head.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "#134 执行基线：git 失败/输出异常必须显式 unknown（audited 2026-10-20）。变异必须产生可观测差异（REA #157）——故关联测试 mock git 失败路径；曾误用 head or unknown 变异（正常路径等价，无差异，已弃）"
+    }
+  ]
+}

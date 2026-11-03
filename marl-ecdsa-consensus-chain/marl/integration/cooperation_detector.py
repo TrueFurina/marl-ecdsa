@@ -50,6 +50,57 @@ class CooperationDetector:
         # 最近一步的合作检测结果（per-step）
         self._last_step_coop: Dict[str, Optional[bool]] = {}
 
+        # ── 2026-10-18 布局契约门 ──
+        # 本检测器只认识 SimpleSpreadEnv 的观测布局：
+        #   [vel(2), pos(2), landmark_rel(2*n_lm), other_agent_rel(2*(n-1))]
+        # 换环境（如 DeliveryMARLEnv：[pos(2), type(1), target(2), handoff(2), others(2*(n-1))]）
+        # 后切片位置完全错位，dist 会被算在绝对坐标分量上——**恒大于阈值、静默输出 0**。
+        # 因此不认识的长度一律判"不可测"，绝不输出假 0（fail-closed）。
+        self.layout_mismatch: bool = False
+        self._layout_warned: bool = False
+        self._layout_observed_len: Optional[int] = None
+
+    def expected_obs_len(self) -> int:
+        """SimpleSpread 布局下的观测长度；长度不符即视为布局不兼容。"""
+        return 4 + 2 * self.n_landmarks + 2 * (self.n_agents - 1)
+
+    def check_layout(self, observations: List[Any]) -> bool:
+        """校验观测布局。不匹配时置 ``layout_mismatch`` 并只告警一次。
+
+        :return: True=布局兼容，可计算行为学合作率；False=不可测。
+        """
+        import numpy as np
+        expected = self.expected_obs_len()
+        lengths = set()
+        for obs in observations:
+            try:
+                lengths.add(int(np.asarray(obs, dtype=float).ravel().size))
+            except (TypeError, ValueError):
+                lengths.add(-1)
+        ok = lengths == {expected}
+        if not ok:
+            self.layout_mismatch = True
+            self._layout_observed_len = sorted(lengths)[0] if lengths else None
+            if not self._layout_warned:
+                self._layout_warned = True
+                logger.warning(
+                    "[CooperationDetector] 观测布局不匹配：期望 %d 维（simple_spread: "
+                    "vel2+pos2+landmark_rel2*%d+other_rel2*%d），实测 %s 维。"
+                    "合作率判为**不可测**（不再输出 0），请改用与场景匹配的检测口径。",
+                    expected, self.n_landmarks, self.n_agents - 1, sorted(lengths),
+                )
+        return ok
+
+    def layout_report(self) -> Dict[str, Any]:
+        """布局门状态，供结果文件与门禁追溯。"""
+        return {
+            "layout_ok": not self.layout_mismatch,
+            "expected_obs_len": self.expected_obs_len(),
+            "observed_obs_len": self._layout_observed_len,
+            "n_agents": self.n_agents,
+            "n_landmarks": self.n_landmarks,
+        }
+
     def detect_cooperation(
         self,
         observations: List[Any],
@@ -85,6 +136,15 @@ class CooperationDetector:
         import numpy as np
         step_status: Dict[str, Optional[bool]] = {}
         sf = selfish_flags if selfish_flags else [False] * len(agent_ids)
+
+        # ── 布局门（fail-closed）：不认识观测长度就不算距离 ──
+        if not self.check_layout(observations):
+            for i, agent_id in enumerate(agent_ids):
+                if i < len(sf) and sf[i]:
+                    self._episode_betray[agent_id] = self._episode_betray.get(agent_id, 0) + 1
+                step_status[agent_id] = None
+            self._last_step_coop = dict(step_status)
+            return step_status
 
         flagged_ids = set()
         for i, (obs, agent_id) in enumerate(zip(observations, agent_ids)):

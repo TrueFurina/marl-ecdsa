@@ -60,10 +60,12 @@ class TestRewardFusion:
     def test_compute_total_reward_delegates(self, bridge):
         """compute_total_reward 委托 SettlementCoordinator：融合 BC 激励"""
         br, _, _, _ = bridge
+        bc = br.get_bc_rewards().get("agent_0", 0.0)
         total = br.compute_total_reward("agent_0", env_reward=1.0)
-        # 总奖励 = env + λ*BC奖励（λ=0.1，非负）
+        # 契约（F08 修复 2026-11-02，替换原恒等式断言）：total = env + λ·bc，
+        # λ 取桥接当前值
         assert isinstance(total, float)
-        assert total >= 1.0 or total < 1.0  # 返回合法浮点即可
+        assert total == pytest.approx(1.0 + br.lambda_weight * bc)
 
     def test_get_all_total_rewards_batch(self, bridge):
         """批量奖励：返回与智能体数量一致"""
