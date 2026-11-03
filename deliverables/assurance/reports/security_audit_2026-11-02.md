@@ -3,21 +3,23 @@
 - 生成时间：2026-11-02T23:15+08:00
 - 审计范围：`blockchain/crypto`、`blockchain/consensus`、`blockchain/network`、`blockchain/ledger`、`blockchain/contracts`、`marl/algorithms`、`marl/analysis`
 - 方法：**源码审读 + 定向差分/性质测试**（经典博弈已知均衡、跨进程确定性、形状不变量），不依赖随机 fuzz
-- 结论：发现 **9 处缺陷**，全部已修复并带回归；全量 `1820 passed / 48 skipped`（唯一 failed 是缺 `torch` 的环境项，非代码缺陷）
+- 结论：发现 **9 处缺陷**，全部已修复并带回归
+- ⚠️ **其中 6 处曾被 `d9e701c`（"sync: 源码对齐 V29 新基线"）静默回退**，仓库里的回归锁当时全红；已于 2026-11-03 恢复并加固，见 **§10 回退事件**。本文所有修复声明以 §10 的恢复提交为准
+- 全量口径：本机实测 **1841 passed / 1 failed / 42 skipped**（唯一 failed 为 `test_deps_importable` 缺 `torch` —— 本机 torch 的 `shm.dll` 加载失败故已卸载；CI 由 `requirements.txt` 安装）。**该计数来自恢复后的本机工作树，不等于 main 的测试总数**（main 比本机多约 180 个文件）
 
 ## 汇总
 
 | # | 严重度 | 模块 | 问题 | 修复 commit |
 |---|---|---|---|---|
-| 1 | **严重（安全）** | `blockchain/crypto/security_guard.py` | `r` 类型混淆绕过 k 重用检测（私钥可推导） | `e7dfa59` |
-| 2 | 高（可用性） | 同上 | 非整数 `timestamp`/`nonce` 抛 `TypeError`（DoS） | `e7dfa59` |
-| 3 | 中（正确性） | `marl/analysis/nash_verifier.py` | 混合策略纳什均衡被漏报 | `c0ba7ab` |
-| 4 | 中（可复现性） | `marl/algorithms/qmix.py` | NumPy 回退用内建 `hash()`，受 `PYTHONHASHSEED` 影响 | `2ba2a52` |
-| 5 | 高（训练正确性） | `marl/algorithms/mappo.py` | Critic 回归目标与 `v_pred` 错位 | `9878a69` |
-| 6 | **严重（安全）** | `blockchain/crypto/ecdsa_utils.py` | 签名与载荷解绑：复用公开历史签名可伪造任意交易 | `597cabe` |
-| 7 | 高（共识安全） | `blockchain/consensus/standard_pbft.py` | 等权基线缺女巫门控：伪造 voter_id 即可凑够 Quorum | `4760fa9` |
-| 8 | 中（指标失真） | `blockchain/consensus/cw_pbft_failover.py` | 心跳缺省值 0 被判「纪元 0 发过」→ 每轮虚假视图切换 | `7caa0d8` |
-| 9 | 高（激励正确性） | `blockchain/contracts/incentive_contract.py` | NaN 奖励被钳成满分 → 算崩的智能体拿最高激励；NaN 还可永久污染账本 | `8ba090c` |
+| 1 | **严重（安全）** | `blockchain/crypto/security_guard.py` | `r` 类型混淆绕过 k 重用检测（私钥可推导） | `12212a9` |
+| 2 | 高（可用性） | 同上 | 非整数 `timestamp`/`nonce` 抛 `TypeError`（DoS） | `12212a9` |
+| 3 | 中（正确性） | `marl/analysis/nash_verifier.py` | 混合策略纳什均衡被漏报 | `44b3962` |
+| 4 | 中（可复现性） | `marl/algorithms/qmix.py` | NumPy 回退用内建 `hash()`，受 `PYTHONHASHSEED` 影响 | `e98d5ca` |
+| 5 | 高（训练正确性） | `marl/algorithms/mappo.py` | Critic 回归目标与 `v_pred` 错位 | `bd56b87` |
+| 6 | **严重（安全）** | `blockchain/crypto/ecdsa_utils.py` | 签名与载荷解绑：复用公开历史签名可伪造任意交易 | `7e20a94` |
+| 7 | 高（共识安全） | `blockchain/consensus/standard_pbft.py` | 等权基线缺女巫门控：伪造 voter_id 即可凑够 Quorum | `5d509f9` |
+| 8 | 中（指标失真） | `blockchain/consensus/cw_pbft_failover.py` | 心跳缺省值 0 被判「纪元 0 发过」→ 每轮虚假视图切换 | `b07953d` |
+| 9 | 高（激励正确性） | `blockchain/contracts/incentive_contract.py` | NaN 奖励被钳成满分 → 算崩的智能体拿最高激励；NaN 还可永久污染账本 | `2e30262` |
 
 ---
 
@@ -109,11 +111,16 @@ r='123' (str)    -> (True, 'OK')   # 同一个 r，字符串形式
 Blockchain._validate_new_block(block) = True  →  False
 ```
 
-**修复**：`verify_action_package` 增加载荷绑定校验——package 若携带 `agent_id / action / timestamp / nonce`，就解析 `message_hex` 中真正被签的内容，逐项比对 `agent_id` / `nonce` / `timestamp` / `action_hash`（`action_hash` 由 `action` 重算）。不一致即拒绝。
+**修复**：`verify_action_package` 用包内字段经 `build_message()` **重建**被签消息，与 `message_hex` 逐字节比对，不一致即拒绝。
+
+**2026-11-03 加固（两处）**：
+
+1. **缺字段一律 fail-closed**。首版写成「package 携带四个字段才比对」，于是把 `agent_id / action / timestamp / nonce` 删掉、只留 `message_hex + signature_hex`，绑定校验就整段被跳过。而 `cooperation_detector.filter_verified_packages()` 吃的正是**外部传入**的包（其 docstring 明写"含伪造/顶名包"）—— 删字段即绕过，这是后门不是兼容。现在缺任一字段直接拒绝；纯字节验签走明确的底层入口 `ECDSAUtils.verify()`。
+2. **`extra` 纳入绑定**。原实现用 `package.get('extra')` 重建，语义正确但没有任何用例覆盖；现补三条回归（未声明键拒绝 / 声明键通过 / 声明键值被改拒绝），并允许 JSON 数值写法差异（`1000` 与 `1000.0` 等价），避免把同值 float 时间戳误判成篡改 —— 放宽的只是表示形式，不是字段集合。
 
 收口点选在 `verify_action_package` 而非 `blockchain.py`：账本（`blockchain.py`）、签名服务（`signing_service.py`）、合谋检测验签门（`cooperation_detector.py`）三个调用方都走这里，一处修全覆盖。
 
-**验证**：`tests/test_signature_payload_binding.py` 9 条——正常签名包仍通过、换 `action`/`nonce`/`timestamp`/`agent_id` 复用签名全部拒绝、区块层端到端拒绝伪造交易且接受真实交易、旧式纯字节包语义不变、`int`/`float` 时间戳不误杀；相关子系统 **642 passed**。
+**验证**：`tests/test_signature_payload_binding.py` **13 条**（本机实测全绿）——正常签名包仍通过、换 `action`/`nonce`/`timestamp`/`agent_id` 复用签名全部拒绝、区块层端到端拒绝伪造交易且接受真实交易、`int`/`float` 时间戳不误杀、裸字节包拒绝、缺任一字段拒绝、`extra` 三条（未声明/声明/被改）。另有 `tests/test_verify_package_field_binding.py` **11 条**（2026-10-15 那版绑定校验的守护）同时全绿。
 
 ## 7. 高：等权基线缺女巫门控（伪造 voter_id 即可凑够 Quorum）
 
@@ -200,6 +207,75 @@ broken (env_reward=NaN) → task=1.0000, delta=20.00   ← 谁算崩了谁拿钱
 
 ---
 
+## 10. 回退事件：9 处修复中有 6 处曾被静默回退（2026-11-03）
+
+### 10.1 事实
+
+`d9e701c`（`2026-11-03T07:58Z`，提交信息「sync: 源码对齐 V29 新基线（口径 n=101/2183 +
+新版前端）」）一次改动 258 个文件。其中 10 个源文件被**整份覆盖**成更旧的基线
+（`nash_verifier` 是 +825/−829，典型的整文件重写），把 11-01/11-02 的修复一起带走。
+
+以 `d9e701c` 的父提交 `3fa6b19` 为对照，逐文件确认被回退的内容：
+
+| 文件 | 被回退的保护 | 后果 |
+|---|---|---|
+| `blockchain/crypto/security_guard.py` | `_coerce_int` 字段归一、缺 `r` 的 fail-closed 分场景判定、淘汰归档 `_r_evicted_digests`、按 agent 淘汰、`get_detection_status` | k 重用检测被绕过（可推导私钥）；非整数时间戳打崩守卫 |
+| `blockchain/crypto/ecdsa_utils.py` | 无（该提交保留了绑定校验，但实现较宽松） | 见 §10.3 的加固 |
+| `marl/algorithms/mappo.py` | `_critic_targets()` | Critic 回归目标与 `v_pred` 错位 |
+| `marl/algorithms/qmix.py` | `_state_index()`（sha256） | 状态离散化受 `PYTHONHASHSEED` 影响，复跑不一致 |
+| `marl/analysis/nash_verifier.py` | `p_me` 公式 | 鹰鸽 p=0.5、猎鹿 p=0.75 的混合均衡被漏报 |
+| `blockchain/consensus/standard_pbft.py` | 自报 `weight` 纠偏（`replace(vote, weight=1.0)`） | 真实成员可自带 `weight=999` 参与阈值计算 |
+| `blockchain/consensus/cw_pbft_failover.py` | 心跳表构造/重置时初始化 | 从未发心跳的主节点永不被判超时（死主不替换） |
+| `blockchain/contracts/incentive_contract.py` | `clamp_finite()` | NaN 被钳成满分：算崩的智能体拿最高激励 |
+| `blockchain/ledger/world_state.py` | `add_score` 非有限值拒收 | `NaN + x` 永久污染该智能体积分 |
+| `marl/integration/settlement_coordinator.py` | 三处 `clamp_finite` 钳位 | NaN delta 流入下游奖励 |
+
+### 10.2 为什么没有被拦住
+
+仓库里那 6 个回归锁文件**都在**、且断言完好（未随提交一起被改弱）。问题在 CI：
+
+```
+GET /repos/TrueFurina/marl-ecdsa/actions/workflows
+→ build-binaries / Dependency Graph / pages-build-deployment     （共 3 个）
+```
+
+`CI - Test Suite` 写在 `marl-ecdsa-consensus-chain/.github/workflows/ci.yml`，
+而 GitHub Actions **只扫描仓库根**的 `.github/workflows/`。子目录里的工作流
+从未被注册，因此**一次都没运行过**。
+
+实测代价：把 main 当前的 5 个源文件换进工作树后跑仓库自带的回归锁 ——
+**19 failed + 1 collection error**（`test_mappo_critic_targets.py` 直接
+`ImportError: cannot import name '_critic_targets'`）。这些红灯在 main 上躺了一整天。
+
+### 10.3 恢复与加固
+
+分 6 个提交逐条恢复（每个提交都保留 `d9e701c` 带来的**正当增量**，不回退 V29 内容）：
+
+1. `8463c27` security_guard：三处保护 + 字段归一 + 淘汰归档 + 降级自检全部恢复；
+2. `dd4c86d` / `b66ca09` ecdsa_utils：缺字段 fail-closed + `extra` 纳入绑定（新增实现，
+   不是回退），测试同步更正 2 条错断言并新增 4 条；
+3. `6fd86b1` mappo / qmix / nash：恢复 `_critic_targets`、sha256 离散化、`p_me` 同公式，
+   同时保留 QMIX 的 S9 登记注释与 Nash 的 F16 `top_tier_bonus=10.0`；
+4. `dfb7e56` standard_pbft / failover：补回权重纠偏；心跳表按回归锁口径初始化
+   （保留 main 的「仅在存在故障证据时切换」判定）；
+5. `7d88939` incentive / world_state / settlement：三处 NaN 护栏恢复，
+   同时保留 F02 `clear_episode_rewards` 与 F05 `get_consensus_weight`；
+6. `fda6cbd` CI 搬到仓库根，安全不变量拆成 fail-fast job。
+
+**合并口径**（避免"恢复成旧版"）：
+以 main 当前版本为底座做**定点补丁**，每个文件的差异只包含被回退的那几处；
+`git diff` 上是 24 / 97 / 22 / 36 / 22 / 67 / 71 行级别的改动，不是整文件重写。
+
+### 10.4 本节引用的哈希
+
+汇总表里的 8 个修复提交哈希，早前版本写的是 `e7dfa59` / `c0ba7ab` / `2ba2a52` /
+`9878a69` / `597cabe` / `4760fa9` / `7caa0d8` / `8ba090c` —— 这 8 个在远端
+**全部 404**（`GET /commits/{sha}` 返回 422）。真实哈希为
+`12212a9` / `44b3962` / `e98d5ca` / `bd56b87` / `7e20a94` / `5d509f9` /
+`b07953d` / `2e30262`，已逐一核对存在。P1-11 的 k 重用那轮是 `8bc432b`。
+
+---
+
 ## 验证口径
 
 ```
@@ -208,11 +284,12 @@ pytest tests/test_security_guard_type_confusion.py \
 pytest tests/test_nash_verifier_canonical.py tests/test_nash_verifier*.py  # 34 passed
 pytest tests/test_qmix_state_index_determinism.py                    # 2 passed
 pytest tests/test_mappo_critic_targets.py                            # 3 passed
-pytest tests/test_signature_payload_binding.py                       # 9 passed
+pytest tests/test_signature_payload_binding.py                       # 13 passed
 pytest tests/test_standard_pbft_sybil_gate.py                        # 8 passed
 pytest tests/test_failover_heartbeat_semantics.py                    # 8 passed
 pytest tests/test_incentive_nonfinite_guard.py                       # 13 passed
-pytest tests/ -q                                                     # 1820 passed / 48 skipped
+pytest tests/ -q                                                     # 1841 passed / 1 failed / 42 skipped
+#   唯一 failed = test_deps_importable 缺 torch（本机 shm.dll 加载失败已卸载；CI 会装）
 ```
 
 ## 剩余风险（诚实说明）
@@ -222,5 +299,6 @@ pytest tests/ -q                                                     # 1820 pass
 - MAPPO 的 PyTorch 路径在本机缺 `torch`，相关训练测试在 CI 才完整执行；本次对 Critic 目标的修复用纯 numpy 不变量做了离线回归。
 - 第 9 项把非有限值统一按「无有效贡献」记 0，而不是抛异常——这是为了不打断长跑训练，代价是上游的 NaN 不会被当成致命错误。若将来接入生产结算，建议把 WARNING 升级为可选严格模式（类似 `MARL_ECDSA_REQUIRE_KEY_PASSPHRASE` 的开关）。
 - 第 8 项修复后，`simulate_byzantine_primary_attack` 仍有 15/20 轮触发切换：拜占庭标记一旦打上就永久生效，没有「节点恢复后重新准入」的路径，而出块轮转每 10 块才换主。这是设计取舍（悲观地把作恶节点永久排除），不是缺陷；但如果论文要报「failover 次数」，应同时给出 `byzantine_events`，否则 15 这个数会被误读成 15 次拜占庭。
-- 第 6 项的绑定校验只覆盖「package 携带四个字段」的路径。若将来新增调用方只传 `message_hex + signature_hex`（纯字节验签），绑定校验不会生效——**账本与签名服务路径必须继续传全字段**，这一点已写进函数 docstring。
+- 第 6 项的绑定校验已改为 fail-closed（缺字段即拒绝），因此**不存在**"删字段跳过校验"的旁路；代价是任何依赖裸 `message_hex + signature_hex` 的新调用方会被拒 —— 这是刻意的：「签名包」语义下必须给全字段，纯字节验签请显式用 `ECDSAUtils.verify()`。
+- `extra` 现已纳入绑定：签名体里出现、而 package 未声明的键一律拒绝。因此**不要**在签名后又往 package 里塞业务字段（例如把 `message_hex` 之外的东西放进 `extra`），否则会被判为篡改。账本路径（`blockchain.py`）当前不传 `extra`，不受影响。
 - 绑定校验**没有**引入「低 s 归一化」，因此 ECDSA 可塑性（`(r, s)` 与 `(r, n-s)` 都合法）仍然存在。当前不影响本链的授权语义（tx_id 由 `agent_id/action_hash/timestamp/nonce/tx_type` 计算，不含签名），但若将来把签名纳入 tx_id，必须同时做低 s 归一化，否则会出现 txid 可变。

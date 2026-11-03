@@ -15,6 +15,66 @@
 
 ---
 
+## 2026-11-03 — 恢复被「源码对齐」提交静默回退的 6 处修复 + CI 归位
+
+> 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+### 事故
+
+`d9e701c`（"sync: 源码对齐 V29 新基线"）改动 258 个文件，其中 10 个源文件被整份
+覆盖成更旧的基线，把 2026-11-01/11-02 的修复一并带走：
+
+- `SecurityGuard`：k 重用检测回到 fail-open（缺 `r` 直接放行、淘汰静默遗忘、
+  无字段归一）——k 重用可直接推导私钥；
+- `mappo`：Critic 回归目标回到 `np.repeat(returns, n_agents)[:T]`（与逐时间步
+  `v_pred` 错位）；
+- `qmix`：NumPy 回退回到内建 `hash()`（受 `PYTHONHASHSEED` 影响，复跑不一致）；
+- `nash_verifier`：`p_me` 回到 `(M[1,0]-M[1,1])/denom`（鹰鸽/猎鹿的混合均衡漏报）；
+- `standard_pbft`：女巫门控还在，但自报 `weight` 纠偏被删（真实成员可自带 999）；
+- `cw_pbft_failover`：心跳表恒空 → 从未发心跳的主节点永不被判超时（死主不替换）；
+- `incentive_contract` / `world_state` / `settlement_coordinator`：三处 NaN 护栏
+  全被删 → NaN 被钳成满分、并永久污染账本积分。
+
+仓库里 6 个回归锁文件都还在、断言完好，实测 **19 failed + 1 collection error**。
+
+### 为什么没被拦住
+
+`CI - Test Suite` 一直写在 `marl-ecdsa-consensus-chain/.github/workflows/ci.yml`。
+GitHub Actions 只扫描**仓库根**的 `.github/workflows/`，子目录不会被注册 ——
+该工作流**一次都没运行过**（`/actions/workflows` 只有 build-binaries 与 pages）。
+
+### 恢复
+
+6 个提交逐条恢复，**以 main 当前版本为底座做定点补丁**，保留 `d9e701c` 的正当增量
+（QMIX 的 S9 登记注释、Nash 的 F16 `top_tier_bonus=10.0` 与 λ 边界表述、
+`clear_episode_rewards`、`get_consensus_weight`、P1-12 注释）。
+逐文件对照与提交清单见 `deliverables/assurance/reports/security_audit_2026-11-02.md` §10。
+
+### 加固（不是回退）
+
+- `verify_action_package`：把"缺字段就跳过绑定校验"改成 **fail-closed** ——
+  首版允许把 `agent_id/action/timestamp/nonce` 删掉来整段跳过校验，而
+  `cooperation_detector.filter_verified_packages()` 吃的正是外部传入的包；
+- `extra` 纳入载荷绑定（原实现没有用例覆盖），并允许 JSON 数值写法差异
+  （`1000` vs `1000.0`）以免误杀同值 float 时间戳；
+- `test_signature_payload_binding.py` 里"裸字节包仍然通过"的断言是错的
+  （把 fail-open 当成了不误杀），更正为断言拒绝，并新增 4 条。
+
+### CI 归位
+
+新增仓库根 `.github/workflows/ci.yml`（`defaults.run.working-directory` 指向子目录），
+安全不变量单拆成 fail-fast job（只装 numpy + cryptography），全量套件 `needs` 它。
+子目录那份保留不删，加抬头注明"不会被执⾏、可执行版在哪"。
+
+### 审计简报的哈希修正
+
+汇总表原先引用的 8 个哈希（`e7dfa59` 等）在远端**全部 404**，已换成真实存在的
+`12212a9` / `44b3962` / `e98d5ca` / `bd56b87` / `7e20a94` / `5d509f9` /
+`b07953d` / `2e30262`；P1-11 那轮为 `8bc432b`。
+
+---
+
 ## v4.1 (2026-07-10) — 当前版本
 
 ### Bug 修复
