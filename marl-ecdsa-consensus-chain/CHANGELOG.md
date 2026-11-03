@@ -49,8 +49,13 @@ CI 首次运行 `77 passed / 1 failed`，失败项是
    运行时在自适应带内」。
 2. `tests/test_f04_web_wiring.py` 把通道键写死 `'1'`：全量套件里更早用例注册过用户后
    新用户 id 就不是 1，4 条假红（**单独跑是 5 passed**）。改为从 `session['uid']` 读。
-3. `structure_guard.py --all` 报 13 个根级历史文档（V18–V27 等）：登记为**存量冻结
-   豁免**（常量集合，只减不增），每次运行打印提醒，不静默腐烂。
+3. `structure_guard.py --all` 报根级历史文件（先 13 个 V18–V27 等说明文档，CI 上又报
+   2 个训练结果 json）：登记为**存量冻结豁免**（常量 `LEGACY_ROOT_FILES`，只减不增），
+   每次运行打印提醒，不静默腐烂。搬目录会打断 README/thesis 的相对引用，以及
+   `visualization/dashboard.py` 等 4 处「按裸文件名从项目根读取」的调用。
+   > 那 2 个 json 是第二次才发现的：本地核对用 `git ls-files`，而它们
+   > **tracked 却命中 `.gitignore`**，在临时目录 `git add -A` 时被忽略 ——
+   > 本地"13 个全过"，CI 报"多 2 个"。核对仓库文件清单要以远端 tree 为准。
 
 ### 五、`test_f11_grandchild_cleanup.py` 的收集期错误
 

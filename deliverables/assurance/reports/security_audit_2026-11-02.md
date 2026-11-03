@@ -364,7 +364,7 @@ AssertionError: assert False is True
 |---|---|---|---|
 | 1 | `scripts/smoke_test_e2e.py` P0-1 | `assert abs(lambda_weight - 0.1) < 0.001` 失败，实测 `0.10231058578630006` | P2-E 自适应 λ 引入后 λ 落在 `(0.05, 0.15)`，断言是旧口径 |
 | 2 | `tests/test_f04_web_wiring.py` | 4 条失败（`get_pending_submit('1')` 得 None / `/api/distributed/resume` 404） | 通道键写死 `'1'`，全量套件里更早用例注册过用户后新用户 id 就不是 1 |
-| 3 | `scripts/pre-commit/structure_guard.py --all` | 13 个根级文档被判违规平铺 | 存量布局问题（V18–V27 等），与代码改动无关 |
+| 3 | `scripts/pre-commit/structure_guard.py --all` | 根级历史文件被判违规平铺（先 13 个说明文档，CI 上又 2 个训练结果 json） | 存量布局问题（V18–V27 等），与代码改动无关 |
 
 第 2 条特别值得记：**单独跑该文件 5 passed，全量跑 4 failed**。这不是环境差异，
 是**测试之间的状态耦合**（`instance/accounts.sqlite3` 的用户自增 id）——
@@ -375,11 +375,21 @@ AssertionError: assert False is True
 1. **自适应 λ**：改为钉住两件真正该守的事 —— `λ_base == 0.1`（config → bridge
    传参通路不丢）+ 运行时 λ 不越出自适应带 `[0.5λ_base, 1.5λ_base]`。
 2. **f04**：从 `session['uid']` 读真实 uid，与用户表状态解耦。
-3. **structure_guard**：13 个文件登记为**存量冻结豁免**（常量集合，只减不增），
-   `main()` 每次打印出来，不静默腐烂。搬目录会打断 README / thesis 的相对引用，
-   属独立任务，不在此处草率处理。
+3. **structure_guard**：根级存量文件登记为**冻结豁免**（常量集合 `LEGACY_ROOT_FILES`，
+   只减不增，新增根级受管文件仍会被拦），`main()` 每次打印出来，不静默腐烂。
+   搬目录会打断 README / thesis 的相对引用，属独立任务，不在此处草率处理。
+   最终是 **15 个**：13 个 V18–V27 说明文档 ＋ 2 个训练结果数据
+   （`training_results_pure.json` / `training_results_bc.json`，被
+   `visualization/dashboard.py:302/317` 与 4 个 scripts 按**裸文件名从项目根**读取）。
    其中 `V18_σèƒΦâ╜σñìµá╕µèÑσæè.md` 的**文件名本身是乱码**（UTF-8 文件名被按
    CP437 解释），原意为「V18_功能复核报告.md」，另案记录。
+
+   > 这两个 json 是**第二次才发现的**，过程值得留档：本地第一次核对用的是
+   > `git ls-files`，而这两个文件**是 tracked、却命中 `.gitignore`** ——
+   > 我在临时目录 `git add -A` 时它们被忽略，于是 `git ls-files` 不列出、
+   > 本地扫描"13 个、全过"，CI 上却报"多 2 个"。
+   > 教训：核对"仓库里到底有哪些文件"要以**远端 tree** 为准（
+   > `GET /git/trees/{sha}?recursive=1`），不能用本地索引。
 4. **`test_f11_grandchild_cleanup.py`**：依赖 `launcher/supervisor.py`，该模块
    **不在本仓库**（全仓 grep `_make_job` 仅命中该测试；Job Object 的实现在
    `visualization/business_service.py`）。模块级 `exec_module` 抛
