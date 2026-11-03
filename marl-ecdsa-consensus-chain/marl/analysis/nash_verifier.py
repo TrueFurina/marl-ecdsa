@@ -299,7 +299,11 @@ class NashEquilibriumVerifier:
         mixed_c = p_opp * payoff_matrix[0, 0] + (1 - p_opp) * payoff_matrix[0, 1]
         mixed_d = p_opp * payoff_matrix[1, 0] + (1 - p_opp) * payoff_matrix[1, 1]
         indifferent = abs(mixed_c - mixed_d) < 1e-8
-        p_me = (payoff_matrix[1, 0] - payoff_matrix[1, 1]) / denom
+        # 对称博弈中双方混合概率相同：p_me 必须与 p_opp 用同一个公式。
+        # 旧实现用 (M[1,0]-M[1,1])/denom，当 M[0,1] != M[1,0]（如鹰鸽/猎鹿）
+        # 时会算出 >1 或 0 的无效值，导致**混合策略均衡被漏报**
+        # （实测鹰鸽 p=0.5、猎鹿 p=0.75 都被判成非均衡）。
+        p_me = (payoff_matrix[0, 1] - payoff_matrix[1, 1]) / denom
         p_me_valid = 0.0 < p_me < 1.0
         proof = (f"混合策略均衡: 对方以p={p_opp:.4f}选合作，我以p={p_me:.4f}选合作; "
                  f"C期望={mixed_c:.4f}, D期望={mixed_d:.4f}, 无差异={indifferent}"
