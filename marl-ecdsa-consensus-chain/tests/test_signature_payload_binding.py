@@ -81,15 +81,91 @@ class TestLegitPackageStillVerifies:
         relaxed['timestamp'] = 1000.0
         assert ECDSAUtils.verify_action_package(relaxed, pub) is True
 
-    def test_legacy_bytes_only_package_still_verifies(self):
-        """只带 message_hex + signature_hex 的旧式调用保持纯字节验签语义"""
+    def test_bare_bytes_package_is_rejected(self):
+        """只带 message_hex + signature_hex 的包 → **拒绝**（fail-closed）。
+
+        ⚠️ 自我推翻（2026-11-03）：本文件初版此处断言"旧式纯字节包仍然通过"，
+        并把它当成"不误杀"。那是错的 —— 一旦"缺 4 个字段就跳过绑定检查"，
+        攻击者只要把 agent_id/action/timestamp/nonce 删掉，绑定检查就整段
+        被跳过，验签退化成"这段字节确实被人签过"。而
+        `cooperation_detector.filter_verified_packages()` 吃的正是**外部传入**
+        的包（其 docstring 明写"含伪造/顶名包"），删字段即可绕过 = 后门。
+
+        裸字节验签仍可用 `ECDSAUtils.verify(pub, message, signature)` 这个
+        明确的底层入口；"签名包"语义下必须给全字段。
+        """
         priv, pub = ECDSAUtils.generate_key_pair()
         pkg = ECDSAUtils.sign_action("agent_A", priv, {"type": "idle"}, nonce=1)
         legacy = {
             'message_hex': pkg['message_hex'],
             'signature_hex': pkg['signature_hex'],
         }
-        assert ECDSAUtils.verify_action_package(legacy, pub) is True
+        assert ECDSAUtils.verify_action_package(legacy, pub) is False
+
+    def test_missing_single_bound_field_rejected(self):
+        """少任何一个承诺字段都必须拒绝（不能靠"少给字段"退出绑定）"""
+        priv, pub = ECDSAUtils.generate_key_pair()
+        pkg = ECDSAUtils.sign_action("agent_A", priv, {"type": "idle"}, nonce=1)
+        for field in ('agent_id', 'action', 'timestamp', 'nonce'):
+            partial = dict(pkg)
+            partial.pop(field)
+            assert ECDSAUtils.verify_action_package(partial, pub) is False, (
+                f"缺 {field} 仍通过 —— 绑定检查可被「少给字段」绕过"
+            )
+
+
+class TestExtraIsBoundToo:
+    """签名体里的额外键（extra）同样在绑定范围内。"""
+
+    def test_undeclared_extra_key_rejected(self):
+        """签名消息里有、package 未声明的键 → 拒绝"""
+        priv, pub = ECDSAUtils.generate_key_pair()
+        msg = ECDSAUtils.build_message(
+            "agent_A", {"type": "idle"}, 1000, 1, extra={"role": "admin"}
+        )
+        pkg = {
+            'agent_id': "agent_A",
+            'action': {"type": "idle"},
+            'timestamp': 1000,
+            'nonce': 1,
+            'message_hex': msg.hex(),
+            'signature_hex': ECDSAUtils.sign(priv, msg).hex(),
+        }
+        assert ECDSAUtils.verify_action_package(pkg, pub) is False
+
+    def test_declared_extra_key_is_accepted(self):
+        """package 声明了同样的 extra → 通过（不误杀带附加字段的合法包）"""
+        priv, pub = ECDSAUtils.generate_key_pair()
+        msg = ECDSAUtils.build_message(
+            "agent_A", {"type": "idle"}, 1000, 1, extra={"role": "admin"}
+        )
+        pkg = {
+            'agent_id': "agent_A",
+            'action': {"type": "idle"},
+            'timestamp': 1000,
+            'nonce': 1,
+            'extra': {"role": "admin"},
+            'message_hex': msg.hex(),
+            'signature_hex': ECDSAUtils.sign(priv, msg).hex(),
+        }
+        assert ECDSAUtils.verify_action_package(pkg, pub) is True
+
+    def test_tampered_extra_value_rejected(self):
+        """extra 值被改 → 拒绝（否则附加字段是第二个不受保护的明文通道）"""
+        priv, pub = ECDSAUtils.generate_key_pair()
+        msg = ECDSAUtils.build_message(
+            "agent_A", {"type": "idle"}, 1000, 1, extra={"role": "admin"}
+        )
+        pkg = {
+            'agent_id': "agent_A",
+            'action': {"type": "idle"},
+            'timestamp': 1000,
+            'nonce': 1,
+            'extra': {"role": "guest"},
+            'message_hex': msg.hex(),
+            'signature_hex': ECDSAUtils.sign(priv, msg).hex(),
+        }
+        assert ECDSAUtils.verify_action_package(pkg, pub) is False
 
 
 class TestForgedPayloadRejected:
