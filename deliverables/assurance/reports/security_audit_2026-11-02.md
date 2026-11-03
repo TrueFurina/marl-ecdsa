@@ -392,9 +392,11 @@ AssertionError: assert False is True
 - `scripts/pre-commit/caliber_check.py`：`_RE_TESTS = (\d{3,5})` 不支持千分位，
   `2,183 passed` 被读成 **183**，于是 README 里等于下限的表述被判成
   「低于下限 2183」的**假红**。现同时接受 `1,234` 与 `1234`。
-- `.agents/skills/test-gate/SKILL.md`：写着 `"1632 passed" 是当前基线`，
-  低于 NR-19 下限 2183 —— 真正的过期数字。改为指向登记簿 NR-19，
-  不再另抄一份（第二份真值源必然漂移）。
+- `.agents/skills/test-gate/SKILL.md`：把历史基线数字写成 1632（低于 NR-19 下限 2183）—— 真正的过期数字。
+  改为指向登记簿 NR-19，不再另抄一份（第二份真值源必然漂移）。
+  > 反讽一则：§11 初稿为了说明这件事，引用了那个数字加 `passed` 的原文写法，
+  > 结果被 `caliber_check --strict` 当成"新声明"判为漂移。门禁是对的 ——
+  > 这类引用只能写数字，不能带 `passed` 后缀，否则就会被当成在宣称。
 
 ### 11.7 一条数字口径的待办（不在本次改动范围）
 
@@ -471,6 +473,20 @@ if sum(x.get('online', False) for x in dc.statuses()['nodes']) >= len(names):
 > 前者是**同一断言落在不同依赖组合的不同实现上**，后者是**就绪判据的语义写错了**
 > （数个数 ≠ 等某人）。前两种（区块签名门缺区块签名、f04 用户 id 硬编码）
 > 见 §11.1 与 §11.4。
+
+### 12.3 修后复跑
+
+```
+2276 passed, 13 skipped, 827 warnings, 2 subtests passed in 359.13s (0:05:59)   # py3.12
+```
+
+0 failed。条数守恒也核对过：2275 + 3 + 11 = 2276 + 0 + 13 = 2289 ——
+f04 那条由 failed 转 passed（+1），qmix 两条由 failed 转 skipped（+2 skip）。
+
+随后暴露的是**门禁自身的误判**：本文件与 CHANGELOG 为了说明 SKILL.md 里那个过期数字，
+引用了原写法（数字 + `passed`），被 `caliber_check --strict` 当成"新声明"判为漂移。
+门禁是对的 —— 这类引用只能写数字、不能带 `passed` 后缀。改后 `--strict` 通过
+（未豁免漂移 0 条 / 已豁免 13 条）。
 
 ---
 

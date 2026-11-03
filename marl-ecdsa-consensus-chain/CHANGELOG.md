@@ -62,8 +62,11 @@ CI 首次运行 `77 passed / 1 failed`，失败项是
 
 - `caliber_check.py` 的 `_RE_TESTS` 不支持千分位，`2,183 passed` 被读成 `183`，
   把等于下限的表述判成假红；现接受 `1,234` 与 `1234`。
-- `.agents/skills/test-gate/SKILL.md` 的 `"1632 passed" 是当前基线` 低于 NR-19 下限，
+- `.agents/skills/test-gate/SKILL.md` 里把历史基线数字写成 1632（低于 NR-19 下限 2183），
   改为指向登记簿，不再另抄一份数字。
+  顺带一个反讽：本节初稿为了说明这件事，引用了那个数字加 "passed" 的原文写法，
+  结果被 `caliber_check --strict` 当成"新声明"判为漂移 —— 门禁是对的，
+  说明这类引用只能写数字、不能带 `passed` 后缀。
 
 ### 七、全量套件第一次在 CI 上跑完：3 failed / 2275 passed / 11 skipped
 
@@ -79,6 +82,13 @@ CI 首次运行 `77 passed / 1 failed`，失败项是
    `start(names=('node-3',))` 在 node-1/2 已跑时 `>= 1` 立刻成立，根本没等 node-3。
    本机（无 torch，导入快）恰好赶上；CI 上导入慢几秒就稳定失败。
    处理：按 `node` 字段精确等待，预算 3.6s → 16s。
+
+修后复跑：**2276 passed / 13 skipped / 0 failed**（py3.12，5m59s）。
+条数守恒：2275+3+11 = 2276+0+13 = 2289。
+
+随后暴露的是**门禁自身的误判**：本文件为了说明 SKILL.md 里那个过期数字，引用了原写法
+（数字 + `passed`），被 `caliber_check --strict` 当成"新声明"判为漂移。门禁是对的 ——
+这类引用只能写数字，不能带 `passed` 后缀。
 
 ### 实测（本机，非对外口径）
 
