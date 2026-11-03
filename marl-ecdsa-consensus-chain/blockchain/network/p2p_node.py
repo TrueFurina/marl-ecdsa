@@ -307,7 +307,9 @@ class P2PNode:
         """
         self._nonce += 1
         msg = MessageProtocol.build(msg_type, self.node_id, data, self._nonce, signature)
-        msg_id = MessageProtocol.get_msg_id(msg)
+        # P2-13修复：去重以内容指纹为准，不信任发送方自报的 msg_id（防伪造绕过）。
+        # 本地广播的 msg 由 build() 生成，重算值与自报值一致，无副作用。
+        msg_id = MessageProtocol.recompute_msg_id(msg)
 
         # 防止重复广播
         if msg_id in self._seen_msg_ids:
@@ -370,7 +372,15 @@ class P2PNode:
 
     async def _dispatch(self, msg: Dict, from_node: str):
         """消息分发到对应处理器"""
-        msg_id = MessageProtocol.get_msg_id(msg)
+        # P2-13修复：去重以内容指纹为准，不信任发送方自报的 msg_id（防伪造绕过）。
+        # 若自报 msg_id 与内容重算值不一致，说明报文被篡改或 msg_id 被伪造，记录告警。
+        asserted_id = MessageProtocol.get_msg_id(msg)
+        msg_id = MessageProtocol.recompute_msg_id(msg)
+        if asserted_id and asserted_id != msg_id:
+            logger.warning(
+                f"[P2PNode] 收到 msg_id 不符的报文（疑似伪造/篡改）: "
+                f"asserted={asserted_id} recomputed={msg_id} from={from_node}"
+            )
         msg_type = MessageProtocol.get_msg_type(msg)
 
         # 去重
