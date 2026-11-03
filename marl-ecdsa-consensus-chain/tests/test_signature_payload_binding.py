@@ -25,7 +25,11 @@ from blockchain.ledger.blockchain import Blockchain
 
 
 class _FakeIdentity:
-    """最小身份合约：固定返回同一把公钥（只验「签名对不对得上」）。"""
+    """最小身份合约：固定返回同一把公钥（只验「签名对不对得上」）。
+
+    `is_active` 是主链 2026-11-02 起（F05 封禁准入）会调用的方法：封禁身份不得
+    上链。本测试不考封禁，恒返 True。
+    """
 
     def __init__(self, pub_hex: str):
         self._pub_hex = pub_hex
@@ -33,9 +37,35 @@ class _FakeIdentity:
     def get_public_key(self, agent_id: str):
         return self._pub_hex
 
+    def is_active(self, agent_id: str) -> bool:
+        return True
 
-def _make_block(prev_block, transactions):
-    return Block(
+
+class _FakeKeyManager:
+    """最小 KeyManager：只为出块者签名提供私钥（不涉及落盘/口令）。"""
+
+    def __init__(self, private_key):
+        self._priv = private_key
+
+    def get_private_key(self, agent_id: str):
+        return self._priv
+
+
+def _make_block(prev_block, transactions, priv=None):
+    """按**真实出块流程**造区块：构造 → finalize() → sign_block()。
+
+    ⚠️ 2026-11-03 修正（CI 抓到，本机没抓到）：主链自 2026-11-02 起有区块级
+    完整性校验 —— 出块者签名必须存在且可验证，`state_root` 必须等于对交易
+    tx_id 重算的 Merkle 根。本测试原先是直接塞 `state_root="0" * 64` 且不签名
+    的合成区块，在 CI 上报「区块 #1 缺少出块者签名，拒绝上链」。
+
+    本机之所以是绿的：本地账本还是旧版（没有这道门）。**本地绿 ≠ CI 绿**，
+    这条用例就是反例 —— 也说明把 CI 搬到仓库根是必要的。
+
+    顺序不能反：`finalize()` 重算 state_root 与 block_hash，`sign_block()` 对
+    `block_hash` 签名；签名不进哈希（见 `Block._compute_hash`），故可后签。
+    """
+    block = Block(
         block_height=prev_block.block_height + 1,
         previous_hash=prev_block.block_hash,
         timestamp=int(time.time() * 1000),
@@ -43,6 +73,10 @@ def _make_block(prev_block, transactions):
         transactions=transactions,
         state_root="0" * 64,
     )
+    block.finalize()
+    if priv is not None:
+        block.sign_block(_FakeKeyManager(priv), agent_id="node_0")
+    return block
 
 
 def _forged_tx(legit_pkg, action, nonce=99999):
@@ -223,6 +257,7 @@ class TestBlockchainRejectsForgedTx:
         block = _make_block(
             bc.latest_block,
             [_forged_tx(legit, {"type": "transfer", "amount": 999999})],
+            priv,
         )
         assert bc._validate_new_block(block) is False
 
@@ -249,4 +284,6 @@ class TestBlockchainRejectsForgedTx:
             },
         )
         bc = Blockchain(identity_contract=_FakeIdentity(pub_hex))
-        assert bc._validate_new_block(_make_block(bc.latest_block, [tx])) is True
+        assert bc._validate_new_block(
+            _make_block(bc.latest_block, [tx], priv)
+        ) is True
