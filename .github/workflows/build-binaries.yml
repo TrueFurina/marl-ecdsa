@@ -46,7 +46,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install build deps
-        run: pip install flask pyinstaller
+        # cryptography 是硬依赖：visualization/business_service.py 与
+        # distributed_consensus.py 在导入期即 from cryptography.hazmat... 导入，
+        # 缺失会让冒烟测试直接失败。psutil 为可选（业务面板的进程指标，try 内降级）。
+        run: pip install flask pyinstaller cryptography psutil
 
       - name: Build single-file dashboard
         shell: bash
@@ -64,6 +67,7 @@ jobs:
             --paths "$SRC" \
             --add-data "$SRC/templates${SEP}templates" \
             --add-data "$SRC/static${SEP}static" \
+            --add-data "$SRC/number_registry.json${SEP}." \
             --add-data "$SRC/training_results_pure.json${SEP}." \
             --add-data "$SRC/training_results_bc.json${SEP}." \
             --add-data "$SRC/results/legacy_json/training_results_selfish.json${SEP}results/legacy_json" \
@@ -77,13 +81,28 @@ jobs:
           "$BIN" > smoke.log 2>&1 &
           PID=$!
           OK=0
-          for i in $(seq 1 15); do
+          PORT=""
+          for i in $(seq 1 20); do
             sleep 2
-            if curl -sf http://127.0.0.1:9090/ | grep -q "MARL-ECDSA"; then OK=1; break; fi
+            # 启动器用 _free_port() 从 9090 起找空闲端口，实际端口打印在 banner 里
+            if [ -z "$PORT" ]; then
+              PORT=$(grep -oE 'http://127\.0\.0\.1:[0-9]+' smoke.log | head -1 | grep -oE '[0-9]+$')
+            fi
+            [ -z "$PORT" ] && PORT=9090
+            # 注意：新版带登录鉴权，`/` 会 302 到 /login，且 /api/* 需登录（401）。
+            # 因此用公开的 /healthz 判就绪、/login 判页面渲染，二者都通过才算成功。
+            if curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1 \
+               && curl -sf "http://127.0.0.1:${PORT}/login" | grep -q "MARL-ECDSA"; then
+              OK=1; break
+            fi
           done
           kill $PID 2>/dev/null || true
-          if [ "$OK" != "1" ]; then echo "smoke test FAILED"; tail -20 smoke.log; exit 1; fi
-          echo "smoke test OK"
+          if [ "$OK" != "1" ]; then
+            echo "smoke test FAILED (port=${PORT:-unknown})"
+            tail -30 smoke.log
+            exit 1
+          fi
+          echo "smoke test OK (port=$PORT)"
 
       - uses: actions/upload-artifact@v4
         with:
