@@ -66,7 +66,13 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
         self._primary_status: Dict[str, PrimaryStatus] = {
             nid: PrimaryStatus.HEALTHY for nid in consensus_nodes
         }
-        self._last_heartbeat: Dict[str, int] = {}
+        # 心跳表在构造时以「当前时刻」初始化，不留空。
+        # 空表 + get(id, 0) 的缺省值 0 会被当成「纪元 0 发过心跳」，于是
+        # now_ms - 0 > HEARTBEAT_TIMEOUT_MS 恒真 —— 从未发过心跳的节点一律
+        # 被判超时，全新引擎第一轮就凭空切换一次主节点。
+        self._last_heartbeat: Dict[str, int] = {
+            nid: int(time.time() * 1000) for nid in consensus_nodes
+        }
         self._failover_history: List[FailoverRecord] = []
         self._view_change_count: int = 0
         self._current_view: int = 0
@@ -113,10 +119,13 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
             return marked
 
         if primary_id not in self._last_heartbeat:
-            # 从未收到心跳：只代表"没信息"，不代表节点已故障。刻意不改写
-            # _primary_status，保持 HEALTHY，使 view change 的候选筛选
-            # 仍把该节点当作可信任候选，避免因缺信息而误剔除。
-            return PrimaryStatus.UNKNOWN
+            # 表外的节点（构造时未在 consensus_nodes 里，或运行期新加入）：
+            # 从此刻开始计时并视为健康。与构造时的初始化口径一致 —— 缺信息
+            # 不是故障证据，不得据此判超时（否则又回到「全新引擎必切换」）。
+            self._last_heartbeat[primary_id] = now_ms
+            if primary_id in self._primary_status:
+                self._primary_status[primary_id] = PrimaryStatus.HEALTHY
+            return PrimaryStatus.HEALTHY
 
         if now_ms - self._last_heartbeat[primary_id] > self.HEARTBEAT_TIMEOUT_MS:
             self._primary_status[primary_id] = PrimaryStatus.TIMEOUT
@@ -403,7 +412,10 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
     def reset_failover_state(self):
         """Reset failover state (for test repeatability)."""
         self._primary_status = {nid: PrimaryStatus.HEALTHY for nid in self.consensus_nodes}
-        self._last_heartbeat.clear()
+        # 重置后重新开始计时（单纯清空会把「从未发心跳」重新变回超时）
+        self._last_heartbeat = {
+            nid: int(time.time() * 1000) for nid in self.consensus_nodes
+        }
         self._failover_history.clear()
         self._view_change_count = 0
         self._current_view = 0
