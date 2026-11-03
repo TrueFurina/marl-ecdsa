@@ -237,6 +237,24 @@ class ECDSAUtils:
         return signature
 
     @staticmethod
+    def _payload_equivalent(expected: bytes, actual: bytes) -> bool:
+        """字节不等时的语义等价判定：只容忍 JSON 数值写法差异。
+
+        为什么要这一步：`build_message` 用 json.dumps 重建，调用方把时间戳
+        传成 float（1000.0，同值）时重建结果写作 1000.0，与被签的 1000 字节
+        不等 —— 但字段值完全一致，不该判成篡改。反过来字符串 "1000" 与整数
+        1000 在 dict 比较里不相等，仍然拒绝（否则类型混淆可绕过绑定）。
+
+        放宽的只是「表示形式」，不是「字段集合」：expected 由包内字段（含
+        extra）重建，字典相等即意味着键集合相等 —— 签名体里多出来的、未被
+        包声明的键一律不等，按篡改拒绝。
+        """
+        try:
+            return json.loads(expected) == json.loads(actual)
+        except Exception:
+            return False
+
+    @staticmethod
     def verify(
         public_key: ec.EllipticCurvePublicKey,
         message: bytes,
@@ -325,14 +343,35 @@ class ECDSAUtils:
             # 导致攻击者可篡改 action / nonce / timestamp 明文而保留原签名，
             # 验签仍然通过（业务字段与签名承诺脱钩）。此处用包内明文重新构造
             # message 并与 message_hex 逐位比对，不一致即拒绝。
+            # 载荷绑定（fail-closed）：四个承诺字段缺一不可。
+            #
+            # 为什么要显式判缺：曾有一版写成「package 带全字段才比对」，于是
+            # 把 agent_id/action/timestamp/nonce 删掉、只留 message_hex +
+            # signature_hex，绑定检查就被整段跳过 —— 而
+            # cooperation_detector.filter_verified_packages() 吃的正是**外部
+            # 传入**的包。删字段即绕过，这是后门不是兼容。
+            missing = [
+                k for k in ('agent_id', 'action', 'timestamp', 'nonce')
+                if k not in package
+            ]
+            if missing:
+                logger.warning(
+                    "[ECDSAUtils] 签名包缺少载荷绑定所需字段 "
+                    f"{missing}，拒绝（裸 message_hex + signature_hex "
+                    "无法证明签名与业务字段相关）"
+                )
+                return False
+
             expected = ECDSAUtils.build_message(
-                package.get('agent_id'),
-                package.get('action'),
-                package.get('timestamp'),
-                package.get('nonce'),
+                package['agent_id'],
+                package['action'],
+                package['timestamp'],
+                package['nonce'],
                 package.get('extra'),
             )
-            if expected != message:
+            if expected != message and not ECDSAUtils._payload_equivalent(
+                expected, message
+            ):
                 logger.debug(
                     "[ECDSAUtils] 签名包业务字段与签名承诺不一致，拒绝 "
                     f"(agent={package.get('agent_id')})"
