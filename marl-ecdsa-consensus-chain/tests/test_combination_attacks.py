@@ -9,7 +9,10 @@
 威胁可达性分级（与探针一致）：
   real       = 正常路径可达，构成实际伤害（C1 开局虚假承诺）
   amplifier  = 单独无伤害，放大其他攻击的感知盲区（C2 fail_count 无感知）
-  depth_gap  = 需绕过签名服务构造包，纵深缺口（C3 省略 r / C4 FIFO 淘汰）
+  depth_gap  = 需绕过签名服务构造包，纵深缺口（C3 省略 r）
+
+2026-11-03 变更：C4（FIFO 淘汰后重用）已由 security_guard 的淘汰摘要档案关闭，
+对应断言已按本节约定翻转；残留边界（档案仅进程内有效）另有一条测试钉住。
 
 诚实边界：C1 不是实现 bug，是承诺机制的设计边界——无外部真值源时，
 任何承诺-揭示方案都无法验证开局真伪。修复需引入受信位置登记，属设计变更。
@@ -150,13 +153,21 @@ def test_c3_sign_action_always_fills_r():
 
 
 # ---------------------------------------------------------------------------
-# C4 —— FIFO 淘汰后重用（depth_gap）：检测窗口被 MAX_R_ENTRIES 截断
+# C4 —— FIFO 淘汰后重用：检测窗口被 MAX_R_ENTRIES 截断
+#
+# 2026-11-03 翻转：原断言钉的是「淘汰即可重用」的旧现状（depth_gap）。
+# security_guard 引入淘汰摘要档案后，被挤出 _r_registry 的 r 仍能被认出，
+# 该缺口关闭 —— 按本文件开头的约定「修复后翻转对应断言」，此处改为钉住新事实。
 # ---------------------------------------------------------------------------
 
-def test_c4_fifo_eviction_allows_reuse():
-    """固定填充 1002 个包后，重用最早期的 r 不被检测（因上限 1000 已淘汰它）。
+def test_c4_evicted_r_is_still_detected():
+    """固定填充 1002 个包后，重用最早期的 r **仍被拦下**（2026-11-03 关闭 depth_gap）。
 
-    注意：填充量必须写死 1002 而不是 MAX_R_ENTRIES+2——否则上限被调大时
+    旧实现只有 `_r_registry` 这一张 FIFO 表：淘汰即遗忘，于是攻击成本仅为
+    「先发 MAX_R_ENTRIES 个合法包」就能重放任意早期 r。现实现淘汰时把 r 的
+    摘要写入 `_r_evicted_digests`，再次出现照样判为重用来。
+
+    注意：填充量必须写死 1002 而不是 MAX_R_ENTRIES+2 —— 否则上限被调大时
     填充量跟着涨，测试恒绿、钉不住具体上限值（变异验证实测过这个缺陷）。
     """
     guard = SecurityGuard()
@@ -167,8 +178,36 @@ def test_c4_fifo_eviction_allows_reuse():
     for i in range(1, 1003):
         ok, _ = guard.check_package(_pkg(i, TRUE_POS, r=500000 + i))
         assert ok, f"前置填充包 {i} 不应被拦"
-    ok, _ = guard.check_package(_pkg(1100, TRUE_POS, r=500001))
-    assert ok, "被 FIFO 淘汰的 r 重用不被检测（本条钉住现状）"
+
+    # 500001 / 500002 已被 FIFO 挤出 `_r_registry`（只剩 500003..501002）
+    assert 500001 not in guard._r_registry[AGENT], "前置条件失效：500001 未被淘汰"
+
+    ok, reason = guard.check_package(_pkg(1100, TRUE_POS, r=500001))
+    assert not ok, "被 FIFO 淘汰的 r 重用必须仍被拦下（不得因淘汰而放行）"
+    assert "历史档案" in reason, f"拦截理由应指明命中淘汰档案，实际：{reason}"
+
+    # 淘汰必须留痕：两条被淘汰 + 告警为降级（静默遗忘等于给攻击者留窗口）
+    st = guard.get_detection_status()
+    assert st["evicted_per_agent"].get(AGENT) == 2, st
+    assert st["evicted_digest_count"] == 2, st
+    assert st["is_degraded"] is True, st
+
+
+def test_c4_residual_archive_is_in_memory_only():
+    """残留边界：摘要档案只在**进程内**，重启即遗忘 —— 不得声称 C4 已彻底修复。
+
+    本测存在的意义是防过度宣称：`_r_evicted_digests` 是纯内存集合，
+    换进程（重启 / 多副本各自持表）后，被淘汰的 r 又能重放。
+    要彻底关闭须持久化，属存储层变更，不在检测器内解决。
+    """
+    guard = SecurityGuard()
+    for i in range(1, 1003):
+        guard.check_package(_pkg(i, TRUE_POS, r=500000 + i))
+    assert guard._r_evicted_digests, "前置条件失效：无淘汰记录"
+
+    fresh = SecurityGuard()          # 模拟进程重启
+    ok, _ = fresh.check_package(_pkg(1, TRUE_POS, r=500001))
+    assert ok, "跨进程不应仍被拦（若此断言变红，说明已做到持久化，请同步更新本文档）"
 
 
 def test_c4_control_within_window_reuse_is_detected():
