@@ -61,8 +61,14 @@ DOC_EXT = {".md", ".txt", ".docx", ".pdf", ".html", ".htm", ".pptx"}
 _RE_SAMPLE = re.compile(
     r"n\s*=\s*(\d+)\s*(?:个)?\s*(?:种子|seeds?|组|groups?|samples?|runs?|episodes?|/"
     r"(?:组|group))", re.I)
-#: 测试数族：``1624 passed`` / ``1624 个测试通过``
-_RE_TESTS = re.compile(r"(\d{3,5})\s*(?:passed|个测试通过|个测试用例全部通过|tests passed)", re.I)
+#: 测试数族：``1624 passed`` / ``2,183 passed`` / ``1624 个测试通过``
+#:
+#: 2026-11-03 修复：原式是 `(\d{3,5})`，遇到**带千分位**的写法会从逗号后开始匹配 ——
+#: `2,183 passed` 被读成 **183**，于是 README 那条明明等于下限的表述被判成「低于下限
+#: 2183」的漂移（假红）。现同时接受 `1,234` 与 `1234` 两种写法，取值时去逗号。
+_RE_TESTS = re.compile(
+    r"(\d{1,3}(?:,\d{3})+|\d{3,5})\s*(?:passed|个测试通过|个测试用例全部通过|tests passed)",
+    re.I)
 
 #: 口径豁免标记（与 scan_void_tokens 的 mention 同源；此处内联一份常量，
 #: 避免本体检脚本依赖 scanning 运行时，缺失配置时仍可独立工作）
@@ -149,7 +155,7 @@ def scan_text(text: str) -> list:
         for m in _RE_SAMPLE.finditer(line):
             out.append((idx, "sample_size", int(m.group(1)), is_exempt(line), line.strip()))
         for m in _RE_TESTS.finditer(line):
-            out.append((idx, "tests", int(m.group(1)), is_exempt(line), line.strip()))
+            out.append((idx, "tests", int(m.group(1).replace(",", "")), is_exempt(line), line.strip()))
     return out
 
 
