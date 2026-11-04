@@ -14,10 +14,17 @@
      否则拒跑——防止把别人的未提交改动卷进变异/恢复）；仓库整体脏改动
      不拒跑，但快照进报告备查；每目标记录原内容 SHA256；finally 恢复并
      逐字节校验；中断不残留变异体；
-  5. command 类目标做前后对照：基线（未注入）必须匹配 expect_pattern，
-     注入后必须不匹配——防止模式写错导致误判承重（#157 的语义：目标
-     定位与断言都必须真实）；
-  6. 报告落 reports/mutation/（gitignored），含"未覆盖守卫类别"声明
+  5. 前后对照对 pytest 类同样成立（2026-11-05 加）：基线（未注入）必须
+     **绿**，注入后必须**红且退出码恰为 1**。理由有二——
+     · 红基线下的"变异后仍红"不证明任何承重，此前 pytest 类没有基线检查，
+       一个本来就红的文件可以让任何变异体都"通过"；
+     · rc=2/3/4/5（中断 / 内部错误 / 用法错 / 一条没收集）都不是"有用例
+       失败"，却是非零——此前一律被当成承重，属于把门禁噪音读成通过了。
+     command 类仍是「基线匹配 expect_pattern、注入后不匹配」（#157）；
+  6. 行尾必须逐字节往返（2026-11-05 加）：`read_text/write_text` 默认做
+     universal newline 转换，在 Windows 上把 LF 文件整份改写成 CRLF——
+     注入虽被"恢复"，工作树却留下一份整文件行尾翻转的假改动；
+  7. 报告落 reports/mutation/（gitignored），含"未覆盖守卫类别"声明
      （#168：知道自己没测什么）。
 
 用法：
@@ -49,8 +56,9 @@ REPORT_DIR = REPO / "reports" / "mutation"
 #   - check_submission_anonymity.py 的逐模式承重（只测过整链）；
 #   - 训练/评估脚本（train.py 等，非交付面）。
 UNCOVERED_NOTE = (
-    "未覆盖守卫类别：marl/ 共识层守卫；pack_submission_zips 打包链路；"
-    "匿名门禁逐模式承重；train.py 等训练脚本。新增目标请带 why + 审计日期。"
+    "未覆盖守卫类别：visualization/ 与 static/ 前端路由；pack_submission_zips 打包链路；"
+    "匿名门禁逐模式承重；train.py 等训练脚本；marl/integration 的自适应 λ 与结算系数"
+    "（本表只覆盖其 NaN 钳位与行为缓冲排空）。新增目标请带 why + 审计日期。"
 )
 
 
@@ -85,31 +93,110 @@ def git_dirty_snapshot(limit: int = 2000) -> str:
     return (r.stdout or "")[:limit]
 
 
+REQUIRED_FIELDS = ("id", "file", "locator", "mutation", "check", "why")
+
+
 def load_targets() -> list[dict]:
+    """读登记表并做静态校验；不合格即 SystemExit（fail-closed，不静默跳过）。"""
     if not TARGETS_FILE.exists():
         raise SystemExit(f"FAIL: 目标登记文件不存在: {TARGETS_FILE}")
     data = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))
-    targets = data.get("targets")
-    if not isinstance(targets, list) or len(targets) == 0:
-        raise SystemExit("FAIL: 变异目标登记为空——空清单不放过（REA #154）")
-    for t in targets:
-        for field in ("id", "file", "locator", "mutation", "check", "why"):
-            if field not in t:
-                raise SystemExit(f"FAIL: 目标缺少必填字段 {field}: {t.get('id', '?')}")
-        if t["check"].get("kind") not in ("pytest", "command"):
-            raise SystemExit(f"FAIL: 目标 {t['id']} 的 check.kind 仅支持 pytest/command")
-    return targets
+    problems = validate_targets(data.get("targets"))
+    if problems:
+        raise SystemExit(
+            "FAIL: 变异目标登记不合格（探针拒跑）：\n  - " + "\n  - ".join(problems))
+    return data["targets"]
+
+
+def read_source(path: Path) -> tuple[str, bool]:
+    """返回 (以 ``\\n`` 归一的行文本, 原文是否 CRLF)。
+
+    行尾必须自己管：``Path.read_text()`` / ``write_text()`` 默认做 universal
+    newline 转换，Windows 上会把 LF 文件**整份**写成 CRLF——注入虽被恢复，
+    恢复的是文本而不是字节，工作树留下整文件行尾翻转的假改动。
+    """
+    raw = path.read_bytes().decode("utf-8")
+    return raw.replace("\r\n", "\n"), "\r\n" in raw
+
+
+def write_source(path: Path, text: str, crlf: bool) -> None:
+    """按原文行尾写回，保证字节级往返。"""
+    out = text.replace("\n", "\r\n") if crlf else text
+    path.write_bytes(out.encode("utf-8"))
 
 
 def locate(path: Path, locator: str) -> tuple[str, int]:
-    """返回 (原文, locator 匹配次数)。"""
-    text = path.read_text(encoding="utf-8")
+    """返回 (行尾归一后的原文, locator 匹配次数)。"""
+    text, _ = read_source(path)
     return text, text.count(locator)
 
 
-def check_pytest(args: list[str]) -> tuple[bool, str]:
+def validate_targets(targets) -> list[str]:
+    """登记表静态校验，返回问题清单（空 = 合格）。
+
+    与 ``load_targets()`` 共用同一套规则：探针拒跑的登记，测试也必须判红，
+    否则会出现"探针说不行、测试说没事"的两套真值。
+
+    校验项：必填字段 / id 唯一 / check.kind 与关联测试存在 / locator 与
+    mutation 不得相同 / locator 必须**恰好**命中 1 次（0 次 = 漂移，多次 =
+    歧义，两种都必须 fail-closed，REA #154）。
+    """
+    problems: list[str] = []
+    if not isinstance(targets, list) or not targets:
+        return ["目标登记为空——空清单不放过（REA #154）"]
+
+    seen: set[str] = set()
+    for i, t in enumerate(targets):
+        if not isinstance(t, dict):
+            problems.append(f"#{i}: 目标不是对象")
+            continue
+        tid = t.get("id") or f"#{i}"
+        for field in REQUIRED_FIELDS:
+            if field not in t:
+                problems.append(f"{tid}: 缺少必填字段 {field}")
+        if tid in seen:
+            problems.append(f"{tid}: id 重复")
+        seen.add(tid)
+
+        check = t.get("check") or {}
+        kind = check.get("kind")
+        if kind not in ("pytest", "command"):
+            problems.append(f"{tid}: check.kind 仅支持 pytest/command（实为 {kind!r}）")
+        elif kind == "pytest":
+            files = [a for a in (check.get("args") or []) if str(a).endswith(".py")]
+            if not files:
+                problems.append(f"{tid}: pytest 类未给出测试文件路径")
+            for f in files:
+                if not (REPO / f).exists():
+                    problems.append(f"{tid}: 关联测试不存在 {f}")
+        else:
+            if not check.get("cmd") or not check.get("expect_pattern"):
+                problems.append(f"{tid}: command 类缺 cmd / expect_pattern")
+
+        target_file = t.get("file")
+        if target_file is not None:
+            f = REPO / str(target_file)
+            if not f.exists():
+                problems.append(f"{tid}: 目标文件不存在 {target_file}")
+            elif "locator" in t:
+                text, _ = read_source(f)
+                n = text.count(t["locator"])
+                if n != 1:
+                    problems.append(f"{tid}: locator 匹配 {n} 次（必须恰好 1 次，REA #154）")
+            if "locator" in t and "mutation" in t and t["locator"] == t["mutation"]:
+                problems.append(f"{tid}: locator 与 mutation 相同（注入后文本无变化）")
+    return problems
+
+
+def check_pytest(args: list[str]) -> tuple[int, str]:
+    """跑关联测试，返回 (退出码, 末行摘要)。
+
+    退出码语义必须区分：0=全绿、1=有用例失败、2=被中断、3=内部错误、
+    4=用法错、5=一条都没收集。只有 1 才算"变异被抓到"。
+    """
     r = run([sys.executable, "-m", "pytest", *args])
-    return r.returncode != 0, f"rc={r.returncode}"
+    tail = [ln for ln in (r.stdout or "").strip().splitlines() if ln.strip()]
+    return r.returncode, (tail[-1][-160:] if tail else "(无输出)")
 
 
 def check_command(cmd: list[str], pattern: str, injected: bool) -> tuple[bool, str]:
@@ -137,7 +224,9 @@ def probe(target: dict, dry_run: bool) -> dict:
         result["steps"].append(f"FAIL: 文件不存在 {target['file']}")
         return result
 
-    original, count = locate(path, target["locator"])
+    raw_before = path.read_bytes()
+    original, crlf = read_source(path)
+    count = original.count(target["locator"])
     if count != 1:
         result["steps"].append(
             f"FAIL: locator 匹配 {count} 次（必须恰好 1 次）——"
@@ -151,7 +240,9 @@ def probe(target: dict, dry_run: bool) -> dict:
             f"FAIL: 目标文件自身有未提交改动，拒跑（先提交该文件）：\n    {dirty.strip()}")
         return result
     result["steps"].append("目标文件 git 干净 ✓")
-    result["original_sha256"] = sha256_text(original)
+    result["original_sha256"] = hashlib.sha256(raw_before).hexdigest()
+    result["original_text_sha256"] = sha256_text(original)
+    result["line_ending"] = "CRLF" if crlf else "LF"
 
     if dry_run:
         result["ok"] = True
@@ -160,33 +251,53 @@ def probe(target: dict, dry_run: bool) -> dict:
 
     check = target["check"]
     try:
-        # command 类先做基线对照（未注入必须匹配）
+        # ── 基线对照（未注入）：两类都必须先证明"改动前本来是对的" ──
         if check["kind"] == "command":
             ok, detail = check_command(check["cmd"], check["expect_pattern"], injected=False)
             if not ok:
                 result["steps"].append(f"FAIL: 基线对照未过——{detail}（模式或命令有误，先修登记再探）")
                 return result
             result["steps"].append(f"基线对照 ✓（{detail}）")
+        else:
+            rc, detail = check_pytest(check.get("args", []))
+            result["baseline_rc"] = rc
+            if rc != 0:
+                result["steps"].append(
+                    f"FAIL: 基线（未注入）退出码 {rc}——{detail}；"
+                    "红基线下的『变异后仍红』不证明任何承重（先修关联测试再探）")
+                return result
+            result["steps"].append(f"基线（未注入）绿 ✓（{detail}）")
 
         mutated = original.replace(target["locator"], target["mutation"], 1)
         if mutated == original:
             result["steps"].append("FAIL: 注入后文本无变化（locator 与 mutation 相同？）")
             return result
-        path.write_text(mutated, encoding="utf-8")
+        write_source(path, mutated, crlf)
 
         if check["kind"] == "pytest":
-            ok, detail = check_pytest(check.get("args", []))
-            verdict = "变异后测试全红 ✓（守卫承重）" if ok else "变异后测试仍绿 ✗（守卫不承重）"
+            rc, detail = check_pytest(check.get("args", []))
+            result["mutated_rc"] = rc
+            if rc == 1:
+                ok = True
+                verdict = f"变异后 {detail} ✓（守卫承重）"
+            elif rc == 0:
+                ok = False
+                verdict = f"变异后仍绿 ✗（守卫不承重）— {detail}"
+            else:
+                ok = False
+                verdict = (
+                    f"变异后退出码 {rc}（不是『有用例失败』）✗ — {detail}；"
+                    "按 fail-closed 记 FAIL（2=中断 / 3=内部错误 / 4=用法错 / 5=一条没收集）")
         else:
             ok, detail = check_command(check["cmd"], check["expect_pattern"], injected=True)
             verdict = f"变异后断言失效 ✓（守卫承重）— {detail}" if ok else f"变异后断言仍成立 ✗ — {detail}"
         result["steps"].append(verdict)
         result["ok"] = ok
     finally:
-        path.write_text(original, encoding="utf-8")
+        write_source(path, original, crlf)
         restored, rcount = locate(path, target["locator"])
-        if rcount == 1 and sha256_text(restored) == result["original_sha256"]:
-            result["steps"].append("原文恢复 ✓（SHA256 逐字节一致）")
+        if path.read_bytes() == raw_before and rcount == 1:
+            result["steps"].append("原文恢复 ✓（逐字节一致，含行尾）")
         else:
             result["steps"].append("FAIL: 原文恢复异常——立即 git checkout 该文件并排查！")
             result["ok"] = False
