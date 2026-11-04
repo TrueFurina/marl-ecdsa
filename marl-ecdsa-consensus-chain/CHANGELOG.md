@@ -15,7 +15,98 @@
 
 ---
 
+## 2026-11-04（续）— 套件提速 48.5%：三处重复执行被去掉，断言一条未改
+
+> 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+三条线索都指向同一类浪费：**同一段确定性计算被多条用例各算了一遍**。
+
+### 一、同一条用例被收集 3 遍（省 118.98s）
+
+`tests/test_v12_consensus_invariants.py` 原先写的是：
+
+```python
+from tests.test_v11_epoch_view import ConsensusV11
+class ConsensusV12(ConsensusV11):
+```
+
+pytest 的 `python_classes` 里的 `Test*` 前缀过滤**只对普通类生效**，
+`unittest.TestCase` 子类**无条件收集**。于是同一条用例跑了 3 遍：
+本模块命名空间里的 `ConsensusV11` 一遍、继承它的 `ConsensusV12` 一遍、
+`test_v11_epoch_view.py` 自身一遍。`-v` 输出里 pytest 自己就标着
+`tests/test_v12_consensus_invariants.py::ConsensusV11::test_... <- tests/test_v11_epoch_view.py`。
+
+实测三条 `test_epoch_reconfiguration_old_certificate` 分别为
+27.18s / 27.11s / 27.08s，四条用例的重复部分合计 **118.98s**。而
+`visualization.distributed_consensus` 是无状态模块、`setUp` 每次新建临时目录，
+重复执行**零新增覆盖**。
+
+修法：把夹具抽成**不继承 TestCase** 的 `_ConsensusHarness`，两个类各自只继承夹具、
+只保留定义在自己模块里的用例。两个文件合计收集数 16 → 8。
+
+配套守卫 `tests/test_no_testcase_leaks.py`：AST 静态扫描「import 了别处的 TestCase
+子类」与「继承了别处的 TestCase 子类」，并带一条自检用例，确保守卫本身不会退化成
+永远通过的空转。
+
+### 二、活代码共演化同一段计算跑 3 遍（省 219.34s）
+
+`TestLiveCoevolution` 三条 live 用例各调一次 `_run_mini`，其中前两条参数**完全相同**
+（2 轮 × 2 种子）——第二条纯属重算。
+
+改之前先做了两项实测，不靠推断：
+
+| 检验 | 结论 |
+|---|---|
+| 同参数（2 轮×2 种子）连跑两遍 | 逐轮指标逐位相同 |
+| 3 轮运行的前 2 轮 vs 直接跑 2 轮 | 逐位相同 |
+
+后者成立的理由：`run_round(r, benign, held, attack_cum)` 只依赖 `r` 与累计攻击轨迹，
+`r<2` 时 `attack_cum` 只含前两轮；`N_ROUNDS` 只有 `main()` 在用，不参与单轮计算。
+
+据此改为在 `scope="module"` 的 `mini_rounds` 夹具里跑一次 3 轮，2 轮的用例取
+`rounds[:2]`。
+
+### 三、代理训练重复 3 次（省 79.29s）
+
+`train_ml_defender()` 与 `train_surrogate()` 都是确定性的，实测：
+
+* 前者连跑两次，`classifier` / `train_accuracy` / `heldout_accuracy` 逐位相同，
+  且在 441 个网格点上两份判信的判定 **0 差异**；
+* 后者 `SURROGATE_SEED` 是常量、分类器 `random_state=42`，两次调用
+  `agreement` 0.9625 / `trusted_cells` 575 / `target` / `target_fidelity` 全等。
+
+改为 `ml_judge` / `surrogate` 两个 module 级夹具。`sweep()` 与 `arm_s2()` 只读
+`surrogate["trusted"]`，不改该字典，跨用例共享无副作用。
+
+### 实测（同条件 A/B：两棵树紧邻先后跑完）
+
+| | 基线（pristine main `989785b2`） | 改动后 |
+|---|---|---|
+| 耗时 | 866.36s（14:26） | **445.92s（7:25）** |
+| passed | 2239 | 2233 |
+| failed | 2 | 2 |
+| skipped | 25 | 25 |
+| 收集 | 2266 | 2260 |
+
+* 提速 **420.44s / 48.5%**（1.94×）
+* 条数守恒：2266 − 8（去掉 8 次重复执行）+ 2（新增守卫两条）= 2260；passed 同差 −6
+* 两条 failed 与基线完全相同，都是既有环境红灯：`test_deps_importable`（本机缺 torch）、
+  `test_next_nr::test_threaded_no_duplicate`（Windows 文件锁，`PermissionError 13`）
+
+> **为什么必须 A/B**：上午同一条基线是 556.20s，下午同一棵树跑出 866.36s（机器热状态
+> 不同，1.56×）。拿上午那 556s 当基线，会得出「提速约 20%」的错误结论。
+
+> **顺带推翻一次我自己的误判**：中途看到日志停在 `test_next_nr.py .....` 十一分钟不动，
+> 一度判为「用例挂死」并据此杀掉了一轮测量。实际原因是 pytest 输出重定向到文件时
+> **块缓冲**，日志整体滞后；加 `PYTHONUNBUFFERED=1` 与 `-u` 后可见一直在正常推进，
+> 单独跑该文件 0.98s 就结束了。教训：**看进度必须关缓冲**，否则「没输出」会被误读成
+> 「没进展」。
+
+---
+
 ## 2026-11-04 — 合并后两处收敛：无 torch 也能跑套件 / C4 档案随快照跨重启
+
 
 > 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
 > `deliverables/number_registry.json`）。

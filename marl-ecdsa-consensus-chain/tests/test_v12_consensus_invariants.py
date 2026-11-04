@@ -2,10 +2,18 @@
 import json
 import unittest
 from unittest.mock import patch
-from tests.test_v11_epoch_view import ConsensusV11
+from tests.test_v11_epoch_view import _ConsensusHarness
 from visualization import distributed_consensus as dc
 
-class ConsensusV12(ConsensusV11):
+class ConsensusV12(_ConsensusHarness,unittest.TestCase):
+    # 2026-11-04：原先写 `class ConsensusV12(ConsensusV11)`，且本模块把
+    # ConsensusV11 直接 import 进了命名空间。pytest 对 unittest.TestCase 子类
+    # 不看类名前缀、无条件收集，于是 V11 的 4 条用例在这里被收集两遍
+    #（import 进来的 ConsensusV11 一遍 + 继承来的 ConsensusV12 一遍），
+    # 加上 test_v11_epoch_view.py 本身一遍 —— 同一条用例跑 3 遍，
+    # 实测白占整套 ~120s（21.6%），dc 无状态、setUp 每次新建临时目录，
+    # 重复执行零新增覆盖。改为只继承夹具 `_ConsensusHarness`（非 TestCase，
+    # 不被收集），本类只保留 V12 自己的 4 条用例。
     def test_commit_receipt_must_match_real_node_and_block(self):
         self.start()
         actual=dc.request

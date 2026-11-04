@@ -51,6 +51,39 @@ def result_json():
     return json.loads(RESULT_PATH.read_text(encoding="utf-8"))
 
 
+@pytest.fixture(scope="module")
+def ml_judge(probe):
+    """训练一次 ML 防御者并对齐判信，模块内共享。
+
+    2026-11-04 实测的确定性依据（不是推断）：连续两次 train_ml_defender()
+    返回的 classifier / train_samples / train_accuracy / heldout_accuracy
+    逐位相同，且在 441 个网格点上两份判信的判定 0 差异。既然每次训练得到的
+    是同一个模型，5 条 live 用例各训一遍就只是重复计算——共享不改变任何
+    用例看到的对象。
+
+    原先每条用例各写 4 行训练样板（各 ~1.5s），外加代理训练（~15s/次，
+    见 surrogate 夹具）在 3 条用例里重复。
+    """
+    pytest.importorskip("sklearn")
+    ml_det, info = probe.BS.train_ml_defender()
+    assert info["trained"] is True
+    return probe.BS.make_judge_ml(ml_det)
+
+
+@pytest.fixture(scope="module")
+def surrogate(probe, ml_judge):
+    """在共享判信函数上训练一次代理，模块内共享。
+
+    可复现性同样实测过：train_surrogate 内部 rng 由常量 SURROGATE_SEED
+    播种、分类器 random_state=42，两次调用返回的 agreement（0.9625）、
+    trusted_cells（575）、target、target_fidelity 逐位相同。
+
+    注意 sweep() 与 arm_s2() 只读 surrogate["trusted"]，不改该字典，
+    因此跨用例共享无副作用。
+    """
+    return probe.train_surrogate(ml_judge)
+
+
 def _healthy_m(**over):
     m = {
         "ada_rr": 0.673, "ada_rm": 0.487, "ada_mm": 0.487, "ada_mr": 0.673,
@@ -207,7 +240,7 @@ class TestResultJsonConsistency:
         assert result_json["invariants"]["mm_equiv_rm"] is True
         assert result_json["invariants"]["mr_equiv_rr"] is True
 
-    def test_sweep_paired_sign_live(self, probe):
+    def test_sweep_paired_sign_live(self, probe, ml_judge, surrogate):
         """实时缩样（2 种子）：sweep 记录的配对增益必须与 rates 重算逐位一致。
 
         已提交 JSON 一致性测试读不到**探针代码漂移**（JSON 是旧代码产的）——
@@ -216,11 +249,7 @@ class TestResultJsonConsistency:
         saved = probe.BS.SEEDS_SWEEP
         probe.BS.SEEDS_SWEEP = probe.BS.SEEDS[:2]
         try:
-            ml_det, info = probe.BS.train_ml_defender()
-            assert info["trained"] is True
-            judge_ml = probe.BS.make_judge_ml(ml_det)
-            sur = probe.train_surrogate(judge_ml)
-            sw = probe.sweep(judge_ml, sur)
+            sw = probe.sweep(ml_judge, surrogate)
         finally:
             probe.BS.SEEDS_SWEEP = saved
         for tag, arm in (("s1", "s1_restarts"), ("s2", "s2_surrogate")):
@@ -305,36 +334,22 @@ class TestSurrogateInstrument:
 # 7. ML 臂实时接线（需 sklearn；结构断言宽松，严格门槛只对已提交 JSON）
 # ---------------------------------------------------------------------------
 class TestMLArmWiring:
-    def test_surrogate_live_structural(self, probe):
-        pytest.importorskip("sklearn")
-        ml_det, info = probe.BS.train_ml_defender()
-        assert info["trained"] is True
-        judge_ml = probe.BS.make_judge_ml(ml_det)
-        sur = probe.train_surrogate(judge_ml)
+    def test_surrogate_live_structural(self, probe, surrogate):
         # 宽松结构断言（sklearn 版本差异不设严格门槛；严格门槛属 decide() 自身）
-        assert sur["agreement"] > 0.90
-        assert sur["trusted_cells"] > 0
-        assert sur["target"] is not None
-        assert sur["target_real_trusted"] in (True, False)
+        assert surrogate["agreement"] > 0.90
+        assert surrogate["trusted_cells"] > 0
+        assert surrogate["target"] is not None
+        assert surrogate["target_real_trusted"] in (True, False)
 
-    def test_s2_live_recovers_exploitation(self, probe):
+    def test_s2_live_recovers_exploitation(self, probe, ml_judge, surrogate):
         """实时端到端：窃取导航必须实际占领（对真实 ML 判信），非 JSON 摆拍。"""
-        pytest.importorskip("sklearn")
-        ml_det, info = probe.BS.train_ml_defender()
-        assert info["trained"] is True
-        judge_ml = probe.BS.make_judge_ml(ml_det)
-        sur = probe.train_surrogate(judge_ml)
-        run = probe.arm_s2(11, judge_ml, sur)
+        run = probe.arm_s2(11, ml_judge, surrogate)
         assert run["coop_rate"] >= 0.90, "窃取攻击实时未占领——探针逻辑疑似退化"
 
-    def test_judge_agnostic_invariant_live(self, probe):
+    def test_judge_agnostic_invariant_live(self, probe, ml_judge):
         """实时判定不变量：mm≡rm、mr≡rr（同函数同反馈源必同轨迹）。"""
-        pytest.importorskip("sklearn")
-        ml_det, info = probe.BS.train_ml_defender()
-        assert info["trained"] is True
-        judge_ml = probe.BS.make_judge_ml(ml_det)
         for seed in (11, 23):
-            a, b = probe.arm_mm(seed, judge_ml), probe.arm_rm(seed, judge_ml)
+            a, b = probe.arm_mm(seed, ml_judge), probe.arm_rm(seed, ml_judge)
             assert a["coop_rate"] == b["coop_rate"]
             assert a["first_hit_step"] == b["first_hit_step"]
             c, d = probe.arm_mr(seed), probe.arm_rr(seed)

@@ -21,7 +21,20 @@ def isolate_consensus_ports(cfg):
  dc.CONFIG.write_text(json.dumps(cfg,ensure_ascii=False,indent=2))
  return cfg
 
-class ConsensusV11(unittest.TestCase):
+class _ConsensusHarness:
+ """节点生命周期与提案构造夹具。**刻意不继承 unittest.TestCase**。
+
+ pytest 收集规则：`python_classes` 的 `Test*` 前缀过滤只作用于普通类，
+ `unittest.TestCase` 子类**无条件收集**。所以「继承 TestCase 的夹具基类」
+ 一旦被别的模块 import，就会在那个模块里再收集一遍。
+
+ 2026-11-04 实测的代价：test_v12_consensus_invariants.py 既 `import ConsensusV11`
+ （模块命名空间里被收集）又 `class ConsensusV12(ConsensusV11)`（继承再收集），
+ 结果是 4 条用例各跑 3 遍 —— 60s + 60s 纯重复，占整套 ~120s（21.6%），
+ 而 dc 是无状态模块、setUp 每次新建临时目录，重复执行零新增覆盖。
+
+ 夹具不持有断言，子类各自补自己的用例；这样跨模块复用夹具不再附带执行。
+ """
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name)
   self.original=(dc.BASE,dc.CONFIG,dc.HISTORY)
@@ -62,6 +75,8 @@ class ConsensusV11(unittest.TestCase):
   return {'payload':pl,'txid':dc.digest(pl),'public_key':dc.pubkey(key),'signature':dc.sign(key,pl)}
  def candidate(self):
   return {'weights':[3333,3333,3333], 'origin':'verified-training.json','origin_sha256':'e'*64,'episodes':3,'source':'training_contribution_share_clipped_20pct_floor_bft_third_cap','agent_mapping':[{'agent':str(i),'node':f'node-{i+1}','weight':w} for i,w in enumerate([3333,3333,3333])]}
+
+class ConsensusV11(_ConsensusHarness,unittest.TestCase):
  def test_epoch_reconfiguration_old_certificate(self):
   self.start();r=dc.propose(self.tx('epoch0'));self.assertEqual(r['status'],'replicated');self.assertTrue(dc.cross_verify(1)['consistent']);self.stop()
   snap=dc.activate_snapshot(self.candidate());self.assertEqual(snap['version'],2)
