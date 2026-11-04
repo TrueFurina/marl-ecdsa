@@ -169,6 +169,30 @@
         "expect": "all_red"
       },
       "why": "2026-11-04 缺陷：clear() 嵌在 bc_node 判断内，stub 模式 flush 是空操作，缓冲随回合单调增长（实测 20 回合 ×100 步累积 2000 条从不释放）；变异把 clear() 放回判断内（audited 2026-11-04，2026-11-05 登记）"
+    },
+    {
+      "id": "anon-placeholder-per-match",
+      "file": "scripts/check_submission_anonymity.py",
+      "locator": "            for mo in rx.finditer(line):\n                snippet = mo.group(0)",
+      "mutation": "            _first = rx.search(line)  # MUTATION-PROBE: 退回整行短路\n            for mo in ([_first] if _first else []):\n                snippet = mo.group(0)",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_check_submission_anonymity.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：占位豁免是逐处语义，旧实现每行每类只取 re.search 首处、首处为占位就整行 continue —— `C:/Users/SomeUser/... 与 C:/Users/<真名>/...` 同行时真泄漏实测 exit 0；同行两处真泄漏也只报首处（audited 2026-11-05）"
+    },
+    {
+      "id": "anon-self-exempt-name-only",
+      "file": "scripts/check_submission_anonymity.py",
+      "locator": "    return EXEMPT_MARKER.encode(\"utf-8\") in head",
+      "mutation": "    return True  # MUTATION-PROBE: 退回「同名即豁免」",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_check_submission_anonymity.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：豁免表按文件名比对，任何同名文件（如把自写的 secrets_scan.py 打进包）连座隐身，与「只有内容就是规则定义才可豁免」的准入判据矛盾；变异退回 name-only 后同名无标记文件不再被扫（audited 2026-11-05）"
     }
   ]
 }

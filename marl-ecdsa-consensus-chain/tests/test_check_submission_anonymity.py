@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# anon-gate-exemption: rule-definition —— 本文件承载规则负向夹具，属于豁免准入内容
 """``check_submission_anonymity.py`` 门禁契约测试（fail-closed 不被误修击穿）。
 
 背景
@@ -139,6 +140,34 @@ def test_placeholder_prefix_is_not_a_free_pass(vector: str):
     """
     code, out = _scan_tmp(f"PATH = '{vector}'\n")
     assert code == 1, f"占位前缀变体必检出：{vector}\n{out}"
+
+
+def test_placeholder_before_real_leak_still_flagged():
+    """占位豁免必须**逐处**生效，不得整行短路（2026-11-05 修）。
+
+    旧实现每行每类只取 ``re.search`` 的**首处**匹配，首处是占位就 ``continue``
+    掉整行 —— ``占位 ... 真泄漏`` 同处一行时真泄漏一路放行（实测 exit 0）。
+    这在文档里极常见：「把 C:/Users/SomeUser/... 改成 C:/Users/<真名>/...」。
+    """
+    real = "C:" + "/Users/" + "devuser01" + "/y"
+    code, out = _scan_tmp(
+        "把 C:/Users/SomeUser/x 换成 %s\n" % real, suffix=".md")
+    assert code == 1, f"占位之后的真泄漏必须检出，实得 {code}\n{out}"
+
+
+def test_two_leaks_on_one_line_both_reported():
+    """同一行两处真泄漏都要报（旧实现只报首处，少报数量）。"""
+    mod = _load_gate_module()
+    compiled = [(c, re.compile(r)) for c, r in mod.RULES]
+    a = "C:" + "/Users/" + "alice01"
+    b = "C:" + "/Users/" + "bob02"
+    with tempfile.TemporaryDirectory(prefix="anonscan_two_") as td:
+        p = Path(td) / "d.md"
+        p.write_text("%s/x %s/y\n" % (a, b), encoding="utf-8")
+        hits = mod.scan_file(p, compiled)
+    snippets = [h[2] for h in hits]
+    assert len(snippets) == 2, f"同一行两处泄漏都该报，实得 {snippets}"
+    assert any("alice01" in s for s in snippets) and any("bob02" in s for s in snippets), snippets
 
 
 def test_files_mode_scans_only_named_files():
@@ -292,13 +321,42 @@ def _load_self_exempt() -> set[str]:
 
 
 def test_self_exempt_files_not_flagged():
-    """门禁自身文件名：路径串是规则定义，不算泄漏。"""
+    """门禁自身文件名 **且** 文件头带豁免标记：路径串是规则定义，不算泄漏。"""
     with tempfile.TemporaryDirectory(prefix="anonscan_self_") as td:
         target = Path(td) / "check_submission_anonymity.py"
         target.write_text(
-            'RULE = "%s"\n' % WIN_USER, encoding="utf-8")
+            "# anon-gate-exemption: rule-definition\nRULE = \"%s\"\n" % WIN_USER,
+            encoding="utf-8")
         code, out = _run_gate("--root", td)
         assert code == 0, f"门禁自身文件名应自豁免，实得 {code}\n{out}"
+
+
+def test_self_exempt_name_without_marker_is_scanned():
+    """同名文件**不等于**规则定义：缺豁免标记就按普通文件扫（2026-11-05 修）。
+
+    旧实现只比文件名，于是把一份自己写的 ``secrets_scan.py`` 打进提交包，
+    里面写死 ``C:/Users/<真名>/...`` 也永远隐身 —— 与「只有内容才是规则定义
+    才可豁免」的准入判据直接矛盾。
+    """
+    with tempfile.TemporaryDirectory(prefix="anonscan_impostor_") as td:
+        target = Path(td) / "secrets_scan.py"
+        target.write_text("TEMPLATE = \"%s\"\n" % WIN_USER, encoding="utf-8")
+        code, out = _run_gate("--root", td)
+        assert code == 1, f"同名但无标记的文件必须被扫出，实得 {code}\n{out}"
+        assert "缺豁免标记" in out, f"应显式提示缺标记，便于定位：\n{out}"
+
+
+def test_repo_exempt_files_carry_marker_in_head():
+    """仓库里真正享受豁免的 3 个文件必须自带标记（否则 CI 会扫出规则定义字样）。"""
+    mod = _load_gate_module()
+    for name in sorted(mod.SELF_EXEMPT_FILES):
+        hits = [p for p in REPO_ROOT.rglob(name) if p.is_file()]
+        assert hits, f"豁免表里的 {name} 在仓库中不存在——豁免表已过期"
+        for p in hits:
+            head = p.read_bytes()[:mod.EXEMPT_MARKER_WINDOW]
+            assert mod.EXEMPT_MARKER.encode("utf-8") in head, (
+                f"{p.relative_to(REPO_ROOT)} 缺豁免标记（首 {mod.EXEMPT_MARKER_WINDOW} 字节内）")
+
 
 
 # ── 4. 机器无关：门禁源码自身零泄漏 ────────────────────────────────────────

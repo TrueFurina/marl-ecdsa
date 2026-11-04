@@ -54,11 +54,22 @@ REPORT_DIR = REPO / "reports" / "mutation"
 # 2026-11-05 起，审计简报 §1/§2/§3/§4/§5/§6/§7/§8/§9 的九处修复与 11-04 的
 # flush_pending 缺陷已全部登记为目标（见 tests/mutation_targets.json），
 # 因此原先列在这里的「marl/ 共识层守卫」一条已划掉（已覆盖的部分不再自称盲区）。
+# 同日划掉「匿名门禁逐模式承重」：占位逐处判定与自豁免标记已各有一条目标。
+#
+# ⚠️ 2026-11-05 自我推翻一条**过期情报**：旧注释里写的
+#   「scripts/pack_submission_zips.py 打包链路」在本仓库**不存在**
+#   （`git ls-files | grep -i pack` 只有 scripts/pack_slim_testdata.py，
+#    全仓 grep "pack_submission" 只命中本文件的注释自己）。
+#   一条不存在的文件不能算盲区 —— 那是把"没查过"写成"查过但没测"。
 UNCOVERED_NOTE = (
-    "未覆盖守卫类别：visualization/ 与 static/ 前端路由；pack_submission_zips 打包链路；"
-    "匿名门禁逐模式承重；train.py 等训练脚本；marl/integration 的自适应 λ 与结算系数"
-    "（本表只覆盖其 NaN 钳位与行为缓冲排空）。新增目标请带 why + 审计日期。"
+    "未覆盖守卫类别：visualization/ 与 static/ 前端路由；train.py 等训练脚本；"
+    "marl/integration 的自适应 λ 与结算系数"
+    "（本表只覆盖其 NaN 钳位与行为缓冲排空）。"
+    "匿名门禁的容器/二进制通道只靠 pytest 家族兜底，未逐规则登记变异目标。"
+    "（原列的 pack_submission_zips 打包链路由实为不存在的文件，2026-11-05 删除。）"
+    "新增目标请带 why + 审计日期。"
 )
+
 
 
 def sha256_text(text: str) -> str:

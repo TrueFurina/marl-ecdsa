@@ -31,7 +31,8 @@ from scripts.mutation_probe import (  # noqa: E402
     write_source,
 )
 
-# 审计简报 §1/§2/§3/§4/§5/§6/§7/§8/§9 与 2026-11-04 flush_pending 缺陷对应的目标 id。
+# 审计简报 §1/§2/§3/§4/§5/§6/§7/§8/§9 与 2026-11-04 flush_pending 缺陷、
+# 2026-11-05 匿名门禁两处 fail-open 对应的目标 id。
 # 删掉一个就等于放弃一处承重证据，必须显式改这个集合并在评审里说明。
 AUDIT_INVARIANT_IDS = {
     "security-guard-r-type-normalization",
@@ -46,6 +47,8 @@ AUDIT_INVARIANT_IDS = {
     "incentive-nan-clamp",
     "world-state-nonfinite-reject",
     "action-recorder-flush-clear",
+    "anon-placeholder-per-match",
+    "anon-self-exempt-name-only",
 }
 
 
@@ -80,7 +83,10 @@ def test_registry_ids_are_unique():
 
 
 def test_audit_invariants_stay_registered():
-    """10 处审计修复的承重证据不得被静默删除。"""
+    """各批修复（审计简报 / flush_pending / 匿名门禁）的承重证据不得被静默删除。
+
+    不写死数量：数量每次加目标都会变，写死只会留下一句迟早过期的自述。
+    """
     registered = {t["id"] for t in load_targets()}
     missing = sorted(AUDIT_INVARIANT_IDS - registered)
     assert missing == [], (

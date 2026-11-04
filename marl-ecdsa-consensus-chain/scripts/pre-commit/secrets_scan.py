@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# anon-gate-exemption: rule-definition —— 本文件的豁免注释/正则是规则定义本体
 """密钥/凭据扫描器 — pre-commit 门禁
 用法：python scripts/pre-commit/secrets_scan.py [文件列表...]
 退出码：0=通过，1=命中密钥（fail-closed）
