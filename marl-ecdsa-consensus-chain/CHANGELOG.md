@@ -15,6 +15,118 @@
 
 ---
 
+## 2026-11-05 — 承重证据制度化：变异目标 2 → 14，并堵掉探针自身的两条「假绿」通道
+
+> 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+`scripts/mutation_probe.py` 早就在仓库里，纪律也写得很足（locator 必须唯一定位、
+恢复必须校验、报告落盘、未覆盖类别显式声明）。但它只登记了 **2 个**目标
+（signing backend 值域、doctor 的 git head 格式）。审计简报 §1–§9 那 9 处安全与
+正确性修复、加上 11-04 的 `flush_pending` 缺陷，**一处都没登记**。
+
+工具在、纪律在、**证据不在** —— 那 9 条「已修复」仍然只是一句自述。本节把
+它们变成可复跑的证据，并顺手修掉探针自身的两条假绿通道。
+
+### 一、登记 12 个新目标（2 → 14），全部实测承重
+
+每个目标必须同时满足四条：locator 在目标文件里**恰好**命中 1 次；未注入时关联
+测试**绿**；注入后**红**；恢复后**逐字节**一致。14/14 实测：
+
+| 目标 | 复原的缺陷 | 未注入 | 注入后 |
+|---|---|---|---|
+| `security-guard-r-type-normalization` | `r` 不归一 → `123` 与 `"123"` 两个键，k 重用检测被绕过（§1） | 7 绿 | 3 红 / 4 绿 |
+| `security-guard-timestamp-normalization` | `timestamp` 非整数 → `abs(now_ms-ts)` 抛 TypeError，畸形包打崩守卫（§2） | 7 绿 | 2 红 / 5 绿 |
+| `security-guard-nonce-normalization` | `nonce` 非整数 → `nonce <= last_nonce` 抛 TypeError（§2 第二处） | 7 绿 | 2 红 / 5 绿 |
+| `ecdsa-payload-field-binding` | 不重建被签消息 → 复用公开历史签名可伪造任意交易（§6） | 24 绿 | 12 红 / 12 绿 |
+| `mappo-critic-target-shape` | `np.repeat(returns,n)[:T]` 与 `v_pred` 错位（§5） | 3 绿 | 1 红 / 2 绿 |
+| `qmix-state-index-hash-seed` | 走内建 `hash()` → 受 `PYTHONHASHSEED` 影响（§4） | 2 绿 | 1 红 / 1 绿 |
+| `nash-mixed-p-me-formula` | `p_me` 与 `p_opp` 不同公式 → 混合均衡漏报（§3） | 3 绿 | 2 红 / 1 绿 |
+| `pbft-self-reported-weight` | 吃成员自报权重（`weight=999` 撬阈值）（§7） | 8 绿 | 1 红 / 7 绿 |
+| `failover-unknown-heartbeat` | 缺省 0 判超时 → 每轮虚假视图切换（§8） | 27 绿 | 5 红 / 22 绿 |
+| `incentive-nan-clamp` | NaN 被钳成满分 → 算崩的拿最高激励（§9） | 13 绿 | 7 红 / 6 绿 |
+| `world-state-nonfinite-reject` | NaN 写进积分 → 永久污染（§9 第二层） | 13 绿 | 2 红 / 11 绿 |
+| `action-recorder-flush-clear` | `clear()` 嵌在 `bc_node` 判断内 → stub 模式不排空（11-04） | 34 绿 | 2 红 / 32 绿 |
+
+原有两条也一并重跑：`signing-backend-value-domain` 22 绿 → 13 红；
+`doctor-git-head-format` 3 绿 → 2 红。汇总 **14/14 目标探测且承重**。
+
+### 二、探针自身有两条「假绿」通道（都已堵）
+
+1. **pytest 类完全没有基线检查**。原实现对 `kind=pytest` 只跑一次「注入后」，
+   退出码非 0 即判承重。于是一个**本来就红**的关联测试文件，能让任何变异体
+   都"通过" —— 变异在红基线上不携带任何信息。现改为：基线必须绿，注入后必须红。
+
+2. **`rc != 0` 不等于「有用例失败」**。pytest 的 2=被中断、3=内部错误、4=用法错、
+   5=一条都没收集，全都是非零。原实现会把「args 路径写错 / 一条没收集」读成
+   「守卫承重」—— **把门禁噪音当成证据**。现只认 rc=1，其余一律 fail-closed 记
+   FAIL 并把退出码含义打进报告。
+
+顺带把「目标文件 git 干净」的判定与 `tests/mutation_targets.json` 的静态校验
+合并成一套规则 `validate_targets()`：探针拒跑的登记，测试也必须判红，不再有
+「探针说不行、测试说没事」的两套真值。
+
+### 三、恢复的是文本，不是字节（行尾）
+
+原实现用 `Path.read_text()` / `write_text()`，默认做 universal newline 转换：
+Windows 上把 LF 文件**整份**写成 CRLF。注入确实被"恢复"了，但恢复的是文本，
+工作树留下整文件行尾翻转的假改动（`git status` 报 M，`git diff` 却是空的）。
+
+现改为 `read_bytes` / `write_bytes`，显式记录原文行尾并在写回时还原，恢复校验
+也改成**字节比对**（`path.read_bytes() == raw_before`）。报告里因此多两个字段：
+`line_ending`（CRLF/LF）与 `original_sha256`（字节级）。实测：目标文件里既有 CRLF
+（`security_guard.py`）也有 LF，14 个目标恢复后 `git status` 均无输出。
+
+### 四、登记表本身进 CI：`tests/test_mutation_targets_registry.py`
+
+探针是**手动**工具（刻意不进必需链），所以登记表漂移只会安静地烂掉 —— locator
+指向的行被改掉之后，要等到下次有人手动跑才喊。新增 13 条静态守卫，把「探针拒跑
+的条件」提前成 CI 里的红/绿：
+
+* 必填字段齐全、id 唯一、`check.kind` 合法、关联测试文件真实存在；
+* locator **恰好**命中 1 次（0 次 = 漂移，多次 = 歧义）；
+* locator 与 mutation 不得相同（相同 = 空变异）；
+* `AUDIT_INVARIANT_IDS`：12 个审计目标不得从登记表里消失（防止静默删证据）；
+* 行尾往返自检（LF / CRLF 各一条，注入+还原的完整往返也要字节一致）。
+
+七条负向自检防退化：目标文件不存在 / locator 命中 2 次 / 命中 0 次 / 空变异 /
+关联测试不存在 / 未知 kind / 空登记表 —— 每一种都必须被判红。实测两种真实退化：
+把 locator 改成漂移写法 → 3 条红；删掉 `action-recorder-flush-clear` → 1 条红
+（命中 `AUDIT_INVARIANT_IDS`）。
+
+### 五、CI 加第三道门：无 torch 回退档全量套件
+
+审计简报 §12.1 记过一个结构问题：`qmix.py` 是**一个模块两套实现**，由模块级
+`HAS_TORCH` 选择。全量 job 装了 torch ⇒ 2200+ 条用例全部落在 torch 实现上；
+回退实现只有「安全不变量」那 10 个文件覆盖。于是「第一道门绿」推不出
+「回退路径绿」，而回退路径**恰恰是 torch 装不上时真实会跑的那条**。
+
+新增 `test-fallback` job：只从 `requirements.txt` 摘掉 torch 一行，其余依赖与全量
+job 完全一致 —— 两个 job 的差异变量只有「torch 在不在」。两道保险：
+
+* 一步 `find_spec('torch') is None` 断言：若依赖解析把 torch 作为传递依赖拖进来，
+  本 job 会退化成全量 job 的复制品（假绿），断言直接拦下；
+* 唯一豁免 `test_deps_importable` 用 `--deselect` 显式点名（它的契约就是
+  "requirements 里每个依赖都能 import"，本 job 刻意不装 torch，此环境不适用）。
+  不改软断言 —— 改软等于让它在全量 job 里也失去意义。
+
+本机（Windows / py3.12 / 无 torch / 干净 tarball）实测该档：**2249 通过 / 3 失败 /
+20 跳过**，三条失败全部是可解释的环境差异（tarball 无 `.git` 导致
+`test_gate_source_is_machine_independent` 红、缺 torch 导致 `test_deps_importable`
+红、Windows 文件锁导致 `test_next_nr` 并发用例红）；前两条在 CI 里分别由 `.git`
+与 `--deselect` 消失，第三条只在 Windows 出现。
+
+### 实测小结
+
+* 探针：14/14 承重，基线全绿，恢复全字节一致；单次全跑约 10 秒。
+* 新增守卫：13 条全绿；两种真实退化分别打红 3 条 / 1 条。
+* 全量套件（干净 tarball，本机无 torch）：2249 通过 / 3 失败 / 20 跳过，
+  失败集合与上一轮完全一致（未引入新红）。
+* **没有**宣称「测试有覆盖率保证」：变异只证明**这 12 个点**上有用例真的盯着，
+  未登记的地方仍然是未知。未覆盖类别已在 `UNCOVERED_NOTE` 里更新并随报告输出。
+
+---
+
 ## 2026-11-04（续五）— 16 条「零断言」用例：其中两条各自掩盖了一个真实问题
 
 > 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见

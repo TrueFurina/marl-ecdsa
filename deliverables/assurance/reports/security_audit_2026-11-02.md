@@ -687,6 +687,74 @@ hybrid 契约另测（1）。
 
 ---
 
+## 15. 2026-11-05 补记：把「已修复」变成可复跑的承重证据
+
+本报告 §1–§9 的九处修复，此前每条都附了「验证：xxx 条用例」——但那是**一次性的
+自述**：测试文件在仓库里，跑没跑过、能不能真的抓到回归，读者无法复核。仓库里
+其实一直躺着 `scripts/mutation_probe.py`（守卫承重变异探针），纪律写得很足，
+却只登记了 2 个目标，本报告涉及的 9 处修复**一处都没登记**。工具在、纪律在、
+证据不在。
+
+### 15.1 登记 12 个新目标（2 → 14），实测 14/14 承重
+
+判定标准（探针自动执行，任一条不满足即 FAIL）：locator 在目标文件里**恰好**
+命中 1 次；未注入时关联测试**绿**；注入后**红且退出码恰为 1**；恢复后**逐字节**
+一致（含行尾）。
+
+| 目标 | 对应修复 | 未注入 | 注入后 |
+|---|---|---|---|
+| `security-guard-r-type-normalization` | §1 `r` 类型混淆 | 7 绿 | 3 红 / 4 绿 |
+| `security-guard-timestamp-normalization` | §2 `timestamp` 打崩守卫 | 7 绿 | 2 红 / 5 绿 |
+| `security-guard-nonce-normalization` | §2 `nonce` 打崩守卫 | 7 绿 | 2 红 / 5 绿 |
+| `ecdsa-payload-field-binding` | §6 签名与载荷解绑 | 24 绿 | 12 红 / 12 绿 |
+| `mappo-critic-target-shape` | §5 Critic 目标错位 | 3 绿 | 1 红 / 2 绿 |
+| `qmix-state-index-hash-seed` | §4 内建 `hash()` 不可复现 | 2 绿 | 1 红 / 1 绿 |
+| `nash-mixed-p-me-formula` | §3 混合均衡漏报 | 3 绿 | 2 红 / 1 绿 |
+| `pbft-self-reported-weight` | §7 自报权重 | 8 绿 | 1 红 / 7 绿 |
+| `failover-unknown-heartbeat` | §8 虚假视图切换 | 27 绿 | 5 红 / 22 绿 |
+| `incentive-nan-clamp` | §9 NaN 钳成满分 | 13 绿 | 7 红 / 6 绿 |
+| `world-state-nonfinite-reject` | §9 账本污染 | 13 绿 | 2 红 / 11 绿 |
+| `action-recorder-flush-clear` | 2026-11-04 stub 模式不排空 | 34 绿 | 2 红 / 32 绿 |
+
+原有两条重跑同样承重（`signing-backend-value-domain` 22 绿 → 13 红；
+`doctor-git-head-format` 3 绿 → 2 红）。
+
+### 15.2 探针自身有两条「假绿」通道
+
+1. **pytest 类没有基线检查**：原实现只跑「注入后」，退出码非 0 即判承重。一个
+   **本来就红**的关联测试文件，能让任何变异体都"通过"。现改为基线必须绿。
+2. **`rc != 0` ≠ 有用例失败**：pytest 的 2=中断 / 3=内部错误 / 4=用法错 /
+   5=一条没收集，全都非零。原实现会把「args 写错 / 路径失效」读成承重 —— 把
+   门禁噪音当证据。现只认 rc=1，其余 fail-closed 并在报告里标出退出码含义。
+
+同时修掉行尾假改动：`read_text/write_text` 的 universal newline 转换在 Windows 上
+会把 LF 文件整份写成 CRLF，而"恢复"校验比的是文本（`sha256_text`）—— 文本一致、
+字节不一致，工作树留下整文件行尾翻转。现改 `read_bytes/write_bytes` 并做字节比对；
+`security_guard.py`（CRLF）与其余文件（LF）都在同一批目标里，实测 14 个目标恢复后
+`git status` 均无输出。
+
+### 15.3 登记表进 CI
+
+探针刻意不进必需链（避免为绿而动门禁），于是登记表漂移会安静地烂掉。新增
+`tests/test_mutation_targets_registry.py`（13 条）把「探针拒跑的条件」提前成
+CI 红/绿：字段齐全、id 唯一、locator 恰好 1 次、locator≠mutation、关联测试存在、
+12 个审计目标不得消失、行尾往返字节一致。七条负向自检（文件不存在 / 命中 2 次 /
+命中 0 次 / 空变异 / 关联测试不存在 / 未知 kind / 空登记表）防退化；
+实测把 locator 改成漂移写法 → 3 条红，删掉一个审计目标 → 1 条红。
+
+### 15.4 边界（这份证据**不能**推出什么）
+
+- 只证明**这 14 个点**上有用例真的盯着；未登记的地方仍是未知。
+- 变异证伪的是「测试能否抓到该缺陷」，不证明「没有别的缺陷」。
+- 未覆盖类别已在 `scripts/mutation_probe.py` 的 `UNCOVERED_NOTE` 里逐个写明
+  （前端路由 / 打包链路 / 匿名门禁逐模式 / 训练脚本 / 自适应 λ 与结算系数），
+  并随每次报告一起落盘 —— 知道自己没测什么，是这套工具的一部分。
+- 探针仍是**手动**工具，不构成 CI 门禁；它的"承重"结论有版本时效性，代码变了
+  要重跑。`tests/test_mutation_targets_registry.py` 只能保证登记表没漂移，
+  不能替代重新探测。
+
+---
+
 ## 验证口径
 
 ```

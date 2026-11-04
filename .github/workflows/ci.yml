@@ -168,3 +168,49 @@ jobs:
 
       - name: Registry mirror integrity
         run: python scripts/check_registry_mirror.py
+
+  # ---------------------------------------------------------------------------
+  # 第三道：无 torch 回退档 —— 全量套件跑在 NumPy 实现上
+  # ---------------------------------------------------------------------------
+  # 为什么必须单独一遍：`marl/algorithms/qmix.py` 是**一个模块两套实现**，由
+  # 模块级 `HAS_TORCH` 选择。全量 job 装了 torch ⇒ 那 2200+ 条用例全部落在
+  # **torch 实现**上；回退实现只有第一道门里那 10 个文件覆盖。于是
+  # 「第一道门绿」推不出「回退路径绿」，而回退路径**恰恰是 torch 装不上时
+  # 真实会跑的那条**（本机实测：pip 装得上 torch，import 时 shm.dll 崩，
+  # 代码就静默回退到 NumPy 版）。
+  #
+  # 本 job 只从 requirements.txt 里摘掉 torch 一行，其余依赖与全量 job 完全
+  # 一致 —— 两个 job 的差异变量只有「torch 在不在」，不是「谁装得多」。
+  test-fallback:
+    name: pytest（无 torch · 回退档）
+    needs: security-invariants
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies without torch
+        run: |
+          python -m pip install --upgrade pip
+          grep -v -E '^[[:space:]]*torch' requirements.txt > /tmp/requirements-notorch.txt
+          pip install -r /tmp/requirements-notorch.txt
+          pip install pytest pytest-cov pytest-asyncio pytest-timeout
+
+      - name: Confirm torch is really absent
+        # 依赖解析若把 torch 作为传递依赖拖进来，本 job 就退化成全量 job 的
+        # 复制品 —— 一条断言比注释更能挡住这种"假绿"。
+        run: |
+          python -c "import importlib.util as u; assert u.find_spec('torch') is None, 'torch 被意外安装，本 job 失去意义'; print('torch absent OK')"
+
+      - name: Run full suite (NumPy fallback profile)
+        # 唯一豁免：test_deps_importable 的契约就是「requirements.txt 里每个依赖
+        # 都能 import」，本 job 刻意不装 torch，这条在此环境不适用。用 --deselect
+        # 显式点名，而不是把断言改软（改软等于让它在全量 job 里也失去意义）。
+        run: |
+          python -m pytest tests/ -q --tb=short \
+            --deselect tests/test_deps_scripts.py::TestRequirementsContent::test_deps_importable

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "守卫承重变异目标登记（REA #153/#154/#157 映射）。每项目必须唯一定位；变异后关联检查必须承重（全红/断言失败），否则该守卫不承重 = 探针 FAIL。新增目标需带 why 与审计日期。",
+  "note": "守卫承重变异目标登记（REA #153/#154/#157 映射）。每项目必须唯一定位；变异后关联检查必须承重（pytest 基线绿、注入后退出码恰为 1），否则该守卫不承重 = 探针 FAIL。新增目标需带 why 与审计日期。2026-11-05：补登记审计简报 §1/§6/§5/§4/§3/§7/§8/§9 的八处安全与正确性修复，以及 2026-11-04 flush_pending 缺陷；探针同时加上 pytest 基线绿校验。",
   "targets": [
     {
       "id": "signing-backend-value-domain",
@@ -25,6 +25,150 @@
         "expect": "all_red"
       },
       "why": "#134 执行基线：git 失败/输出异常必须显式 unknown（audited 2026-10-20）。变异必须产生可观测差异（REA #157）——故关联测试 mock git 失败路径；曾误用 head or unknown 变异（正常路径等价，无差异，已弃）"
+    },
+    {
+      "id": "security-guard-r-type-normalization",
+      "file": "blockchain/crypto/security_guard.py",
+      "locator": "        r = _coerce_int(r)\n        if r is None:",
+      "mutation": "        r = r  # MUTATION-PROBE: 取消 r 的类型归一\n        if r is None:",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_security_guard_type_confusion.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §1（严重/安全）：r 直接当 dict 键时 int 123 与 str '123' 是两个键，同一个 k 重发即绕过检测，私钥可推导（audited 2026-11-02，2026-11-05 登记变异目标）"
+    },
+    {
+      "id": "security-guard-timestamp-normalization",
+      "file": "blockchain/crypto/security_guard.py",
+      "locator": "        ts = _coerce_int(ts)\n        if ts is None:",
+      "mutation": "        ts = ts  # MUTATION-PROBE: 取消时间戳类型归一\n        if ts is None:",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_security_guard_type_confusion.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §2（高/可用性）：timestamp 非整数时 abs(now_ms - ts) 直接抛 TypeError，把一个畸形包升级成守卫崩溃（DoS）；变异后 \"x\" 会打崩守卫而不是被拒（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "security-guard-nonce-normalization",
+      "file": "blockchain/crypto/security_guard.py",
+      "locator": "        nonce = _coerce_int(nonce)\n        if nonce is None:",
+      "mutation": "        nonce = nonce  # MUTATION-PROBE: 取消 nonce 类型归一\n        if nonce is None:",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_security_guard_type_confusion.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §2 第二处：nonce 非整数时 nonce <= last_nonce 抛 TypeError；同时数字字符串形式必须仍参与单调性判断，不能被归一掉（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "ecdsa-payload-field-binding",
+      "file": "blockchain/crypto/ecdsa_utils.py",
+      "locator": "            if expected != message and not ECDSAUtils._payload_equivalent(",
+      "mutation": "            if False and expected != message and not ECDSAUtils._payload_equivalent(  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_signature_payload_binding.py", "tests/test_verify_package_field_binding.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §6（严重/安全）：签名与业务字段解绑时，复用公开历史签名即可伪造任意交易；变异摘掉『用包内字段重建消息再比对』这一步（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "mappo-critic-target-shape",
+      "file": "marl/algorithms/mappo.py",
+      "locator": "    if arr.shape[0] != T:\n        raise ValueError(f\"returns 长度 {arr.shape[0]} != 时间步 T={T}\")\n    return arr",
+      "mutation": "    if arr.shape[0] != T:\n        raise ValueError(f\"returns 长度 {arr.shape[0]} != 时间步 T={T}\")\n    return np.repeat(arr, n_agents)[:T]  # MUTATION-PROBE: 复原形状错位",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_mappo_critic_targets.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §5（高/训练正确性）：np.repeat(returns, n_agents)[:T] 与逐时间步 v_pred 错位，n_agents>1 时 critic 一直在拟合错位目标（loss 会降，学的是错的东西）。变异即复原该 bug（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "qmix-state-index-hash-seed",
+      "file": "marl/algorithms/qmix.py",
+      "locator": "            digest = hashlib.sha256(payload.encode(\"utf-8\")).digest()",
+      "mutation": "            digest = str(abs(hash(payload)) % (2 ** 40)).encode(\"utf-8\")  # MUTATION-PROBE: 走回内建 hash()",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_qmix_state_index_determinism.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §4（中/可复现性）：内建 hash() 按 PYTHONHASHSEED 加盐，同一观测在不同进程落到不同 Q 表行；关联测试用 0/1 两个子进程比对同一索引（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "nash-mixed-p-me-formula",
+      "file": "marl/analysis/nash_verifier.py",
+      "locator": "        p_me = (payoff_matrix[0, 1] - payoff_matrix[1, 1]) / denom",
+      "mutation": "        p_me = (payoff_matrix[1, 0] - payoff_matrix[1, 1]) / denom  # MUTATION-PROBE: 复原错公式",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_nash_verifier_canonical.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §3（中/正确性）：对称 2×2 博弈中 p_me 必须与 p_opp 同公式，否则 M[0,1]!=M[1,0] 时算出无效概率、混合均衡被漏报（猎鹿 0.75 / 鹰鸽 0.5）（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "pbft-self-reported-weight",
+      "file": "blockchain/consensus/standard_pbft.py",
+      "locator": "        vote = vote if vote.weight == 1.0 else replace(vote, weight=1.0)",
+      "mutation": "        vote = vote  # MUTATION-PROBE: 信任成员自报权重",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_standard_pbft_sybil_gate.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §7（高/共识安全）：等权基线的权重必须由引擎给定，不能吃成员自报值（weight=999 可撬动阈值）；变异为信任自报（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "failover-unknown-heartbeat",
+      "file": "blockchain/consensus/cw_pbft_failover.py",
+      "locator": "            return PrimaryStatus.UNKNOWN",
+      "mutation": "            return PrimaryStatus.TIMEOUT  # MUTATION-PROBE: 复现缺省 0 判超时",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_failover_heartbeat_semantics.py", "tests/test_cw_pbft_failover.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §8（中/指标失真）：从未收到心跳的节点被判超时 → 每轮虚假视图切换，failover 统计与真实拜占庭事件脱钩（实测 20/20 假切换）（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "incentive-nan-clamp",
+      "file": "blockchain/contracts/incentive_contract.py",
+      "locator": "    if not math.isfinite(v):\n        if field:",
+      "mutation": "    if False:  # MUTATION-PROBE: 放过非有限值\n        if field:",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_incentive_nonfinite_guard.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §9（高/激励正确性）：max(low,min(high,nan))==1.0 —— NaN 奖励被钳成满分，算崩的智能体拿最高激励，且经 total=env+λ·bc 回流到策略奖励（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "world-state-nonfinite-reject",
+      "file": "blockchain/ledger/world_state.py",
+      "locator": "        if not math.isfinite(delta):",
+      "mutation": "        if False:  # MUTATION-PROBE: 放过 NaN 增量",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_incentive_nonfinite_guard.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "审计 §9 第二层（账本污染）：NaN 一旦写进积分，NaN+x 恒为 NaN，该智能体积分永久救不回来，并污染 cumulative_contribution 与排行榜排序（audited 2026-11-02，2026-11-05 登记）"
+    },
+    {
+      "id": "action-recorder-flush-clear",
+      "file": "marl/integration/action_recorder.py",
+      "locator": "        # 与 batch_upload() 同一处置：交出或丢弃，都不留在缓冲里。\n        self._pending_actions.clear()",
+      "mutation": "        if self.bc_node is not None:  # MUTATION-PROBE: 复原 stub 模式不排空\n            self._pending_actions.clear()",
+      "check": {
+        "kind": "pytest",
+        "args": ["tests/test_action_recorder_boundary.py", "tests/test_action_recorder.py", "-q"],
+        "expect": "all_red"
+      },
+      "why": "2026-11-04 缺陷：clear() 嵌在 bc_node 判断内，stub 模式 flush 是空操作，缓冲随回合单调增长（实测 20 回合 ×100 步累积 2000 条从不释放）；变异把 clear() 放回判断内（audited 2026-11-04，2026-11-05 登记）"
     }
   ]
 }
