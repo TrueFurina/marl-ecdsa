@@ -15,6 +15,85 @@
 
 ---
 
+## 2026-11-04（续四）— 一个模块两套实现：回退分支在 CI 上从未被执行
+
+> 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+`marl/algorithms/qmix.py` 是**一个模块、两套实现**，由模块级 `HAS_TORCH` 选择：
+有 torch 走 `QMIXAgent` / `VDNMixer` / 混合网络，无 torch 走纯 Q 表的 IQL 回退。
+
+覆盖被环境劈成两半，而且**两半互不相交**：
+
+| 环境 | 执行哪半 | 另半 |
+|---|---|---|
+| CI（`ubuntu-latest`，装了 torch） | PyTorch 分支 | 回退分支**一行不跑** |
+| 开发机（常无 torch） | 回退分支 | PyTorch 分支**一行不跑** |
+
+于是回退实现里的任何回归，**CI 全绿也发现不了**，只会在某台无 torch 的机器上炸。
+
+`tests/test_torch_import_contract.py` 已经用假 `torch` 包验证过「回退分支能被
+`import`」，但**import 成功 ≠ 能干活**。本节补的是"能干活"这一层。
+
+### 一、新增 `tests/test_qmix_dual_path_contract.py`
+
+用同一个会抛 `ModuleNotFoundError(name='torch')` 的假包遮蔽真 torch，
+在**任何环境**（包括 CI）强制走回退分支，然后跑一遍真实训练动作：
+构造 trainer → `init_hidden` → `get_actions` → `store_episode` ×2 → `train_step`。
+
+同一段调用代码也用于驱动 PyTorch 分支。四条用例：
+
+1. **回退分支可被驱动**（任何环境都跑）——并断言 `has_torch is False`，
+   证明假包确实生效；否则它在重复测 PyTorch 路径，回退分支仍然零覆盖。
+2. **PyTorch 分支可被驱动**（`importorskip("torch")`）。
+3. **两条路径逐项对齐**：先断言本次真的拿到 `{False, True}` 两个取值
+   （否则字段比对退化成"同一份实现自己比自己"），再比契约字段。
+4. **对断言本身的自检**：注入 7 种违规（`train_step` 恒返回 None / 动作个数不符 /
+   越界 / 非整数 / 三个公开名字被删），每一种都必须被拦下；外加合规基线必须通过。
+
+### 二、只比契约，不比数值
+
+模块自己在缺 torch 时就会警告「结果口径与 PyTorch 版不同，禁止跨实现混比」。
+因此对齐的是**调用契约**：动作个数 = `n_agents`、动作是整数、取值在
+`[0, n_actions)`、数据足够时 `train_step` 必须产出损失（而不是 `None`）、
+`QMIXAgent` / `QMIXMixer` / `QMIXTrainer` 三个名字都在。
+
+### 三、mappo 不需要同样的处理
+
+`marl/algorithms/mappo.py` 的回退分支是**显式占位**：
+
+```python
+class MAPPOTrainer:  # pragma: no cover
+    def __init__(self, *a, **k):
+        raise ImportError("MAPPO 需要 PyTorch")
+```
+
+它在构造时就 fail-closed，不存在"悄悄换成另一套实现"的路径，因此没有两半覆盖问题。
+
+### 四、一处自我更正
+
+初次用 AST 比对 `QMIXTrainer.__init__`，得出「PyTorch 版 13 个参数 / 回退版 5 个，
+接口不兼容」——**这个判断是错的**。两边的 `__init__` 与 `train_step` 都带 `**kwargs`
+（回退版写作 `train_step(self, **kwargs)`），多出来的参数会被吸收，不会 `TypeError`。
+
+真实差异只有两处，且都不影响位置调用：
+- `store_episode` 的形参名不同（`episode_data` / `data`）—— 只有**关键字调用**会破；
+- `train_step` 回退版是 `**kwargs`，**位置传参**（`train_step(64)`）会 `TypeError`，
+  必须写 `train_step(batch_size=64)`。
+
+新用例统一用关键字形式调用，正是为了同时兼容两侧。
+
+### 五、实测
+
+- 本机（Windows / py3.12 / 无 torch）：`2 passed, 2 skipped`。
+- 干净 tarball 全量：`3 failed, 2245 passed, 20 skipped`。
+  与上一轮基线（`2243 passed / 18 skipped`）相比 **+2 passed / +2 skipped**，
+  精确对应新增的 4 条用例；失败集合不变，仍是三条环境差异
+  （tarball 无 `.git` 的 tracked 门禁 / 本机缺 torch / Windows 文件锁）。
+- PyTorch 分支的两条用例只在 CI 上执行 —— 这正是本次要修的那个缺口本身。
+
+---
+
 ## 2026-11-04（续三）— 同名副本「为什么不构成缺陷」落成代码
 
 > 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
