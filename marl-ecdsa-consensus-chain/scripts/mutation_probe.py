@@ -50,11 +50,10 @@ REPO = Path(__file__).resolve().parent.parent
 TARGETS_FILE = REPO / "tests" / "mutation_targets.json"
 REPORT_DIR = REPO / "reports" / "mutation"
 
-# 已知未覆盖的守卫类别（诚实声明盲区，REA #168）：
-#   - marl/ 共识层（非 integration 签名层）的守卫；
-#   - scripts/pack_submission_zips.py 打包链路（未登记 pytest 家族）；
-#   - check_submission_anonymity.py 的逐模式承重（只测过整链）；
-#   - 训练/评估脚本（train.py 等，非交付面）。
+# 已知未覆盖的守卫类别（诚实声明盲区，REA #168）。
+# 2026-11-05 起，审计简报 §1/§2/§3/§4/§5/§6/§7/§8/§9 的九处修复与 11-04 的
+# flush_pending 缺陷已全部登记为目标（见 tests/mutation_targets.json），
+# 因此原先列在这里的「marl/ 共识层守卫」一条已划掉（已覆盖的部分不再自称盲区）。
 UNCOVERED_NOTE = (
     "未覆盖守卫类别：visualization/ 与 static/ 前端路由；pack_submission_zips 打包链路；"
     "匿名门禁逐模式承重；train.py 等训练脚本；marl/integration 的自适应 λ 与结算系数"
