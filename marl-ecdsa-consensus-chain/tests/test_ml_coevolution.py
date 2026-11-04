@@ -320,46 +320,62 @@ class TestLabelIntegrity:
 # ---------------------------------------------------------------------------
 # 5/6. 实时缩样共演化（活代码，守住探针逻辑不退化）
 # ---------------------------------------------------------------------------
-class TestLiveCoevolution:
-    def _run_mini(self, probe, n_rounds=2, n_seeds=2):
-        saved_rounds = probe.N_ROUNDS
-        saved_seeds = probe.BS.SEEDS
-        probe.N_ROUNDS = n_rounds
-        probe.BS.SEEDS = saved_seeds[:n_seeds]
-        try:
-            benign, held, _ = probe.gen_benign_split()
-            attack_cum, rounds = [], []
-            for r in range(n_rounds):
-                rd, uniq = probe.run_round(r, benign, held, attack_cum)
-                rounds.append(rd)
-                attack_cum.extend(uniq)
-            return probe.decide(rounds, probe.PRIOR_R0), rounds
-        finally:
-            probe.N_ROUNDS = saved_rounds
-            probe.BS.SEEDS = saved_seeds
+@pytest.fixture(scope="module")
+def mini_rounds(probe):
+    """活代码共演化跑一次 3 轮 × 2 种子，供 TestLiveCoevolution 三条用例共用。
 
-    def test_live_mini_instrument_healthy(self, probe):
+    2026-11-04 实测依据（先验证再改，不是推断）：
+      A. 确定性 —— 同参数（2 轮×2 种子）连跑两遍，逐轮指标逐位相同；
+      B. 前缀性 —— 3 轮运行的前 2 轮，与「直接跑 2 轮」逐位相同
+         （run_round(r, benign, held, attack_cum) 只依赖 r 与累计攻击轨迹，
+          r<2 时 attack_cum 只含前两轮；N_ROUNDS 仅 main() 用，不参与单轮计算）。
+
+    原先三条用例各调一次 _run_mini：前两条参数**完全相同**（2 轮×2 种子），
+    第二条纯属重算；第三条跑 3 轮。三条合计 172.5s，其中约 96s 是重复计算。
+    改为这里跑一次 3 轮，2 轮的用例取 rounds[:2]——断言一个未改，
+    只是不再重复算同一批数。
+
+    夹具定义在模块级而非类内：pytest 已弃用「类内实例方法 + class 作用域」
+    的写法（PytestRemovedIn10Warning），模块级既避开弃用，语义也相同。
+    """
+    pytest.importorskip("sklearn")
+    saved_rounds = probe.N_ROUNDS
+    saved_seeds = probe.BS.SEEDS
+    probe.N_ROUNDS = 3
+    probe.BS.SEEDS = saved_seeds[:2]
+    try:
+        benign, held, _ = probe.gen_benign_split()
+        attack_cum, rounds = [], []
+        for r in range(3):
+            rd, uniq = probe.run_round(r, benign, held, attack_cum)
+            rounds.append(rd)
+            attack_cum.extend(uniq)
+        return rounds
+    finally:
+        probe.N_ROUNDS = saved_rounds
+        probe.BS.SEEDS = saved_seeds
+
+
+class TestLiveCoevolution:
+    """活代码共演化：三条用例共用同一次 3 轮运行（见 mini_rounds 夹具）。"""
+
+    def test_live_mini_instrument_healthy(self, probe, mini_rounds):
         """2 轮×2 种子活代码：仪表全绿 + R0 初始可利用（run_exploit 真实反馈
         预筛未被移除，否则 exploit=0 → E2 红）。"""
-        pytest.importorskip("sklearn")
-        d, rounds = self._run_mini(probe, 2, 2)
+        d = probe.decide(mini_rounds[:2], probe.PRIOR_R0)
         assert d["checks"]["E0_r0_fingerprint"] is True
         assert d["checks"]["E2_initially_exploitable"] is True
         assert d["checks"]["E3_no_label_conflict"] is True
         assert d["checks"]["E6_determinism"] is True
         assert d["checks"]["E5_surrogate_instrument"] is True
 
-    def test_live_mini_attacker_still_exploits(self, probe):
+    def test_live_mini_attacker_still_exploits(self, mini_rounds):
         """活代码：攻击者（每轮重窃取）首轮即可占领离流形可信格（exploit>0.8）。
         若 run_exploit 真实反馈预筛被误删，会选到代理误差格 ⇒ exploit≈0。"""
-        pytest.importorskip("sklearn")
-        d, rounds = self._run_mini(probe, 2, 2)
-        assert rounds[0]["attack"]["exploit_rate"] > 0.80, \
+        assert mini_rounds[0]["attack"]["exploit_rate"] > 0.80, \
             "R0 攻击者未占领离流形盲点——run_exploit 逻辑疑似退化"
 
-    def test_live_mini_off_cells_shrink(self, probe):
+    def test_live_mini_off_cells_shrink(self, mini_rounds):
         """活代码：重训压缩盲点（离流形格非增），守护 retrain 标签管线方向正确。"""
-        pytest.importorskip("sklearn")
-        d, rounds = self._run_mini(probe, 3, 2)
-        offs = [r["model"]["off_cells"] for r in rounds]
+        offs = [r["model"]["off_cells"] for r in mini_rounds]
         assert offs[0] >= offs[-1], "离流形格应随重训收窄"
