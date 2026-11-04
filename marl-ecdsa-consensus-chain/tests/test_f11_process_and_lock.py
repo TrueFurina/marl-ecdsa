@@ -17,12 +17,25 @@ def test_pid_alive_self_and_dead():
 
 
 def test_file_lock_acquire_release_ok():
+    """锁文件被建出、可重复获取释放、两次都真的走完上下文管理器
+
+    原来只有两个 with 没有断言：即使 `_file_lock` 退化成空上下文管理器
+    （yield 前直接 return），这条也会绿。
+    """
     d = tempfile.mkdtemp(prefix='f11_lock_')
+    lock_path = __import__('pathlib').Path(d) / '.t.lock'
+    entered = []
     try:
-        with _file_lock(__import__('pathlib').Path(d) / '.t.lock'):
-            pass
-        with _file_lock(__import__('pathlib').Path(d) / '.t.lock'):  # 可重复获取释放不死锁
-            pass
+        with _file_lock(lock_path):
+            entered.append(1)
+            assert lock_path.exists()      # O_CREAT：锁文件真的被建出来
+        with _file_lock(lock_path):        # 可重复获取释放不死锁
+            entered.append(2)
+            assert lock_path.exists()
+        # 两次都完整进入并退出（不是被异常吞掉提前跳过循环体）
+        assert entered == [1, 2]
+        # 实现只 close fd、不删锁文件；下次仍复用同一个 inode
+        assert lock_path.exists()
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

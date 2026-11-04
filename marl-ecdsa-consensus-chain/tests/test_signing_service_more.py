@@ -46,9 +46,12 @@ def keyed():
 
 class TestVerifyEpisode:
     def test_verify_no_bc_returns(self, keyed):
-        """bc_node=None → 直接返回不崩溃"""
+        """bc_node=None → 直接返回，且不计数（与空交易池一样是零动作）"""
         svc, _, _ = keyed
         svc.verify_episode_transactions(None)
+        stats = svc.get_stats()
+        assert stats["ecdsa_verify_count"] == 0
+        assert stats["security_fail_count"] == 0
 
     def test_verify_empty_pool_no_count(self, keyed):
         """空交易池 → 验签数不增长"""

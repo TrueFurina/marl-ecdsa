@@ -188,14 +188,30 @@ class TestFlushPending:
         assert recorder._tx_count == 0
 
     def test_flush_pending_stub_mode(self, recorder_stub):
-        """stub 模式下 flush_pending 仅清空缓冲"""
+        """stub 模式下 flush_pending 不建交易，但**必须排空缓冲**
+
+        这条早前只有注释没有断言，而注释描述的正是当时的缺陷：
+        ``clear()`` 嵌在 ``if bc_node is not None`` 之内，所以 stub 模式下
+        flush 是空操作。record_action 无条件 append ⇒ 缓冲随回合数单调增长
+        （实测 20 回合 ×100 步累积 2000 条，从不释放）。docstring 写的是
+        "仅清空缓冲"，实现却没有清 —— 断言缺失让这个矛盾藏了很久。
+        """
         ts = int(time.time() * 1000)
-        recorder_stub.record_action("agent_0", step=0, action_data=0,
-                                     env_reward=-1.0, timestamp=ts, nonce=1)
+        for i in range(3):
+            recorder_stub.record_action("agent_0", step=i, action_data=i,
+                                        env_reward=-1.0, timestamp=ts + i, nonce=i)
+        assert len(recorder_stub._pending_actions) == 3
+
         recorder_stub.flush_pending()
-        # stub: bc_node=None, flush_pending 跳过 Transaction 创建
-        # 但 _pending_actions 只有在有 bc_node 时才 clear
-        # (flush_pending 内部: if self.bc_node is not None and self._pending_actions)
+
+        # 没有 bc_node 就没有交易池：不得凭空计数
+        assert recorder_stub._tx_count == 0
+        # 缓冲必须排空，与 batch_upload() 同一处置
+        assert recorder_stub._pending_actions == []
+        # 幂等：重复 flush 不应报错，也不应改坏计数
+        recorder_stub.flush_pending()
+        assert recorder_stub._pending_actions == []
+        assert recorder_stub._tx_count == 0
 
 
 class TestPendingToTransaction:

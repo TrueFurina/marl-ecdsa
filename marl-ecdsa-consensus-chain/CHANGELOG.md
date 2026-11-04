@@ -15,6 +15,127 @@
 
 ---
 
+## 2026-11-04（续五）— 16 条「零断言」用例：其中两条各自掩盖了一个真实问题
+
+> 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+用 AST 扫全仓 `tests/test_*.py`（2211 条 `test_*` 函数），找出**函数体内没有任何
+断言**的用例：**16 条**。它们永远 PASS —— 被测行为完全错了也不会红。
+
+这类用例比「被 skip」更危险：skip 至少会在报告里留下痕迹，零断言用例
+**看起来是通过的**。而其中两条各自精确地描述了一个真实问题却从未失败过。
+
+### 一、`flush_pending()` 在 stub 模式下从不回收缓冲（真实缺陷，已修）
+
+`marl/integration/action_recorder.py`：
+
+```python
+if self.bc_node is not None and self._pending_actions:   # 修复前
+    ...
+    self._pending_actions.clear()                        # clear 嵌在 if 之内
+```
+
+`record_action()` 无条件 `append`，而 `flush_pending()` 只在有 `bc_node` 时才清 ——
+stub 模式（`bc_node=None`）下 flush 是**空操作**，缓冲随回合数单调增长。实测：
+
+| 场景 | flush 前 | flush 后 |
+|---|---|---|
+| 有 `bc_node` | 24 | **0** |
+| stub（`bc_node=None`） | 24 | **24** |
+| stub 跑 20 回合 ×100 步 | — | **2000（从不回收）** |
+
+同一个类里的 `batch_upload()` 是把 `clear()` 放在 `bc_node` 判断**之外**的 ——
+两个「排空缓冲」的方法处置不一致，这本身就是缺陷的旁证。
+
+调用方 `Bridge.on_episode_end()` 的编排第 7 步还留着一句
+`self._recorder._pending_actions.clear()` 兜底 —— 那正是这条缺陷的痕迹。
+而仓库里正有 P1-4「替代直接操作 `_` 前缀属性」的整改号召，一旦有人把第 7 步
+当冗余删掉，泄漏就会露出来。
+
+修复：把 `clear()` 移出 `bc_node` 判断，与 `batch_upload()` 对齐；stub 模式下
+记一条 debug 说明「无可上链节点，仅排空缓冲」。
+
+### 二、`test_corrupted_priv_key_regenerates`：写错的是 docstring，不是实现
+
+该用例名为「…regenerates」、docstring 写「新实例应能检测损坏并重新生成」，
+但**既没有调用被测方法，也没有任何断言** —— 只留了准备代码（造一个损坏的
+私钥文件），然后就结束了。
+
+实测真实行为（探针，非推断）：抛 `ValueError`，且
+
+* 损坏的私钥文件**不被改写**（不留半成品）
+* 公钥文件**不被改写**（链上身份仍可读）
+* 重复调用仍以同样方式失败（不会第二次「自愈」）
+
+这是正确的 **fail-closed**：静默重新生成会换掉密钥对，而公钥可能已上链，
+历史签名将全部失配，且用户不会知道自己被换了钥。所以改的是用例名与断言，
+不改实现 —— 现更名为 `test_corrupted_priv_key_fails_closed`，把上面四条钉住。
+
+### 三、其余 14 条补上可失败的断言
+
+把 `*_noop` / `*_no_crash` 从「不抛异常」升级为「可判定无副作用」：
+
+| 文件 | 用例 | 补的断言 |
+|---|---|---|
+| `test_world_state.py` | `add_score_unregistered_noop` | 不得凭空建条目；`get_all_scores()=={}`；读分仍 `KeyError` |
+| `test_world_state.py` | `betrayal_unregistered_noop` | 不建积分/行为档案；权重 0.0；摘要 `{}` |
+| `test_world_state_behavior.py` | `record_action_unregistered_noop` | 不建行为档案；`_behaviors` 仍恰好 2 项 |
+| `test_world_state_behavior.py` | `record_betrayal_unregistered_noop` | 背叛计数 0；无档案 |
+| `test_world_state_behavior.py` | `record_cooperation_unregistered_noop` | 不建积分条目；他人计数不受影响 |
+| `test_action_recorder_boundary.py` | `flush_without_bc_noop` → `_drains_buffer` | 原断言 `len(...) >= 0` 对 list **恒真**；改为排空 + 不计数 |
+| `test_dashboard_startup.py` | `run_server_flask_unavailable` | 断言记录了 error 日志（静默 return 会让「未装 Flask」表现为无响应） |
+| `test_f11_process_and_lock.py` | `file_lock_acquire_release_ok` | 锁文件被建出；两次都真的走完上下文管理器 |
+| `test_p2p_consensus_network.py` | `update_weights_unstarted_noop` | `nodes` 为空；`get_weights()=={}` |
+| `test_p2p_node_msgs.py` | `broadcast_no_peers_no_crash` | 广播后 `_connections` 仍为空 |
+| `test_plot_helpers.py` | `empty_no_crash` | 空数据仍产出非空图（契约是"能出图"） |
+| `test_plot_results.py` | `empty_leaderboard_no_crash` | 无数据时**不**写空图 |
+| `test_signing_service_boundary.py` | `verify_episode_none_bc_no_crash` | 验签/失败计数均不增长 |
+| `test_signing_service_more.py` | `verify_no_bc_returns` | 同上 |
+
+顺带修掉一处**假断言**：`assert len(ar._pending_actions) >= 0  # 不崩溃即可`
+—— 对 list 恒真，任何实现都能过。
+
+### 四、新增守卫 `tests/test_no_assertion_free_tests.py`
+
+AST 扫描全仓 `test_*`（含 `async def`），要求函数体内至少有一种断言形态：
+`assert` / `raise` / 名字以 `assert` 开头的调用（`self.assertEqual` 等）/
+`pytest.raises|fail|warns|approx|deprecated_call`。
+
+刻意**不拦弱断言**（如对 `len()` 恒真的 `assert x >= 0`）—— 那需要按表达式推断
+恒真性，误报率高，属另一个族。
+
+三条自检防退化：
+
+1. 植入一条只有赋值的用例 → 必须被命中
+2. 6 种合法断言形态 → 不得误报
+3. `async def` 用例 → 必须纳入扫描
+
+外加两项结构性检查：
+
+* **分母自检**：扫到的用例数必须 ≥ 2000（当前 2211）；低于即说明 `rglob` 或
+  判据退化，守卫在空转而不是在保护
+* **双向对账**：`ALLOWED` 里每条都必须仍是一条真实存在的无断言用例；
+  过期条目（用例已补断言/改名/删除）会报错 —— 否则将来同名的空用例被静默放过
+
+例外仅 1 条：`test_deps_scripts.py::test_deps_importable`，理由写进 `ALLOWED`
+—— 它的契约就是「import 不抛 ImportError」，写 `assert True` 只是把空转伪装成断言。
+
+### 五、实测
+
+* `marl/integration/action_recorder.py`：stub 模式 flush 后缓冲 24 → **0**；
+  2000 步累积从 2000 → **0**；有 `bc_node` 路径行为不变（`_tx_count` 仍 24）
+* 受影响的 9 个测试文件：**81 passed**
+* 守卫自身：**4 passed**
+* 全仓零断言用例：**16 → 1**（剩余 1 条为显式例外）
+* 变异验证：
+  - `flush_pending`：还原缺陷 → 2 条断言红；删掉 `clear()` → 3 条红
+  - 守卫：清空 `ALLOWED` / 登记幽灵例外 / 判据恒 False / 扫描根为空 /
+    真实用例摘掉断言 —— **5/5 命中**，且各自打到对应分支；
+    分母自检单独验证（空根 + 空 `ALLOWED` → 「只扫到 0 条」）
+
+---
+
 ## 2026-11-04（续四）— 一个模块两套实现：回退分支在 CI 上从未被执行
 
 > 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见

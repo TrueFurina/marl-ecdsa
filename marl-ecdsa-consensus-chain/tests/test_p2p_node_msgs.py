@@ -58,8 +58,10 @@ class TestSendTo:
 
 class TestBroadcast:
     def test_broadcast_no_peers_no_crash(self, node):
-        """无连接 → 广播不崩溃"""
+        """无连接 → 广播不崩溃，且不得凭空建出连接"""
+        assert node._connections == {}
         asyncio.run(node.broadcast(MessageType.HEARTBEAT, {}))
+        assert node._connections == {}      # 广播不应产生半截连接状态
 
     def test_broadcast_exclude_skips(self, node):
         """广播排除指定节点"""

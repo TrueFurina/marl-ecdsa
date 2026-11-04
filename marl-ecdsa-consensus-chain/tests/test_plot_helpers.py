@@ -40,9 +40,13 @@ class TestCooperationComparison:
         assert (out / 'comparison_coop.png').exists()
 
     def test_empty_no_crash(self, tmp_path):
+        """空数据 → 不崩溃，且仍产出非空图（契约是"能出图"，不是"跳过"）"""
         out = tmp_path / 'sub4'
         out.mkdir(exist_ok=True)
         pr._plot_cooperation_comparison([], [], str(out))  # 空数据不崩溃
+        png = out / 'comparison_coop.png'
+        assert png.exists(), "空数据仍应产出一张空图，否则调用方拿到的是缺失图"
+        assert png.stat().st_size > 0
 
 
 class TestRewardDistribution:

@@ -87,9 +87,12 @@ class TestSignAndVerify:
 
 class TestVerifyEpisode:
     def test_verify_episode_none_bc_no_crash(self):
-        """bc_node=None → 直接返回不崩溃"""
+        """bc_node=None → 直接返回，且验签/失败计数都不增长"""
         svc = SigningService(n_agents=3)
         svc.verify_episode_transactions(None)  # 不应抛异常
+        stats = svc.get_stats()
+        assert stats["ecdsa_verify_count"] == 0
+        assert stats["security_fail_count"] == 0
 
     def test_verify_episode_empty_bc_no_crash(self, keyed_components):
         """空交易池 → 验签数不增长"""

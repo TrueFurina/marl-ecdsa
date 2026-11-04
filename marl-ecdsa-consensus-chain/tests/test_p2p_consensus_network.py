@@ -33,9 +33,12 @@ class TestInit:
 
 class TestWeightDelegation:
     def test_update_weights_unstarted_noop(self):
-        """未启动时 update_weights 不崩溃（nodes 为空）"""
+        """未启动时 update_weights：不崩溃，且不凭空建节点/权重"""
         net = P2PConsensusNetwork(n_nodes=3, base_port=BASE_PORT)
         net.update_weights({"agent_0": 0.8})  # 不抛异常
+        # noop 必须可判定：既不能有节点，也不能冒出权重
+        assert len(net.nodes) == 0
+        assert net.get_weights() == {}
 
     def test_get_weights_unstarted(self):
         net = P2PConsensusNetwork(n_nodes=3, base_port=BASE_PORT)
