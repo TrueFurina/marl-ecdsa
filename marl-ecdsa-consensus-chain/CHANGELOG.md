@@ -15,7 +15,82 @@
 
 ---
 
+## 2026-11-05（续）— 匿名门禁的两处 fail-open：占位豁免整行短路、同名即豁免
+
+> 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+上一节把变异目标铺到 14 个之后，`UNCOVERED_NOTE` 里还剩几条「知道自己没测什么」。
+其中一条写着「`check_submission_anonymity.py` 的逐模式承重（只测过整链）」。
+去补这条时先撞到的是门禁自身的两个漏洞 —— 都是**声明说 fail-closed、实现却放行**。
+
+### 一、占位豁免被做成了「整行短路」（真实 fail-open）
+
+`scan_file()` 原本每行每类只取 `re.search` 的**首处**匹配，命中后拿这一处的文本
+去比占位表；只要首处是占位（`SomeUser`、`/home/user`、`example.com`…），就
+`continue` 掉**整行**，同一行后面的真泄漏再也不会被看。
+
+实测（同一检查函数、同一规则表；**示例里的真名一律用占位表示**——第一版本文
+写了测试用的假用户名 `devuser01`，CI 的 `--tracked` 模式立刻把本文件扫红，
+本节所述的毛病正好落在了本节自己身上）：
+
+| 构造的文本 | 修复前 | 修复后 |
+|---|---|---|
+| `把 C:/Users/SomeUser/x 换成 C:/Users/<开发者A>/y` | **0 命中**（exit 0） | 1 命中 |
+| `C:/Users/<开发者A>/x C:/Users/<开发者B>/y` | 1 命中（只报首处） | 2 命中 |
+| `C:/Users/SomeUser/bin`（纯占位） | 0 命中 ✓ | 0 命中 ✓ |
+
+第一行不是编出来的刁钻用例——文档里写「样例路径 … 换成你的真实路径 …」正是这个
+形态。修复是把 `re.search` 换成 `rx.finditer`：占位豁免本来就是**逐处**语义，
+旧写法把它降级成了**逐行**语义。
+
+### 二、`SELF_EXEMPT_FILES` 只看文件名，与自己的准入判据矛盾
+
+该表的注释写着「准入判据：只有当文件里出现的东西是**规则定义本身**才可豁免」，
+但实现是 `if p.name in SELF_EXEMPT_FILES: continue` —— 比的是**名字**。
+于是任何叫 `secrets_scan.py` 的文件（比如把自己写的同名脚本一起打进提交包）都连座
+隐身，里面的 `C:/Users/<真名>/...` 永远不会被扫。
+
+修复：文件名改为**必要条件**，另要求文件头 4KB 内带显式标记
+`anon-gate-exemption: rule-definition`。三个真正豁免的文件（门禁本体、它的测试、
+`scripts/pre-commit/secrets_scan.py`）各加一行注释；复制进提交包时逐字节带走，
+仍然豁免。同名缺标记的文件按普通文件扫，并在输出里明说「缺豁免标记」——
+否则「老副本被扫出规则定义字样」会显得莫名其妙。
+
+### 三、证据
+
+新增 4 条用例（39 → 43）：`test_placeholder_before_real_leak_still_flagged`、
+`test_two_leaks_on_one_line_both_reported`、
+`test_self_exempt_name_without_marker_is_scanned`、
+`test_repo_exempt_files_carry_marker_in_head`。
+
+新增 2 个变异目标（14 → 16），均实测承重：
+
+| 目标 | 复原的缺陷 | 未注入 | 注入后 |
+|---|---|---|---|
+| `anon-placeholder-per-match` | 退回 `re.search` 首处判定 → 占位在前时真泄漏 exit 0 | 43 绿 | 2 红 / 41 绿 |
+| `anon-self-exempt-name-only` | 退回「同名即豁免」→ 同名无标记文件不再被扫 | 43 绿 | 1 红 / 42 绿 |
+
+### 四、顺手推翻一条自己写的过期情报
+
+`UNCOVERED_NOTE` 里列过「`scripts/pack_submission_zips.py` 打包链路」。
+这个文件**在仓库里不存在**：`git ls-files | grep -i pack` 只有
+`scripts/pack_slim_testdata.py`，全仓 `grep -rn pack_submission` 只命中那条注释
+自己。一条不存在的文件不能算盲区——那是把「没查过」写成「查过但没测」。
+已从声明里删除并留下更正说明；同时把「匿名门禁逐模式承重」从盲区里划掉。
+
+### 五、不宣称的部分
+
+本节的结论只覆盖**规则匹配与自豁免**这两条路径。门禁的容器通道（docx/xlsx/pptx/pdf）
+与二进制通道仍然只靠既有用例兜底，没有逐规则登记变异目标；`visualization/` 与
+`static/` 前端路由、`train.py` 等训练脚本同样不在覆盖范围内。这两处修复也**不**
+证明门禁对「非身份类泄漏」（密钥、凭据、业务机密）有任何新增能力——那仍归
+`secrets_scan.py`。
+
+---
+
 ## 2026-11-05 — 承重证据制度化：变异目标 2 → 14，并堵掉探针自身的两条「假绿」通道
+
 
 > 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
 > `deliverables/number_registry.json`）。

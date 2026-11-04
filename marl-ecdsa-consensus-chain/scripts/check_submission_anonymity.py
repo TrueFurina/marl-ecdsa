@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# anon-gate-exemption: rule-definition —— 本文件是匿名门禁的规则定义本体
 """
 check_submission_anonymity.py —— 身份/机器路径合规门禁（一票否决）
 =================================================================
@@ -131,6 +132,26 @@ SELF_EXEMPT_FILES = {
     "test_check_submission_anonymity.py",
     "secrets_scan.py",
 }
+# ⚠️ 文件名只是**必要条件**，不是充分条件（2026-11-05 修）：
+#   旧实现只比 `p.name in SELF_EXEMPT_FILES`，于是**任何**叫这个名字的文件都连座
+#   隐身 —— 把一份自己写的 `secrets_scan.py` 打进提交包，里面的
+#   `C:/Users/<真名>/...` 就永远不会被扫。这与上面写的准入判据（"只有当文件里
+#   出现的东西是规则定义本身才可豁免"）相矛盾：判据是内容，实现比的却是名字。
+#   现要求豁免文件在**文件头**带显式标记 —— 名字像不再等于内容就是规则定义。
+#   三个豁免文件都在首 4KB 内带这行注释；复制到提交包时逐字节带走，仍然豁免。
+EXEMPT_MARKER = "anon-gate-exemption: rule-definition"
+EXEMPT_MARKER_WINDOW = 4096  # 只在文件头找，不做全文搜索（避免正文偶然出现即生效）
+
+
+def is_self_exempt(p: Path) -> bool:
+    """仅当「文件名在豁免表内」且「文件头带规则定义标记」时豁免。"""
+    if p.name not in SELF_EXEMPT_FILES:
+        return False
+    try:
+        head = p.read_bytes()[:EXEMPT_MARKER_WINDOW]
+    except OSError:
+        return False
+    return EXEMPT_MARKER.encode("utf-8") in head
 # ⚠️ 体积上限必须按类型分级（2026-10-18 修）：
 #    原先单一 MAX_BYTES=4MB 让交付的 12.3MB exe **从未被扫过一次** ——
 #    也就是说它是「因为没被检查所以通过」。PyInstaller 打包的 exe 恰恰最容易
@@ -343,9 +364,13 @@ def scan_file(path: Path, compiled, stats=None) -> list[tuple[str, int, str, str
         if not line:
             continue
         for category, rx in compiled:
-            m = re.search(rx, line)
-            if m:
-                snippet = m.group(0)
+            # ⚠️ 必须 finditer 逐处判，不能 re.search 只取首处（2026-11-05 修）：
+            #   占位豁免是**逐处匹配**的语义，旧写法把它做成了**逐行**语义 ——
+            #   一行里 `C:/Users/SomeUser/...` 出现在真路径前面时，首处是占位，
+            #   整行被 continue 掉，后面的真用户名一路放行（实测 exit 0）。
+            #   同一行两处真泄漏也只报第一处，少报数量。
+            for mo in rx.finditer(line):
+                snippet = mo.group(0)
                 # 过滤通用占位：负向夹具样例 / 容器默认路径等（不构成机器身份）
                 if GENERIC_PLACEHOLDER.search(snippet):
                     continue
@@ -469,6 +494,8 @@ def main() -> int:
     skipped: list[tuple[Path, int]] = []
     channels: dict[str, int] = {}
     scanned = 0
+    exempted = 0
+    marker_missing: list[Path] = []
 
     if args.files is not None:
         source, mode = iter_explicit(args.files, root), "files"
@@ -479,8 +506,13 @@ def main() -> int:
     else:
         source, mode = iter_files(root, skipped), "walk"
     for p in source:
-        if p.name in SELF_EXEMPT_FILES:
+        if is_self_exempt(p):
+            exempted += 1
             continue
+        if p.name in SELF_EXEMPT_FILES:
+            # 名字在豁免表里但头里没有标记 → 按普通文件扫（fail-closed）。
+            # 单独记下来：否则"老副本被扫出规则定义字样"会显得莫名其妙。
+            marker_missing.append(p)
         scanned += 1
         for category, lineno, snippet, line in scan_file(p, compiled, channels):
             rec = (p, category, lineno, snippet, line)
@@ -497,6 +529,15 @@ def main() -> int:
     except OSError:
         pass
     print(f"[scan] 已扫描文件: {scanned}")
+    if exempted:
+        print(f"[scan] 规则定义自豁免: {exempted} 个（文件名在豁免表内且文件头带 "
+              f"`{EXEMPT_MARKER}` 标记）")
+    if marker_missing:
+        print(f"[warn] 有 {len(marker_missing)} 个文件与规则定义同名但**缺豁免标记**，"
+              f"已按普通文件扫描（fail-closed）：")
+        for p in marker_missing[:5]:
+            print(f"  - {p}")
+        print(f"       若它确实是规则定义本体，请在文件头加一行注释：{EXEMPT_MARKER}")
     if channels:
         detail = "  ".join(f"{k}={v}" for k, v in sorted(channels.items()))
         print(f"[scan] 通道分布: {detail}" + ("（binary=exe/dll 串提取；container=docx/xlsx/pptx/pdf）"
