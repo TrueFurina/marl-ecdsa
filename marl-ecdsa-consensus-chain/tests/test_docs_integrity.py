@@ -43,8 +43,8 @@ class TestAnonymousCompliance:
                     pass
         assert not hits, f'身份泄漏: {hits}'
 
-    @pytest.mark.skip(reason="F15 旧仓布局守卫：app 树无对应布局/物料（2026-11-02 赛后 R10 登记）")
-
+    # 2026-11-04 移除无条件 skip：实测可通过。原 skip 系 d9e701c8
+    # 为掩盖 legacy 副本口径漂移所加，随漂移一并修复后恢复执行。
     def test_no_github_badge_in_readme(self):
         """README 不再引用真实 GitHub 仓库链接"""
         for fname in ('README.md', 'README.zh.md'):
@@ -53,7 +53,8 @@ class TestAnonymousCompliance:
 
 
 class TestReadme:
-    @pytest.mark.skip(reason="F15 旧仓布局守卫：app 树无对应布局/物料（2026-11-02 赛后 R10 登记）")
+    # 2026-11-04 移除无条件 skip：实测可通过。原 skip 系 d9e701c8
+    # 为掩盖 legacy 副本口径漂移所加，随漂移一并修复后恢复执行。
     def test_bilingual_readme_exists(self):
         """README 双语存在"""
         assert (ROOT / 'README.md').exists()
