@@ -194,20 +194,27 @@ def test_c4_evicted_r_is_still_detected():
 
 
 def test_c4_residual_archive_is_in_memory_only():
-    """残留边界：摘要档案只在**进程内**，重启即遗忘 —— 不得声称 C4 已彻底修复。
+    """残留边界：**没有状态文件**的进程，重启即遗忘 —— 不得声称 C4 已彻底修复。
 
-    本测存在的意义是防过度宣称：`_r_evicted_digests` 是纯内存集合，
-    换进程（重启 / 多副本各自持表）后，被淘汰的 r 又能重放。
-    要彻底关闭须持久化，属存储层变更，不在检测器内解决。
+    本测存在的意义是防过度宣称。2026-11-04 补了一条：`_r_evicted_digests` 已随
+    `to_snapshot()` 落盘（`SigningService.save_state` 那条路径），所以"重启即遗忘"
+    现在**只对裸 `SecurityGuard()` 成立**——即从未调用过 save_state/load_state 的
+    进程。仍在的残留是**多副本**：每个副本各持一张表，A 副本淘汰的 r 在 B 副本
+    看来仍是新的（除非共享同一份状态文件，而那会引入写冲突，属存储层设计，
+    不在检测器内解决）。
+
+    因此本测钉的是"裸进程不共享档案"这一事实；档案跨重启的部分由
+    `test_security_guard_persistence.py::test_snapshot_roundtrip_preserves_evicted_archive`
+    从正面钉住。两者不矛盾：一个锁"没落盘就没有"，一个锁"落了盘就还在"。
     """
     guard = SecurityGuard()
     for i in range(1, 1003):
         guard.check_package(_pkg(i, TRUE_POS, r=500000 + i))
     assert guard._r_evicted_digests, "前置条件失效：无淘汰记录"
 
-    fresh = SecurityGuard()          # 模拟进程重启
+    fresh = SecurityGuard()          # 模拟裸进程重启（未加载任何状态文件）
     ok, _ = fresh.check_package(_pkg(1, TRUE_POS, r=500001))
-    assert ok, "跨进程不应仍被拦（若此断言变红，说明已做到持久化，请同步更新本文档）"
+    assert ok, "裸进程间不应共享档案；若此断言变红，说明档案成了全局单例/隐式落盘，请同步更新本文档"
 
 
 def test_c4_control_within_window_reuse_is_detected():

@@ -82,3 +82,117 @@ def test_signing_service_load_state_missing_file_is_fresh(tmp_path):
     ss = SigningService(security_guard=SecurityGuard(), n_agents=1, state_path=path)
     assert ss._nonce_counters['agent_0'] == 0
     assert ss.security_guard.check_package(_pkg('agent_0', 1, 123))[0] is True
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-04：C4 淘汰档案必须跨重启存活
+#
+# 病灶（实测）：C4 修复让"被 FIFO 淘汰的 r"在**进程存活期内**仍被拦下，但
+# to_snapshot 只导出 r_registry，淘汰档案没进快照。于是重启后：
+#   digest_count 由 2 掉到 0；同一个被淘汰的 r 由「历史档案命中」变成「OK」放行；
+#   is_degraded 由 True 变回 False —— 系统同时**丢了检测**并**自称未降级**。
+# 本组用例把"档案随快照走"钉死。
+# ---------------------------------------------------------------------------
+
+def _flood_to_evict(g, agent_id='node_0', seed_rs=(500001, 500002)):
+    """先把要淘汰的 r 塞进窗口，再灌满 MAX_R_ENTRIES 条把它挤出去。
+
+    返回 (timestamp, 已用到的最大 nonce)。nonce 必须严格递增，否则会在
+    nonce 门就被拦，测不到 r 档案这一层。
+    """
+    ts = int(time.time() * 1000)
+    nonce = 1
+    for r in seed_rs:
+        ok, why = g.check_package(_pkg(agent_id, nonce, r, ts))
+        assert ok, f"置入种子 r 失败：{why}"
+        nonce += 1
+    for i in range(g.MAX_R_ENTRIES):
+        ok, why = g.check_package(_pkg(agent_id, nonce, 600000 + i, ts))
+        assert ok, f"灌窗口时被误拦（第 {i} 条）：{why}"
+        nonce += 1
+    return ts, nonce
+
+
+def test_snapshot_roundtrip_preserves_evicted_archive():
+    """淘汰档案随快照跨重启存活：重启后同一 r 仍被拦、且仍报降级。"""
+    g = SecurityGuard()
+    ts, nonce = _flood_to_evict(g)
+
+    st = g.get_detection_status()
+    assert st['evicted_per_agent'].get('node_0') == 2, f"前置条件失效：{st}"
+    assert st['evicted_digest_count'] == 2
+    assert st['is_degraded'] is True
+
+    snap = g.to_snapshot()
+    blob = json.dumps(snap)
+
+    # 重启前：被淘汰的 r 重用必须被拦（C4 已在内存窗口外生效）
+    ok_live, why_live = g.check_package(_pkg('node_0', nonce + 1, 500001, ts))
+    assert ok_live is False, "前置条件失效：淘汰后重用在内存里都没被拦"
+    assert '历史档案' in why_live
+
+    g2 = SecurityGuard()
+    g2.from_snapshot(json.loads(blob))
+
+    st2 = g2.get_detection_status()
+    assert st2['evicted_digest_count'] == st['evicted_digest_count'], (
+        f"淘汰档案没跨重启存活：重启前 {st['evicted_digest_count']} 条，"
+        f"重启后只剩 {st2['evicted_digest_count']} 条")
+    assert st2['is_degraded'] is True, "重启后自称未降级 —— 把已滚过窗口这件事瞒掉了"
+
+    ok2, why2 = g2.check_package(_pkg('node_0', nonce + 2, 500001, ts))
+    assert ok2 is False, "跨重启后被淘汰的 r 重用被放行 —— C4 缺口在重启处回来了"
+    assert '历史档案' in why2
+
+
+def test_old_snapshot_without_archive_is_backward_compatible():
+    """旧版快照（没有淘汰档案字段）必须能加载，退化为空档案而不是报错。"""
+    fresh = SecurityGuard().to_snapshot()
+    legacy = {k: v for k, v in fresh.items() if k not in ('r_evicted', 'r_evicted_digests')}
+    assert 'r_evicted' not in legacy and 'r_evicted_digests' not in legacy
+
+    g = SecurityGuard()
+    g.from_snapshot(legacy)          # 不应抛错
+    st = g.get_detection_status()
+    assert st['evicted_digest_count'] == 0
+    assert st['is_degraded'] is False
+    # 加载旧快照后检测照常工作（非空转）
+    assert g.check_package(_pkg('a', 1, 7))[0] is True
+
+
+def test_old_snapshot_does_not_wipe_live_archive():
+    """旧格式快照加载到"已有档案"的实例上时，不得把档案冲成空。
+
+    缺字段的正确解读是"写快照的那版没有档案功能"，而不是"当时没淘汰过 r"。
+    """
+    g = SecurityGuard()
+    ts, nonce = _flood_to_evict(g, agent_id='node_0')
+    assert g.get_detection_status()['evicted_digest_count'] == 2
+
+    legacy = {k: v for k, v in g.to_snapshot().items()
+              if k not in ('r_evicted', 'r_evicted_digests')}
+    g.from_snapshot(legacy)          # 同一实例加载旧格式快照
+
+    assert g.get_detection_status()['evicted_digest_count'] == 2, "旧快照把内存档案冲掉了"
+    ok, why = g.check_package(_pkg('node_0', nonce + 1, 500001, ts))
+    assert ok is False, "旧快照加载后，被淘汰的 r 重用被放行"
+    assert '历史档案' in why
+
+
+def test_archive_survives_signing_service_state_file(tmp_path):
+    """走真实状态文件（SigningService.save_state → 新实例自动 load_state）。"""
+    path = str(tmp_path / 'sg_state_c4.json')
+
+    ss = SigningService(security_guard=SecurityGuard(), n_agents=1, state_path=path)
+    g = ss.security_guard
+    ts, nonce = _flood_to_evict(g, agent_id='agent_0')
+    assert g.get_detection_status()['evicted_digest_count'] == 2
+    ss.save_state(path)
+
+    ss2 = SigningService(security_guard=SecurityGuard(), n_agents=1, state_path=path)
+    g2 = ss2.security_guard
+    ok, why = g2.check_package(_pkg('agent_0', nonce + 1, 500001, ts))
+    assert ok is False, "从状态文件重启后，被淘汰的 r 重用被放行"
+    assert '历史档案' in why
+    assert g2.get_detection_status()['is_degraded'] is True
+

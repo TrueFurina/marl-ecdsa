@@ -15,6 +15,67 @@
 
 ---
 
+## 2026-11-04 — 合并后两处收敛：无 torch 也能跑套件 / C4 档案随快照跨重启
+
+> 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+### 一、`pytest tests/` 在无 torch 的机器上从「0 条执行」恢复为全量收集
+
+两处**收集期**错误：`tests/test_qmix.py`、`tests/test_algorithm_family_contract.py`
+在模块顶层 `from marl.algorithms.qmix import ReplayBuffer, VDNMixer`，而这两个名字
+只在 `qmix.py` 的 PyTorch 分支（`if HAS_TORCH:`）里定义 —— NumPy 回退分支按设计
+不提供它们（回退实现是纯 Q 表的 IQL，没有回放缓存、也没有混合器）。
+
+缺 torch 时 import 直接抛 ImportError，pytest 记成收集期错误，实测
+`Interrupted: 2 errors during collection`，**2259 条一条都不跑**。CI 因为装了 torch
+所以一直是绿的——这层盲区一直没人看见。
+
+修法与 F11 同源：**不造假桩**（假桩会让这两个文件在回退路径上绿得毫无意义，
+正属本项目禁止的假通过），缺依赖就整模块 skip 并把理由写进报告。修后
+`2259 tests collected`，零 error。
+
+> 顺带纠正一处旧记录：`security_audit_2026-11-02.md` §11.7 里写的"已 `--ignore`
+> 这两个文件"是当时的手段，需要人工记得加参数；现在是文件自己 skip，不再依赖
+> 调用者记忆。
+
+### 二、C4 淘汰档案在快照往返中丢失（真实缺陷，含两重后果）
+
+`to_snapshot()` 只导出 `r_registry`，**没有导出** `_r_evicted_digests` /
+`_r_evicted`。而 C4 修复（淘汰即入摘要档案）恰恰依赖后者。实测（探针与本机复现）：
+
+| 时点 | `evicted_digest_count` | `is_degraded` | 重用被淘汰的 `r` |
+|---|---|---|---|
+| 重启前 | 2 | `True` | 拦下 |
+| 快照往返后 | **0** | **`False`** | **放行** |
+
+两层后果：① 上轮 C4 修复只在**进程存活期内**有效，重启后缺口原样回来；
+② 重启后系统**自称「未降级」**，把"已滚过内存窗口"这件事瞒掉——比缺口本身更难发现。
+
+修复：快照补入 `r_evicted` / `r_evicted_digests`；`from_snapshot` 对缺失键退化为
+空档案（旧状态文件仍能加载，不阻断启动）。修后同一探针：`digests=2`、
+`degraded=True`、重用仍被拦。
+
+同时把两条边界写进代码注释，防止后人"优化"掉：
+- `_r_evicted_digests` **刻意不设上限**。淘汰是攻击者可廉价触发的，档案一旦有界，
+  攻击者继续灌就能把目标 agent 的旧摘要挤出去，等于用极低成本重置 C4 检测。
+- `reset_agent()` **刻意不清档案**。`r` 被用第二次无论隔多久都是私钥可能泄露的
+  硬事实，不该随"重新准入"一起忘掉。
+
+### 三、测试
+
+- 新增 `test_security_guard_persistence.py` 三条：档案随快照往返存活（正面钉住）、
+  旧快照缺字段可加载（向后兼容）、走真实状态文件
+  `SigningService.save_state → 新实例 load_state` 的端到端。
+- `test_combination_attacks.py::test_c4_residual_archive_is_in_memory_only` 的
+  docstring 同步改写：残留边界由「重启即遗忘」收窄为「裸进程之间不共享档案」，
+  断言本身不动（仍成立，且现在与正面用例互为对照）。
+- `scripts/security/_probe_combination_attacks.py` 的 C4 段补测快照往返，
+  并把 `survives_snapshot_roundtrip` 等字段写进证据 JSON —— 证据要能证明新能力，
+  不能只在 note 里写一句"已修"。
+
+---
+
 ## 2026-11-03（续）— CI 归位后首轮实测：修 8 处、撤回 1 处误判
 
 > 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见

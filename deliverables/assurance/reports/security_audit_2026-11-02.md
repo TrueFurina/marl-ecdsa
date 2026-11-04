@@ -353,6 +353,10 @@ AssertionError: assert False is True
 `test_c4_residual_archive_is_in_memory_only` 钉住**残留边界**：摘要档案只在进程内，
 重启 / 换副本后仍可重放。
 
+> 【2026-11-04 补】这句里的「重启即遗忘」只对**裸 `SecurityGuard()`** 成立：
+> 档案已随 `to_snapshot()` 落盘，走 `save_state/load_state` 的进程重启后仍拦得下。
+> 同时发现该修复**当初漏了持久化**（快照没带档案），属真实缺陷，见 §13.1。
+
 探针与证据同步重算（`scripts/security/_probe_combination_attacks.py` +
 `combination_attack_result.json`）：**4/4 绕过 → 3/4 绕过**，C4 转为 ✅ 拦截。
 顺带修掉探针 `write_text` 的平台行尾问题（Windows 会把 `\n` 翻成 `\r\n`，
@@ -497,6 +501,69 @@ f04 那条由 failed 转 passed（+1），qmix 两条由 failed 转 skipped（+2
 引用了原写法（数字 + `passed`），被 `caliber_check --strict` 当成"新声明"判为漂移。
 门禁是对的 —— 这类引用只能写数字、不能带 `passed` 后缀。改后 `--strict` 通过
 （未豁免漂移 0 条 / 已豁免 13 条）。
+
+## 13. 2026-11-04 补记：C4 档案的跨重启路径，与「无 torch 也能跑」
+
+### 13.1 C4 修复当初只覆盖了进程存活期（真实缺陷，已修）
+
+§11.3 关掉的是「淘汰后重用」在**同一个 `SecurityGuard` 实例内**的检测。但
+`to_snapshot()` 当时只导出 `r_registry`，**没导出** `_r_evicted_digests` /
+`_r_evicted` —— 而 C4 修复恰恰依赖后者。实测（探针 + 本机复现）：
+
+| 时点 | `evicted_digest_count` | `is_degraded` | 重用被淘汰的 `r` |
+|---|---|---|---|
+| 重启前 | 2 | `True` | 拦下（理由命中「历史档案」） |
+| 快照往返后 | **0** | **`False`** | **放行（`OK`）** |
+
+两层后果，第二层比第一层更难发现：
+
+1. C4 缺口在重启处原样回来；
+2. 重启后 `is_degraded` 回落为 `False`，系统**自称「未降级」**——把「内存窗口已经
+   滚过去」这件事瞒掉。缺口至少还能被测出来，谎报降级状态连测都测不出。
+
+修复：快照补入两个字段；`from_snapshot` **按字段逐个判断、存在才覆盖**，缺席则保留
+内存档案——旧格式快照的缺字段只说明「写快照的那版没有档案功能」，推不出「当时没
+淘汰过 `r`」，不能据此清空。修后同一探针：`digests=2`、`degraded=True`、跨重启仍拦下。
+
+### 13.2 残留边界收窄，但没有消失
+
+原 `test_c4_residual_archive_is_in_memory_only` 的表述「档案只在进程内，重启即遗忘」
+现在**只对裸 `SecurityGuard()` 成立**（从未 `save_state` / `load_state` 的进程）。
+仍在的残留是**多副本**：每个副本各持一张表，A 副本淘汰的 `r` 在 B 副本看来仍是新的。
+共享同一份状态文件会引入写冲突，属存储层设计，不在检测器内解决。
+
+该用例 docstring 已同步改写、断言不动（仍成立），与新增正面用例
+`test_snapshot_roundtrip_preserves_evicted_archive` 互为对照：一个锁「没落盘就没有」，
+一个锁「落了盘就还在」。
+
+### 13.3 两处「刻意不做」的优化（写进代码注释，防后人改回去）
+
+- `_r_evicted_digests` **不设上限**。淘汰是攻击者可廉价触发的（自己灌满窗口即可）；
+  档案一旦有界，攻击者继续灌就能把目标 agent 的旧摘要挤出去——等于用极低成本把
+  C4 检测重置，与 C4 本身是同一个洞。
+- `reset_agent()` **不清档案**。`r` 被用第二次，无论隔多久都是「私钥可能已泄露」的
+  硬事实，不该随「封禁后重新准入」一起忘掉。
+
+### 13.4 无 torch 的机器上 `pytest tests/` 从「一条不跑」恢复
+
+`test_qmix.py` 与 `test_algorithm_family_contract.py` 在模块顶层 import
+`ReplayBuffer` / `VDNMixer`，而这两个名字只在 `qmix.py` 的 PyTorch 分支里定义
+（NumPy 回退分支按设计不提供：回退实现是纯 Q 表的 IQL，没有回放缓存、也没有混合器）。
+缺 torch 时 import 抛 `ImportError`，pytest 记为**收集期错误**，实测
+`Interrupted: 2 errors during collection`，整套 2259 条一条都不跑。
+
+CI 装了 torch，所以从来是绿的——这层盲区只在本机裸跑时现形。修法与 11.x 的 F11 同源：
+**不造假桩**（假桩会让这两个文件在回退路径上绿得毫无意义），缺依赖则整模块 skip 并
+把理由写进报告。修后 `2259 tests collected`，零 error。
+
+> 上一版靠「记得给 `--ignore` 这两个文件」绕过（见 §11.7），依赖调用者记忆；
+> 现在文件自己 skip。
+
+### 13.5 本次未做
+
+- **NR-19 仍未重新基线化**，§11.7 的待办保持原样（改登记簿需配套 junit 证据）。
+- 本机两条既有红灯（缺 torch 的 `test_deps_importable`、Windows 文件锁的
+  `test_next_nr::test_threaded_no_duplicate`）与本次改动无关，本次未动。
 
 ---
 

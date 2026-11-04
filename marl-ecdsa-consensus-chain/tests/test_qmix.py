@@ -2,10 +2,27 @@
 QMIX / VDN 算法模块测试
 覆盖 ReplayBuffer、VDNMixer、QMIXTrainer 的基础行为
 （多算法值分解：IQL / VDN / QMIX，MARL-ECDSA 共识链）
+
+2026-11-04：本文件的 import 是**收集期**依赖。``ReplayBuffer`` / ``VDNMixer``
+只在 ``marl/algorithms/qmix.py`` 的 PyTorch 分支（``if HAS_TORCH:``）里定义，
+NumPy 回退分支**刻意不提供**这两个名字（回退实现是纯 Q 表的 IQL，没有回放缓存、
+也没有混合器）。因此在无 torch 的机器上 ``from ... import ReplayBuffer`` 直接
+抛 ImportError —— pytest 把它记成**收集期错误**，导致整个 ``pytest tests/``
+一条都不执行（实测 ``Interrupted: 2 errors during collection``，2259 条全灭）。
+
+不伪造桩来让 import 成功：那会让本文件在回退路径上"绿"得毫无意义，正属于本项目
+明令禁止的假通过。改为缺失时整模块 skip，理由写进报告；torch 可用时行为不变。
 """
 import pytest
 
-from marl.algorithms.qmix import ReplayBuffer, VDNMixer, QMIXTrainer
+try:
+    from marl.algorithms.qmix import ReplayBuffer, VDNMixer, QMIXTrainer
+except ImportError as _exc:  # 无 torch：三个名字里的 ReplayBuffer/VDNMixer 不存在
+    pytest.skip(
+        "本文件锁的是 qmix 的 PyTorch 分支（ReplayBuffer / VDNMixer 只在该分支定义，"
+        "NumPy 回退分支按设计不提供它们）；当前环境不可用：%s" % _exc,
+        allow_module_level=True,
+    )
 
 
 class TestReplayBuffer:
