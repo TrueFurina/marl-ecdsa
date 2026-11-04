@@ -13,6 +13,7 @@ Standard Practical Byzantine Fault Tolerance
 """
 import logging
 import time
+from dataclasses import replace
 from typing import Dict, List, Optional, Set
 
 from .cw_pbft import ConsensusState, ConsensusVote
@@ -107,6 +108,11 @@ class StandardPBFTConsensus:
                 f"[PBFT] 拒收非成员投票（女巫门控）: voter={vote.voter_id}"
             )
             return None
+
+        # 自报 weight 不作为第二个可信通道：等权模式下权威值恒为 1.0。
+        # 存副本而非就地改写入参 —— 前者防伪造权重，后者防对调用方持有的
+        # 对象产生隐式副作用（两条都已被 test_standard_pbft_sybil_gate 锁住）。
+        vote = vote if vote.weight == 1.0 else replace(vote, weight=1.0)
 
         phase = vote.phase
         if phase in self._votes:

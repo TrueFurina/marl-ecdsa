@@ -33,10 +33,11 @@
   },
   {
     "case": "C4_fifo_eviction",
-    "attack_successful": true,
+    "attack_successful": false,
     "max_r_entries": 1000,
     "packages_to_evict": 1002,
-    "note": "r_registry 有上限，淘汰后历史 r 不再受检；攻击成本 = MAXN+2 个合法包",
+    "evicted_digest_count": 2,
+    "note": "r_registry 有上限，但淘汰时把 r 的摘要写入 _r_evicted_digests，重用仍被判为重用来 —— 该缺口已于 2026-11-03 关闭。残留边界：摘要档案仅在进程内，重启 / 换副本后不再保留，彻底闭合需持久化（存储层变更）。",
     "reachability": "depth_gap"
   }
 ]

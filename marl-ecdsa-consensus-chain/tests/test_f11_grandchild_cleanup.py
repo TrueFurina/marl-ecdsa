@@ -19,8 +19,24 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
-_spec = importlib.util.spec_from_file_location(
-    "launcher_supervisor", _ROOT / "launcher" / "supervisor.py")
+_SUPERVISOR = _ROOT / "launcher" / "supervisor.py"
+
+# 2026-11-03：本仓库**不含** `launcher/supervisor.py`（全仓 grep `_make_job` 仅本文件
+# 命中；Job Object 的实现在 `visualization/business_service.py`）。这条用例是随
+# `launcher/` 一起从另一发行物带过来的遗留：模块级 `exec_module` 在文件缺失时抛
+# FileNotFoundError，属**收集期错误**，会让整个 `pytest tests/` 中断（CI 实测
+# Interrupted: 1 error during collection，其余 2000+ 条一条都没跑）。
+#
+# 不删用例（它锁的是真实的 Job Object 语义），改为缺模块时**整模块 skip**：
+# 模块一旦随 `launcher/` 一起回来，本用例自动恢复执行。
+if not _SUPERVISOR.exists():
+    pytest.skip(
+        f"launcher/supervisor.py 不在本仓库（查找路径 {_SUPERVISOR}）；"
+        "本用例锁的是该模块的 Windows Job Object 孙进程回收语义，模块缺席时跳过",
+        allow_module_level=True,
+    )
+
+_spec = importlib.util.spec_from_file_location("launcher_supervisor", _SUPERVISOR)
 sup = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sup)
 

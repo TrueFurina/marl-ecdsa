@@ -48,11 +48,20 @@ class RoundRecovery(unittest.TestCase):
                     f'd.HISTORY=d.BASE/"epochs";d.serve({n!r})')
             self.ps.append(subprocess.Popen([sys.executable, '-c', code],
                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-        for _ in range(45):
-            if sum(x.get('online', False) for x in dc.statuses()['nodes']) >= len(names):
+        # 2026-11-03：原判据是「在线节点**个数** ≥ len(names)」，在已经跑着 node-1/2
+        # 的情况下，`start(names=('node-3',))` 的 `>= 1` 立刻成立 —— 根本没等 node-3
+        # 起来就开始 propose。本机（没装 torch，子进程 import 快）恰好赶得上；CI 上
+        # （装了 torch，`visualization.distributed_consensus` 的导入要几秒）稳定失败：
+        # 第二次 propose 只打到 2 个节点 → quorum_failed ≠ replicated。
+        # 改为等**指定的这几个节点各自** online（按 `node` 字段精确匹配）。
+        want = set(names)
+        online = set()
+        for _ in range(200):          # 16s，给慢环境留余量
+            online = {x.get('node') for x in dc.statuses()['nodes'] if x.get('online')}
+            if want <= online:
                 return
             time.sleep(.08)
-        raise AssertionError('nodes unavailable ' + str(dc.statuses()))
+        raise AssertionError(f'nodes not ready: want={sorted(want)} online={sorted(online)}')
 
     def stop(self):
         for p in self.ps:

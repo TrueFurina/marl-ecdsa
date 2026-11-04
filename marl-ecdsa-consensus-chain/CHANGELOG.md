@@ -15,6 +15,163 @@
 
 ---
 
+## 2026-11-03（续）— CI 归位后首轮实测：修 8 处、撤回 1 处误判
+
+> 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。取证与逐条判据见
+> `deliverables/assurance/reports/security_audit_2026-11-02.md` §11。
+
+### 一、第一道门转绿：区块签名
+
+CI 首次运行 `77 passed / 1 failed`，失败项是
+`test_signature_payload_binding.py::test_block_with_genuine_tx_accepted` ——
+账本自 2026-11-02 起有「出块者签名 + `state_root` 可重算」门，而测试塞的是
+`state_root="0"*64` 且不签名的合成区块。`_make_block()` 改走真实出块流程
+（`构造 → finalize() → sign_block()`）。顺带修掉 `test_block_with_forged_tx_rejected`
+的**假通过**（原先它拦的是「区块没签名」，不是「伪造交易」）。修后 **78 passed**。
+
+### 二、撤回一处误判
+
+`cw_pbft_failover` 的"恢复"实际是把 main 更好的实现（显式 `UNKNOWN`）改回较差的
+（预填表、一律 `HEALTHY`），已撤回，与 main 逐字节一致。
+连带修掉 main 上一对**自相矛盾**的测试（见上），两份心跳测试并存 **27 passed**。
+
+### 三、真修复：C4 组合攻击缺口关闭
+
+`security_guard` 的淘汰摘要档案让「FIFO 挤出后重用 `r`」被拦下；测试按该文件自述的
+约定翻转断言，并新增残留边界测试（档案仅进程内）。探针与证据同步重算：
+**4/4 绕过 → 3/4**，C4 转 ✅ 拦截。
+
+### 四、main 上三处既有红灯（CI 归位才看见）
+
+1. `scripts/smoke_test_e2e.py` 的 P0-1 断言 `λ == 0.1`：P2-E 自适应 λ 后取值为
+   `(0.05, 0.15)` 带内，实测 `0.10231058578630006`。改为钉「`λ_base=0.1` 的传参通路 +
+   运行时在自适应带内」。
+2. `tests/test_f04_web_wiring.py` 把通道键写死 `'1'`：全量套件里更早用例注册过用户后
+   新用户 id 就不是 1，4 条假红（**单独跑是 5 passed**）。改为从 `session['uid']` 读。
+3. `structure_guard.py --all` 报根级历史文件（先 13 个 V18–V27 等说明文档，CI 上又报
+   2 个训练结果 json）：登记为**存量冻结豁免**（常量 `LEGACY_ROOT_FILES`，只减不增），
+   每次运行打印提醒，不静默腐烂。搬目录会打断 README/thesis 的相对引用，以及
+   `visualization/dashboard.py` 等 4 处「按裸文件名从项目根读取」的调用。
+   > 那 2 个 json 是第二次才发现的：本地核对用 `git ls-files`，而它们
+   > **tracked 却命中 `.gitignore`**，在临时目录 `git add -A` 时被忽略 ——
+   > 本地"13 个全过"，CI 报"多 2 个"。核对仓库文件清单要以远端 tree 为准。
+
+### 五、`test_f11_grandchild_cleanup.py` 的收集期错误
+
+依赖 `launcher/supervisor.py`，该模块不在本仓库，模块级 `exec_module` 抛
+`FileNotFoundError` → 整个 `pytest tests/` 中断（其余 2000+ 条一条没跑）。
+不删用例，缺模块时整模块 skip。
+
+### 六、门禁自身的两个 bug
+
+- `caliber_check.py` 的 `_RE_TESTS` 不支持千分位，`2,183 passed` 被读成 `183`，
+  把等于下限的表述判成假红；现接受 `1,234` 与 `1234`。
+- `.agents/skills/test-gate/SKILL.md` 里把历史基线数字写成 1632（低于 NR-19 下限 2183），
+  改为指向登记簿，不再另抄一份数字。
+  顺带一个反讽：本节初稿为了说明这件事，引用了那个数字加 "passed" 的原文写法，
+  结果被 `caliber_check --strict` 当成"新声明"判为漂移 —— 门禁是对的，
+  说明这类引用只能写数字、不能带 `passed` 后缀。
+
+### 七、全量套件第一次在 CI 上跑完：3 failed / 2275 passed / 11 skipped
+
+3.11 与 3.12 两个 job 结果一致。三条失败都不是"被回退的修复"，而是新暴露的：
+
+1. `test_qmix_state_index_determinism.py` 2 条 —— `_state_index` 是 **NumPy 回退**实现的
+   方法，CI 全量 job 装了 torch，`IQLEstimator` 指向 torch 版 `QMIXAgent`，没有该方法。
+   这暴露了工作流自身的结构问题：安全不变量门只装 `numpy+cryptography`（跑回退路径），
+   全量 job 装了 torch（跑 torch 路径），**同一断言在两道门里落在不同实现上**。
+   处理：文件加 `skipif(HAS_TORCH)` 并写明覆盖分工。
+2. `test_f04_round_recovery.py::test_transient_failure_resume_same_txid` —— 就绪判据
+   写错了：数「在线节点**个数**」而不是等「**指定的**节点」。
+   `start(names=('node-3',))` 在 node-1/2 已跑时 `>= 1` 立刻成立，根本没等 node-3。
+   本机（无 torch，导入快）恰好赶上；CI 上导入慢几秒就稳定失败。
+   处理：按 `node` 字段精确等待，预算 3.6s → 16s。
+
+修后复跑：**2276 passed / 13 skipped / 0 failed**（py3.12，5m59s）。
+条数守恒：2275+3+11 = 2276+0+13 = 2289。
+
+随后暴露的是**门禁自身的误判**：本文件为了说明 SKILL.md 里那个过期数字，引用了原写法
+（数字 + `passed`），被 `caliber_check --strict` 当成"新声明"判为漂移。门禁是对的 ——
+这类引用只能写数字，不能带 `passed` 后缀。
+
+### 实测（本机，非对外口径）
+
+| 项 | 结果 |
+|---|---|
+| 安全不变量门（10 个文件） | 78 passed |
+| 全量 `tests/` | 2227 passed / 2 failed / 22 skipped（合计 2251） |
+| 2 条 failed | `test_deps_importable`（本机缺 torch）＋`test_next_nr::test_threaded_no_duplicate`（Windows 文件锁，main 上同样红） |
+| 未计入 | `test_qmix.py`、`test_algorithm_family_contract.py`（本机装不上 torch，已 `--ignore`） |
+
+> 这些是**本机实测**，不是对外口径。用例总数已由 NR-19 的 2192 增长到 2251+，
+> 登记簿需重新基线化（属独立流程，本次不动）。
+
+---
+
+## 2026-11-03 — 恢复被「源码对齐」提交静默回退的 6 处修复 + CI 归位
+
+> 本节只记录代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+### 事故
+
+`d9e701c`（"sync: 源码对齐 V29 新基线"）改动 258 个文件，其中 10 个源文件被整份
+覆盖成更旧的基线，把 2026-11-01/11-02 的修复一并带走：
+
+- `SecurityGuard`：k 重用检测回到 fail-open（缺 `r` 直接放行、淘汰静默遗忘、
+  无字段归一）——k 重用可直接推导私钥；
+- `mappo`：Critic 回归目标回到 `np.repeat(returns, n_agents)[:T]`（与逐时间步
+  `v_pred` 错位）；
+- `qmix`：NumPy 回退回到内建 `hash()`（受 `PYTHONHASHSEED` 影响，复跑不一致）；
+- `nash_verifier`：`p_me` 回到 `(M[1,0]-M[1,1])/denom`（鹰鸽/猎鹿的混合均衡漏报）；
+- `standard_pbft`：女巫门控还在，但自报 `weight` 纠偏被删（真实成员可自带 999）；
+- ~~`cw_pbft_failover`：心跳表恒空 → 从未发心跳的主节点永不被判超时（死主不替换）~~
+  **此条判断错误，已撤回**：main 现实现是「空表 + 对从未心跳的节点返回 `UNKNOWN`」，
+  比 11-02 那版（预填整表、一律 `HEALTHY`）更严 —— 缺信息不等于健康。详见
+  `security_audit_2026-11-02.md` §11.2；
+- `incentive_contract` / `world_state` / `settlement_coordinator`：三处 NaN 护栏
+  全被删 → NaN 被钳成满分、并永久污染账本积分。
+
+仓库里 6 个回归锁文件都还在、断言完好，实测 **19 failed + 1 collection error**。
+
+### 为什么没被拦住
+
+`CI - Test Suite` 一直写在 `marl-ecdsa-consensus-chain/.github/workflows/ci.yml`。
+GitHub Actions 只扫描**仓库根**的 `.github/workflows/`，子目录不会被注册 ——
+该工作流**一次都没运行过**（`/actions/workflows` 只有 build-binaries 与 pages）。
+
+### 恢复
+
+6 个提交逐条恢复，**以 main 当前版本为底座做定点补丁**，保留 `d9e701c` 的正当增量
+（QMIX 的 S9 登记注释、Nash 的 F16 `top_tier_bonus=10.0` 与 λ 边界表述、
+`clear_episode_rewards`、`get_consensus_weight`、P1-12 注释）。
+逐文件对照与提交清单见 `deliverables/assurance/reports/security_audit_2026-11-02.md` §10。
+
+### 加固（不是回退）
+
+- `verify_action_package`：把"缺字段就跳过绑定校验"改成 **fail-closed** ——
+  首版允许把 `agent_id/action/timestamp/nonce` 删掉来整段跳过校验，而
+  `cooperation_detector.filter_verified_packages()` 吃的正是外部传入的包；
+- `extra` 纳入载荷绑定（原实现没有用例覆盖），并允许 JSON 数值写法差异
+  （`1000` vs `1000.0`）以免误杀同值 float 时间戳；
+- `test_signature_payload_binding.py` 里"裸字节包仍然通过"的断言是错的
+  （把 fail-open 当成了不误杀），更正为断言拒绝，并新增 4 条。
+
+### CI 归位
+
+新增仓库根 `.github/workflows/ci.yml`（`defaults.run.working-directory` 指向子目录），
+安全不变量单拆成 fail-fast job（只装 numpy + cryptography），全量套件 `needs` 它。
+子目录那份保留不删，加抬头注明"不会被执⾏、可执行版在哪"。
+
+### 审计简报的哈希修正
+
+汇总表原先引用的 8 个哈希（`e7dfa59` 等）在远端**全部 404**，已换成真实存在的
+`12212a9` / `44b3962` / `e98d5ca` / `bd56b87` / `7e20a94` / `5d509f9` /
+`b07953d` / `2e30262`；P1-11 那轮为 `8bc432b`。
+
+---
+
 ## v4.1 (2026-07-10) — 当前版本
 
 ### Bug 修复

@@ -11,10 +11,11 @@
      → 承诺绑定只比对「报的 vs 承诺的」，防的是中途改口，防不了开局撒谎
   C2 阈值下持续作恶：每个包时间戳/nonce/r 均合法 ⇒ fail_count 恒 0
      → SecurityGuard 的 fail_count 只统计「检测失败」，不统计「作恶成功」
-  C3 r 字段省略：构造包不带 r ⇒ _check_r_reuse 直接 return True
-     → 防御纵深缺口（检测被静默跳过）
+  C3 r 字段省略：构造包不带 r ⇒ 无签名包允许缺 r（本来没有 k 可重用）
+     → 防御纵深缺口（签名包已 fail-closed，非签名包仍放行）
   C4 FIFO 淘汰后重用：发 >MAX_R_ENTRIES 个包挤掉旧 r，再重用早期 r
-     → 检测窗口被上限截断
+     → 2026-11-03 已关闭（淘汰时入摘要档案，重用仍被拦）；残留边界是
+       档案只在进程内，重启即遗忘
 
 口径纪律：
   - 承诺绑定公式与 demo_observation_forgery 逐位一致：
@@ -178,15 +179,22 @@ def c4_fifo_eviction():
     # 重用最早被淘汰的 r=500001
     replay = _pkg(MAXN + 100, TRUE_POS, r=500001)
     ok, reason = guard.check_package(replay)
+    st = guard.get_detection_status()
     print(f"  填充 {MAXN + 2} 个包（r 全部唯一）后，重用最早期的 r=500001")
     print(f"  check_package → {ok}（{reason[:40]}）")
+    print(f"  get_detection_status → evicted={st['evicted_per_agent']} "
+          f"digests={st['evicted_digest_count']}")
     print(f"  → {'✅ 仍被检测' if not ok else '❌ 重用未被检测（已被 FIFO 淘汰）'}")
     return {
         "case": "C4_fifo_eviction",
         "attack_successful": ok,
         "max_r_entries": MAXN,
         "packages_to_evict": MAXN + 2,
-        "note": "r_registry 有上限，淘汰后历史 r 不再受检；攻击成本 = MAXN+2 个合法包",
+        "evicted_digest_count": st["evicted_digest_count"],
+        "note": "r_registry 有上限，但淘汰时把 r 的摘要写入 _r_evicted_digests，"
+                "重用仍被判为重用来 —— 该缺口已于 2026-11-03 关闭。"
+                "残留边界：摘要档案仅在进程内，重启 / 换副本后不再保留，"
+                "彻底闭合需持久化（存储层变更）。",
     }
 
 
@@ -219,7 +227,11 @@ def main():
     for r in results:
         r["reachability"] = reach[r["case"]]
     out = Path(__file__).resolve().parent / "combination_attack_result.json"
-    out.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    # newline='\n'：Windows 上 write_text 会按平台把 \n 翻成 \r\n，导致同一份证据
+    # 在 Windows 生成与在 Linux 生成字节不同，git 上显示为整文件重写，
+    # 把真实改动（仅 C4 一条）埋进行尾噪音里。
+    out.write_text(json.dumps(results, ensure_ascii=False, indent=2),
+                   encoding="utf-8", newline="\n")
     print(f"  结果已写入 {out}")
     return 0
 

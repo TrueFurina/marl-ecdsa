@@ -158,8 +158,24 @@ assert bc_chain.height >= 1, f"Blockchain height abnormal: {bc_chain.height}"
 print("\n[8/8] Verify all fix points...")
 
 
-assert abs(bridge.lambda_weight - 0.1) < 0.001, f"P0-1 FAIL: lambda={bridge.lambda_weight}"
-print("  [OK] P0-1: lambda_weight=0.1 verified")
+# P0-1：λ 的**配置通路**仍是 0.1，且运行时值落在自适应带内。
+#
+# 2026-11-03 修正（本断言在 main 上一直是红的，CI 归位前没人跑过这条路）：
+# P2-E 引入 `marl/integration/adaptive_lambda.py` 后，`bridge.lambda_weight` 每次
+# `on_episode_end` 都会被 EMA 重算为 λ_t = λ_base·(0.5 + sigmoid(...))，
+# 取值范围 (0.5λ_base, 1.5λ_base) = (0.05, 0.15)。原来断言 `== 0.1` 是自适应
+# 引入**之前**的口径，实测值 0.10231 属正常抖动 —— 断言本身过期，不是代码坏了。
+#
+# 改为钉住两件真正该守的事：① 配置的 λ_base 仍是 0.1（P0-1 的原始语义：
+# config → bridge 传参通路不丢）；② 运行时 λ 不得越出自适应带（防控制器发散）。
+_lam_base = (bridge._adaptive_lambda.lambda_base
+             if bridge._adaptive_lambda is not None else bridge.lambda_weight)
+assert abs(_lam_base - 0.1) < 1e-9, f"P0-1 FAIL: λ_base={_lam_base}（配置通路被改）"
+_lo, _hi = 0.5 * _lam_base, 1.5 * _lam_base
+assert _lo - 1e-9 <= bridge.lambda_weight <= _hi + 1e-9, (
+    f"P0-1 FAIL: 运行时 λ={bridge.lambda_weight} 越出自适应带 [{_lo}, {_hi}]")
+print(f"  [OK] P0-1: λ_base=0.1 verified；运行时 λ={bridge.lambda_weight:.6f}"
+      f"（自适应带 [{_lo:.3f}, {_hi:.3f}] 内）")
 
 # P0-2: nonce同步
 for aid in agent_ids:

@@ -29,6 +29,45 @@ ROOT_ALLOW = {
     "config.json", "number_registry.json",
 }
 
+#: 根级**存量**文件冻结豁免（2026-11-03 登记；只减不增）。
+#:
+#: 两类，都是"平铺在仓库根、且被按裸相对路径引用"的历史文件：
+#:
+#: 1) V18–V27 等说明文档 —— 从 V18 起就平铺在根，被 README / thesis / 演示脚本
+#:    以相对路径引用。一次性搬进 docs/ 会同时打断这些引用。
+#:
+#: 2) `training_results_pure.json` / `training_results_bc.json` —— 训练结果数据，
+#:    被**按裸文件名从项目根读取**的位置至少 4 处：
+#:      * `visualization/dashboard.py:302/317`（仪表盘主数据源）
+#:      * `scripts/export_dataset.py:67`、`scripts/generate_all_dashboard_screenshots.py:78-79`
+#:      * `scripts/generate_complete_data.py:344-345`、`scripts/generate_ppt.py:44-45`
+#:    搬进 results/ 就等于同时改这些调用点，属独立的、需要回归的任务。
+#:
+#: 因此把它们**登记冻结**而不是删除或假装合规：
+#:   * 新增的根级受管文件仍然会被拦（本集合是常量，不随仓库内容变化）；
+#:   * `main()` 每次都会把这些条目作为「待归位存量」打印出来，不静默腐烂。
+#:
+#: 注：`V18_σèƒΦâ╜σñìµá╕µèÑσæè.md` 的文件名本身就是**乱码**（UTF-8 文件名被按
+#: CP437 解释后的产物，原意为「V18_功能复核报告.md」）。重命名属破坏性操作，
+#: 此处如实按现有字节登记，问题本身记录在案待单独处理。
+LEGACY_ROOT_FILES = {
+    "CCF2026_SHOWCASE_GUIDE.md",
+    "FRONTEND_REDESIGN_2026.md",
+    "training_results_bc.json",
+    "training_results_pure.json",
+    "V18_σèƒΦâ╜σñìµá╕µèÑσæè.md",
+    "V19_验收结果与运行说明.md",
+    "V20_贡献与共识业务联动说明.md",
+    "V21_协作多智能体与区块链融合说明.md",
+    "V21_测试记录.md",
+    "V22_多智能体与区块链联动说明.md",
+    "V23_登录注册界面重设计说明.md",
+    "V24_统一图标主题说明.md",
+    "V25_共识精简与功能联动说明.md",
+    "V26_可信协作流程可视化与审计中心说明.md",
+    "V27_全模块系统审查与验收说明.md",
+}
+
 
 def git(*args):
     """git 调用，关闭 quotePath 以免中文路径被转义导致漏判。"""
@@ -64,7 +103,7 @@ def violations_for(path: str) -> str | None:
     if "/" not in p:
         # 根级平铺文件
         ext = p.rsplit(".", 1)[-1].lower() if "." in p else ""
-        if ext in MANAGED_EXT and p not in ROOT_ALLOW:
+        if ext in MANAGED_EXT and p not in ROOT_ALLOW and p not in LEGACY_ROOT_FILES:
             return f"根级平铺文件 {p!r} 不在白名单，请移入对应子目录（docs/ deliverables/ data/ 等）"
     return None
 
@@ -93,6 +132,13 @@ def main():
         for v in bad:
             print(f"  {v}")
         return 1
+
+    # 存量不静默：每次都报出来，避免"登记完就忘"
+    legacy = sorted(f for f in files if f.replace("\\", "/") in LEGACY_ROOT_FILES)
+    if legacy:
+        print(f"⚠️ 根级存量文档 {len(legacy)} 个（已冻结豁免，待归位 docs/）：")
+        for f in legacy:
+            print(f"  {f}")
 
     print("✅ 结构守卫通过")
     return 0

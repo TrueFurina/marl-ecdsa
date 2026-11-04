@@ -1,4 +1,4 @@
-"""故障切换心跳语义回归锁（2026-11-03）
+"""故障切换心跳语义回归锁（2026-11-03，2026-11-03 二次修订）
 
 缺陷形态：`_last_heartbeat` 是空 dict，`check_primary_health` 用
 `self._last_heartbeat.get(primary_id, 0)` 取缺省值 —— 0 被当成「纪元 0 发过
@@ -10,15 +10,22 @@
 在只注入 3 次拜占庭的情况下报告 `successful_failovers = 20`（100%）—— 故障
 切换统计与真实拜占庭事件完全脱钩，而这正是论文用来量化 failover 有效性的数据。
 
-修复：心跳表在构造/重置时以当前时刻初始化；`check_primary_health` 把「从未
-收到心跳」解释为「监控刚开始」，给一个 `HEARTBEAT_TIMEOUT_MS` 宽限期，宽限期
-后仍无心跳才判超时。
+修复的最终口径（**以本文件为准，勿回退**）：
+  「从未收到心跳」既不是「健康」也不是「超时」，而是 **UNKNOWN** ——
+  信息缺失不等于任何一侧的事实。`_last_heartbeat` 保持空表，不伪造时间戳；
+  `check_primary_health` 对表外节点直接返回 UNKNOWN，且**不改写**
+  `_primary_status`（保持可信任候选），因此不会触发视图切换。
+
+  为什么不选「构造时把表按 now 初始化、一律判 HEALTHY」（2026-11-03 首版）：
+  那等于对「从未收到心跳」的节点**声称**它刚刚发过心跳 —— 状态表撒谎，
+  持久化/审计时无法区分「真健康」与「没消息」。两种写法在「正常轮不触发切换」
+  上等价（见 TestNoSpuriousFailover），但 UNKNOWN 多保留一个真实状态。
 
 本文件锁住四件事：
-1. 全新引擎的健康 primary 不被判超时（不误报）；
-2. 正常轮不触发视图切换（failover 记录为 None）；
-3. 真正超时（心跳过旧）仍被判超时（不误放）；
-4. 重置后不会退回到「一律超时」的旧行为。
+1. 全新引擎的健康 primary 不被**误判超时**，而是 UNKNOWN（不误报）；
+2. 心跳表初始为空，不得伪造时间戳；
+3. 真正超时（心跳过旧）仍被判超时（不误放）；拜占庭仍触发切换；
+4. 重置后不退回到「一律超时」的旧行为。
 """
 import logging
 import time
@@ -37,27 +44,32 @@ def _engine():
 
 
 class TestFreshEngineHealth:
-    def test_fresh_engine_primary_is_healthy(self):
-        """全新引擎：健康 primary 不得被判超时"""
-        cf = _engine()
-        assert cf.check_primary_health('node_0') == PrimaryStatus.HEALTHY
+    def test_fresh_engine_primary_is_unknown_not_timeout(self):
+        """全新引擎：从未收到心跳 ⇒ UNKNOWN。
 
-    def test_all_nodes_initialized_in_heartbeat_table(self):
-        """构造时心跳表已按节点初始化（不是空表）"""
+        关键在**不等于 TIMEOUT** —— 旧实现的缺陷正是 `now - 0 > 阈值` 恒真。
+        """
         cf = _engine()
-        assert set(cf._last_heartbeat) == set(NODES_5)
-        assert all(ts > 0 for ts in cf._last_heartbeat.values())
+        assert cf.check_primary_health('node_0') == PrimaryStatus.UNKNOWN
+        assert cf.check_primary_health('node_0') != PrimaryStatus.TIMEOUT
 
-    def test_unknown_node_starts_monitoring(self):
-        """运行期首次问到的节点：从此刻开始计时并视为健康"""
+    def test_heartbeat_table_starts_empty(self):
+        """构造时心跳表为空：不伪造「刚刚发过」的时间戳"""
         cf = _engine()
-        assert cf.check_primary_health('node_x') == PrimaryStatus.HEALTHY
-        assert cf._last_heartbeat['node_x'] > 0
+        assert cf._last_heartbeat == {}, (
+            f"心跳表被预填了：{cf._last_heartbeat} —— 缺信息不得伪造为已知")
+
+    def test_unknown_node_is_not_fabricated(self):
+        """运行期首次问到的节点：返回 UNKNOWN，且**不写入**伪造时间戳"""
+        cf = _engine()
+        assert cf.check_primary_health('node_x') == PrimaryStatus.UNKNOWN
+        assert 'node_x' not in cf._last_heartbeat, (
+            "查询不得顺手写入时间戳（那会把「没消息」变成「刚收到」）")
 
 
 class TestNoSpuriousFailover:
     def test_normal_round_does_not_trigger_failover(self):
-        """正常轮（主节点健康）不得产生 failover 记录"""
+        """正常轮（未收到心跳、状态 UNKNOWN）不得产生 failover 记录"""
         cf = _engine()
         ok, record = cf.simulated_consensus_with_failover(
             'hash_normal', 'node_0', block_height=0,
@@ -99,10 +111,10 @@ class TestGenuineTimeoutStillDetected:
 
 
 class TestResetSemantics:
-    def test_reset_reinitializes_heartbeat_table(self):
-        """重置后心跳表重新初始化，不退回到「一律超时」"""
+    def test_reset_clears_heartbeat_table(self):
+        """重置后心跳表清空 ⇒ UNKNOWN，不退回到「一律超时」的旧行为"""
         cf = _engine()
-        cf._last_heartbeat['node_0'] = 0          # 人为制造旧状态
+        cf.record_heartbeat('node_0')
         cf.reset_failover_state()
-        assert cf._last_heartbeat['node_0'] > 0
-        assert cf.check_primary_health('node_0') == PrimaryStatus.HEALTHY
+        assert cf._last_heartbeat == {}
+        assert cf.check_primary_health('node_0') == PrimaryStatus.UNKNOWN

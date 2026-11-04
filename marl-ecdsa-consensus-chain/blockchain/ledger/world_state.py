@@ -2,6 +2,7 @@
 世界状态模型
 链上维护的全局状态：身份状态、积分状态、行为记录、系统状态
 """
+import math
 import time
 import logging
 from dataclasses import dataclass, field
@@ -119,9 +120,26 @@ class WorldState:
     # -------------------------------------------------------------------------
 
     def add_score(self, agent_id: str, delta: float):
-        """为智能体添加/扣除积分"""
+        """为智能体添加/扣除积分
+
+        非有限 delta 一律拒收（fail-closed），不做静默钳位：`NaN + x` 恒为 NaN，
+        一旦写进去该智能体的积分会被**永久污染**（后续任何加减都救不回来，已
+        实测），并连带污染 cumulative_contribution 与排行榜排序。
+        """
         if agent_id not in self._scores:
             logger.warning(f"[WorldState] {agent_id} 未注册，无法更新积分")
+            return
+        try:
+            delta = float(delta)
+        except (TypeError, ValueError):
+            logger.warning(
+                f"[WorldState] {agent_id} 的积分增量不是数值（{delta!r}），已拒收"
+            )
+            return
+        if not math.isfinite(delta):
+            logger.warning(
+                f"[WorldState] {agent_id} 的积分增量为非有限值（{delta!r}），已拒收"
+            )
             return
         self._scores[agent_id].score += delta
         if delta > 0:
