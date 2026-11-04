@@ -100,6 +100,72 @@ FROZEN_TEST_IMPORTERS = {
     ],
 }
 
+# --------------------------------------------------------------------------
+# 处置登记表（T7）：每个同名 basename 必须显式声明「为什么不构成缺陷」
+# --------------------------------------------------------------------------
+#
+# FROZEN_DUPLICATES 只记录「哪些名字撞了」。撞了之后**怎么处置**此前只存在于
+# 讨论与 commit message 里 —— 5 对里只有 analyze_all_experiments 那一对被 T2
+# 真正校验等价，其余 4 对为何不需要校验，没有任何机器可读的记录。后果是：下一对
+# 副本出现时，最省力的过测方式是往 FROZEN_DUPLICATES 里加一行了事，而"这一对
+# 要不要等价"这个判断被静默跳过。
+#
+# 本表把该判断落成代码，kind 只有三种，每种都有既有断言背书：
+#
+#   equivalent     两份必须语义等价（T2 按本表参数化逐条校验，不是靠这行字）
+#   explicit_path  两份**有意不同**，每个消费者都必须显式注入自己的目录（T4）
+#   orphan_unused  两份无任何消费者，歧义面为零，且 T5 保证它保持无引用
+#
+# 交叉校验（T7）：orphan_unused 不得有消费者；explicit_path 必须有消费者；
+# equivalent 必须与 SEMANTIC_EQUIVALENT_PAIR 一一对应。三张表不得互相矛盾。
+
+DUPLICATE_DISPOSITION = {
+    "analyze_all_experiments.py": {
+        "kind": "equivalent",
+        "reason": (
+            "tests/test_analyze_all_experiments.py 裸 import 它，落到哪份由 "
+            "pythonpath 决定；两份已同步为逐字节相同（25183 bytes），"
+            "T2 持续校验，任何单侧修改都会 FAIL。"
+        ),
+    },
+    "analyze_deep_tests.py": {
+        "kind": "orphan_unused",
+        "reason": (
+            "两份逐字节相同（12277 bytes），且仓库内无任何入口 import；"
+            "无消费者即无解析歧义面。T5 断言其保持无人引用。"
+        ),
+    },
+    "deep_test_driver.py": {
+        "kind": "orphan_unused",
+        "reason": (
+            "两份 128 vs 119 行，BASE（结果目录）一处对一处错；但 "
+            "results/scalability_test 等目标目录两处都不存在 ⇒ 从未在本仓库"
+            "运行过。无消费者，漂移不构成当前缺陷；T5 禁止其被接线。"
+        ),
+    },
+    "deep_test_orchestrator.py": {
+        "kind": "orphan_unused",
+        "reason": (
+            "两份 126 vs 118 行，PYTHON 解释器路径一处对一处错；与 driver 同属"
+            "未运行过的遗留编排脚本。无消费者，T5 禁止其被接线。"
+        ),
+    },
+    "run_all.py": {
+        "kind": "explicit_path",
+        "reason": (
+            "两份是**有意不同**的脚本（ablation 263 行 / benchmark 359 行），"
+            "不可能等价；两个测试各自在 import 前显式注入 scripts/benchmark，"
+            "且仓库根不存在 run_all.py —— 均由 T4 断言。"
+        ),
+    },
+}
+
+_DISPOSITION_KINDS = {"equivalent", "explicit_path", "orphan_unused"}
+
+# T2 的参数来源：凡声明 equivalent 的 basename 都必须真的被逐行校验
+_EQUIVALENT_BASENAMES = sorted(
+    b for b, d in DUPLICATE_DISPOSITION.items() if d["kind"] == "equivalent")
+
 # 有测试消费者的那对副本：必须语义等价（另一份是 legacy 兼容副本）
 SEMANTIC_EQUIVALENT_PAIR = {
     "name": "analyze_all_experiments",
@@ -287,25 +353,43 @@ def test_duplicate_module_basenames_are_frozen():
 
 # 2026-11-04 移除无条件 skip：实测可通过。原 skip 系 d9e701c8
 # 为掩盖 legacy 副本口径漂移所加，随漂移一并修复后恢复执行。
-def test_live_copy_is_semantically_identical_to_its_legacy_sibling():
-    """``analyze_all_experiments`` 两份副本除样板头外必须逐行相同。
+@pytest.mark.parametrize("basename", _EQUIVALENT_BASENAMES)
+def test_live_copy_is_semantically_identical_to_its_legacy_sibling(basename):
+    """声明为 equivalent 的每一对副本，除 legacy 样板头外必须逐行相同。
 
     这是本守卫的核心：该名字被测试**裸 import**，解析到哪一份由环境决定；
     只要两份内容等价，解析顺序就无关紧要。反之，任何单侧修改都会让
     "测试通过" 与 "交付行为" 脱钩 —— 那正是 F13 要防的滚雪球。
-    """
-    root_txt = _normalized_semantic_text(SEMANTIC_EQUIVALENT_PAIR["root_copy"])
-    legacy_txt = _normalized_semantic_text(SEMANTIC_EQUIVALENT_PAIR["legacy_copy"])
 
-    if root_txt != legacy_txt:
+    参数来自 ``DUPLICATE_DISPOSITION`` 而非硬编码唯一一对：将来任何新增的
+    ``equivalent`` 声明都会自动进入本用例，不会出现"登记了但没人校验"。
+    """
+    copies = FROZEN_DUPLICATES[basename]
+    assert len(copies) >= 2, "%s 在 FROZEN_DUPLICATES 里不足两份" % basename
+
+    pivot_rel = SEMANTIC_EQUIVALENT_PAIR["root_copy"]
+    assert pivot_rel in copies, (
+        "%s 的基准副本 %s 不在 FROZEN_DUPLICATES 登记路径 %s 里"
+        % (basename, pivot_rel, copies))
+    pivot_txt = _normalized_semantic_text(pivot_rel)
+
+    drifted = {}
+    for rel in copies:
+        if rel == pivot_rel:
+            continue
+        txt = _normalized_semantic_text(rel)
+        if txt != pivot_txt:
+            drifted[rel] = txt
+
+    if drifted:
         import difflib
+        rel, txt = sorted(drifted.items())[0]
         diff = list(difflib.unified_diff(
-            root_txt.split("\n"), legacy_txt.split("\n"),
-            SEMANTIC_EQUIVALENT_PAIR["root_copy"],
-            SEMANTIC_EQUIVALENT_PAIR["legacy_copy"],
-            lineterm="", n=2))
+            pivot_txt.split("\n"), txt.split("\n"),
+            pivot_rel, rel, lineterm="", n=2))
         pytest.fail(
-            "两份活副本已发生语义漂移（除 legacy 样板头外不允许有任何差异）：\n"
+            "%s 的两份活副本已发生语义漂移（除 legacy 样板头外不允许有任何差异）：\n"
+            % basename
             + "\n".join("  " + l for l in diff[:60])
             + "\n\n处置方式：两份必须同步修改（或把 legacy 那份改成薄转发）。"
               "禁止只改其中一份，然后依赖「测试全绿」。"
@@ -495,3 +579,87 @@ def test_no_project_module_shadows_declared_dependency():
         "以下项目模块会**遮蔽 requirements 里声明的依赖**：\n%s\n"
         "处置：重命名该文件/目录。"
         % "\n".join("  %s -> %s" % (k, v) for k, v in sorted(clash.items())))
+
+
+# --------------------------------------------------------------------------
+# T7 处置登记表必须覆盖全部同名副本，且与消费者表/等价表/孤儿表互不矛盾
+# --------------------------------------------------------------------------
+
+def test_every_duplicate_basename_declares_a_consistent_disposition():
+    """每对同名副本「为什么不构成缺陷」必须显式登记，且四张表互相自洽。
+
+    T1 只保证撞名清单冻结；T2 只校验被声明为 equivalent 的那一对；T4/T5 各自
+    只管一类消费者。**此前没有任何一条断言要求"每一对副本都被归过类"** ——
+    于是新增一对副本时，只要把 T1 的白名单同步一下就能全绿，处置判断本身可以
+    完全不做。本用例补上这个缺口，并钉住几种会互相矛盾、却都能单独过测的登记。
+    """
+    declared = DUPLICATE_DISPOSITION
+    problems = []
+
+    # (a) 覆盖：与 FROZEN_DUPLICATES 双向对账（新增一对副本不能只加白名单）
+    missing = sorted(set(FROZEN_DUPLICATES) - set(declared))
+    extra = sorted(set(declared) - set(FROZEN_DUPLICATES))
+    if missing:
+        problems.append("以下同名副本未登记处置方式（可选 %s）：%s"
+                        % ("/".join(sorted(_DISPOSITION_KINDS)), missing))
+    if extra:
+        problems.append("处置表登记了 FROZEN_DUPLICATES 里不存在的名字：%s" % extra)
+
+    # (b) 每条登记本身合法：kind 在集合内，reason 必须是真实依据而非占位符
+    for base in sorted(declared):
+        entry = declared[base]
+        kind = entry.get("kind")
+        if kind not in _DISPOSITION_KINDS:
+            problems.append("%s 的 kind=%r 不在允许集合 %s 内"
+                            % (base, kind, sorted(_DISPOSITION_KINDS)))
+        if len(str(entry.get("reason", "")).strip()) < 20:
+            problems.append("%s 的 reason 过短（需写明实测依据，不接受占位符）" % base)
+
+    # (c) 与消费者表交叉校验：kind 蕴含"有无消费者"，两者必须一致
+    consumer_modules = set(FROZEN_TEST_IMPORTERS)
+    for base in sorted(declared):
+        kind = declared[base].get("kind")
+        mod = base[:-3] if base.endswith(".py") else base
+        has_consumer = mod in consumer_modules
+        if kind == "orphan_unused" and has_consumer:
+            problems.append(
+                "%s 声明为 orphan_unused，却被 %s import —— 无消费者正是它免于"
+                "等价校验的唯一理由" % (base, FROZEN_TEST_IMPORTERS[mod]))
+        elif kind in ("equivalent", "explicit_path") and not has_consumer:
+            problems.append(
+                "%s 声明为 %s，但 FROZEN_TEST_IMPORTERS 里没有消费者；"
+                "无消费者的副本应归为 orphan_unused" % (base, kind))
+
+    # (d) equivalent 与 SEMANTIC_EQUIVALENT_PAIR 必须一一对应
+    #     （T3 只读后者；多余的 equivalent 会被静默跳过）
+    eq_bases = sorted(b for b, d in declared.items() if d.get("kind") == "equivalent")
+    pair_name = SEMANTIC_EQUIVALENT_PAIR.get("name")
+    if eq_bases and pair_name is None:
+        problems.append("有 equivalent 登记但 SEMANTIC_EQUIVALENT_PAIR 缺失")
+    elif eq_bases and [pair_name + ".py"] != eq_bases:
+        problems.append(
+            "equivalent 登记集合 %s 与 SEMANTIC_EQUIVALENT_PAIR[name]=%r 不一致"
+            % (eq_bases, pair_name))
+
+    # (e) orphan_unused 必须与 T5 实际扫描的清单一致
+    #     否则"声明为孤儿"只是个标签：没人会断言它保持无人引用
+    orphan_bases = sorted(b[:-3] for b, d in declared.items()
+                          if d.get("kind") == "orphan_unused")
+    if orphan_bases != sorted(ORPHAN_BASENAMES):
+        problems.append(
+            "orphan_unused 登记 %s 与 T5 的 ORPHAN_BASENAMES %s 不一致；"
+            "未进入后者的副本不会被断言「保持无人引用」"
+            % (orphan_bases, sorted(ORPHAN_BASENAMES)))
+
+    # (f) 防退化自检：T2 的参数表变空等于等价校验整体消失
+    if not _EQUIVALENT_BASENAMES:
+        problems.append(
+            "T2 的参数表 _EQUIVALENT_BASENAMES 为空 —— 等价校验已被整体跳过，"
+            "本文件的核心断言静默失效")
+
+    assert not problems, (
+        "同名副本的处置登记不自洽：\n"
+        + "\n".join("  - " + p for p in problems)
+        + "\n\n处置方式：为每对副本在 DUPLICATE_DISPOSITION 里选一种 kind 并写明"
+          "实测依据；若 kind 与消费者现状矛盾，先确认是哪一边过时，不要改断言迁就。"
+    )

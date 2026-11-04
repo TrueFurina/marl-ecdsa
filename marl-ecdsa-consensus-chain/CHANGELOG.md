@@ -15,6 +15,80 @@
 
 ---
 
+## 2026-11-04（续三）— 同名副本「为什么不构成缺陷」落成代码
+
+> 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+前两节拆掉了「重复执行」与「假覆盖」。这一节处理第三种浪费：**看起来有守卫，
+其实没人判**。`tests/test_module_resolution_contract.py` 把 5 对同名 basename 冻结
+在 `FROZEN_DUPLICATES` 里，但检视后发现，**只有 `analyze_all_experiments` 那一对
+被真正校验等价**；另外 4 对「为什么不需要等价」只写在 commit message 与讨论里。
+
+后果是具体的：新增第 6 对副本时，最省力的过测方式是往白名单加一行（T1 立刻变绿），
+而「这一对要不要等价」这个判断可以完全不做 —— 守卫在，判定不在。
+
+### 一、处置登记表：三种 kind，每种都有既有断言背书
+
+`DUPLICATE_DISPOSITION` 为 5 对逐一登记处置方式与实测依据，kind 只有三种：
+
+| kind | 含义 | 背书断言 |
+|---|---|---|
+| `equivalent` | 两份必须语义等价 | T2 按本表**参数化**逐条校验（不再硬编码唯一一对） |
+| `explicit_path` | 两份有意不同，消费者必须显式注入目录 | T4 |
+| `orphan_unused` | 无任何消费者，歧义面为零 | T5 断言其保持无人引用 |
+
+5 对的实际登记：`analyze_all_experiments` → equivalent；`run_all` → explicit_path；
+`analyze_deep_tests` / `deep_test_driver` / `deep_test_orchestrator` → orphan_unused。
+
+### 二、T7 交叉校验：四张表不得互相矛盾
+
+新增 `test_every_duplicate_basename_declares_a_consistent_disposition`，六项检查：
+
+1. 与 `FROZEN_DUPLICATES` 双向对账（新增副本不能只加白名单、也不能登记幽灵名）；
+2. kind 必须在允许集合内；
+3. `reason` 必须写实测依据，不接受占位符（短于 20 字符即失败）；
+4. kind 蕴含的「有无消费者」必须与 `FROZEN_TEST_IMPORTERS` 一致
+   （`orphan_unused` 不得有消费者；`equivalent`/`explicit_path` 必须有）；
+5. `equivalent` 必须与 `SEMANTIC_EQUIVALENT_PAIR` 一一对应（T3 只读后者，
+   多余的 `equivalent` 会被静默跳过）；
+6. `orphan_unused` 必须与 T5 实际扫描的 `ORPHAN_BASENAMES` 一致
+   （否则「声明为孤儿」只是个标签，没人断言它保持无人引用）。
+
+外加一条防退化自检：T2 的参数表不得为空 —— 表一空，参数化用例整体消失，
+核心断言静默失效。
+
+### 三、变异验证：10/10 命中，且各自打到对应分支
+
+不是"改一处然后看红"，而是逐条注错，确认每条变异触发的是**它自己**那条问题
+条目（避免所有变异都被同一句兜底吞掉）：
+
+| 变异 | 触发 |
+|---|---|
+| 删掉 `run_all` 登记 | 报 missing |
+| 孤儿副本被登记为有消费者 | 报 kind 与消费者矛盾 |
+| 孤儿改成 `equivalent` | 三重冲突：无消费者 + 等价表不一致 + 孤儿表脱节 |
+| `run_all` 改成 `orphan_unused` | 消费者矛盾 + 孤儿表不一致 |
+| `reason` 写 `TODO` | 报过短 |
+| kind 写非法值 | 报不在允许集合 |
+| 清空 T2 参数表 | 报核心断言静默失效 |
+| 多登记一个不存在的名字 | 报 extra |
+| `ORPHAN_BASENAMES` 被截断 | 报与登记不一致 |
+| 两份等价副本出现真实漂移 | T2 用 unified diff 定位到具体行 |
+
+### 四、顺手推翻两处旧记录（自我更正）
+
+- 早前记的「`run_all` 两份相差 **531 行**」是 **diff 输出行数**，不是文件行数。
+  实际两份分别是 ablation **263 行** / benchmark **359 行**。
+- 5 对副本字节数已逐个复核：`analyze_all_experiments` 两份 **25183 B 逐字节相同**、
+  `analyze_deep_tests` 两份 **12277 B 逐字节相同**；`deep_test_driver` 128 / 119 行、
+  `deep_test_orchestrator` 126 / 118 行（漂移存在但无消费者，见上表 orphan_unused）。
+
+回归：`tests/test_module_resolution_contract.py` **11 passed**（原 10 条，+1 条 T7；
+T2 由 1 条硬编码改为按表参数化）。
+
+---
+
 ## 2026-11-04（续二）— 六条覆盖被「顺手 skip」掩盖：连带修掉一处真实口径漂移
 
 > 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
