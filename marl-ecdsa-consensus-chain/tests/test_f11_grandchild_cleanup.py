@@ -6,8 +6,17 @@
 
 本测用真实进程验证：父(=子进程) → 孙进程，关闭 Job 后两者都必须死亡。
 环境不支持 Job/Assign（如嵌套 Job 受限）时 skip，不误报失败。
+
+2026-11-04 重接线（原测在跑一个**不存在的实现**）：
+  本文件原先 `exec_module` 一个本仓库没有的 `launcher/supervisor.py`
+  （那边才叫 `_make_job/_assign_job/_close_job`）。模块级加载失败 ⇒ 收集期错误
+  ⇒ 整份套件中断（CI 实测 Interrupted: 1 error during collection），
+  随后降级为整模块 skip —— 于是这条用例实际覆盖为**零**，而且它是无条件 skip，
+  永远不会自己活过来。
+  而真实实现自 2026-11-02 起就在 `visualization/business_service._win_job_kill_on_close`，
+  由 `business_service.py:248` 对每个训练子进程调用。现在直接打真实实现：
+  测的终于是活代码，而不是一份缺席实现的影子。
 """
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -18,27 +27,29 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[2]
-_SUPERVISOR = _ROOT / "launcher" / "supervisor.py"
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
 
-# 2026-11-03：本仓库**不含** `launcher/supervisor.py`（全仓 grep `_make_job` 仅本文件
-# 命中；Job Object 的实现在 `visualization/business_service.py`）。这条用例是随
-# `launcher/` 一起从另一发行物带过来的遗留：模块级 `exec_module` 在文件缺失时抛
-# FileNotFoundError，属**收集期错误**，会让整个 `pytest tests/` 中断（CI 实测
-# Interrupted: 1 error during collection，其余 2000+ 条一条都没跑）。
-#
-# 不删用例（它锁的是真实的 Job Object 语义），改为缺模块时**整模块 skip**：
-# 模块一旦随 `launcher/` 一起回来，本用例自动恢复执行。
-if not _SUPERVISOR.exists():
-    pytest.skip(
-        f"launcher/supervisor.py 不在本仓库（查找路径 {_SUPERVISOR}）；"
-        "本用例锁的是该模块的 Windows Job Object 孙进程回收语义，模块缺席时跳过",
-        allow_module_level=True,
-    )
+from visualization import business_service as bs  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location("launcher_supervisor", _SUPERVISOR)
-sup = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(sup)
+
+def _close_job(job):
+    """模拟「持句柄的 Web 进程退出」：关闭 Job 句柄，KILL_ON_JOB_CLOSE 随之触发。
+
+    这是**测试侧**工具，不是生产接口：生产代码刻意不提供「关 Job」的入口，
+    它把句柄挂在 `_JOB_HANDLES` 上一直持有到本进程退出——正因如此，Web 崩溃
+    （os._exit / 被杀）时内核才会连带杀掉训练子进程。本测手动关句柄，
+    就是为了构造「持句柄的进程退出」这一触发条件。
+
+    64 位下必须显式设 argtypes，否则句柄按 c_int 截断（business_service 自己踩过这个坑）。
+    """
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    k32.CloseHandle.restype = wintypes.BOOL
+    bs._JOB_HANDLES.discard(job)   # 别让本进程退出时再去关一个已失效的句柄
+    return k32.CloseHandle(job)
 
 
 def _alive(pid):
@@ -65,9 +76,6 @@ def _alive(pid):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Object")
 def test_job_kills_grandchild():
-    job = sup._make_job()
-    if not job:
-        pytest.skip("CreateJobObject/SetInformation 不可用（环境限制）")
     tmp = Path(tempfile.mkdtemp(prefix="f11_gc_"))
     pidfile = tmp / "grandchild.pid"
     child_code = (
@@ -79,8 +87,11 @@ def test_job_kills_grandchild():
     child = subprocess.Popen([sys.executable, "-c", child_code])
     gpid = None
     try:
-        if not sup._assign_job(job, child.pid):
-            pytest.skip("AssignProcessToJobObject 不可用（环境限制）")
+        # 真实实现一步完成 CreateJobObject + SetInformation(KILL_ON_JOB_CLOSE) + Assign；
+        # 任一步失败返回 None（best-effort 语义，不抛异常）。
+        job = bs._win_job_kill_on_close(child)
+        if not job:
+            pytest.skip("CreateJobObject/SetInformation/Assign 不可用（环境限制，如嵌套 Job 受限）")
         for _ in range(60):
             if pidfile.exists():
                 break
@@ -89,7 +100,7 @@ def test_job_kills_grandchild():
         gpid = int(pidfile.read_text().strip())
         assert _alive(child.pid), "子进程应存活"
         assert _alive(gpid), "孙进程应存活"
-        sup._close_job(job)
+        _close_job(job)
         time.sleep(0.8)
         assert not _alive(child.pid), "直接子进程未被 Job 回收"
         assert not _alive(gpid), "孙进程未被 Job 回收"

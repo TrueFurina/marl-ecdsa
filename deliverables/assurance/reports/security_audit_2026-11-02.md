@@ -567,6 +567,126 @@ CI 装了 torch，所以从来是绿的——这层盲区只在本机裸跑时�
 
 ---
 
+## 14. 2026-11-04 补记二：六条覆盖被「顺手 skip」掩盖，连带暴露一处真实漂移
+
+### 14.1 现象：6 处无条件 skip 共用同一句 reason
+
+全仓 AST 扫描 `@pytest.mark.skip(...)` 装饰器（**无条件**形式，等于永久放弃覆盖）
+恰好 6 处，`reason` 完全相同：
+
+> `F15 旧仓布局守卫：app 树无对应布局/物料（2026-11-02 赛后 R10 登记）`
+
+分布在 `test_docs_integrity.py`（2）、`test_module_resolution_contract.py`（3）、
+`test_check_submission_anonymity.py`（1）。
+
+### 14.2 追因：它们是为掩盖一次口径漂移而加的
+
+用 API 逐版取文件核对（不是从提交信息推断）：
+
+| 时点 | 根副本 `analyze_all_experiments.py` | legacy 副本 `scripts/legacy/analysis/…` | 该测试文件内 skip 数 |
+|---|---|---|---|
+| `0997c829`（10-04 源码入库） | n_a=71 | n_a=71 | **0** |
+| `d9e701c8`（11-03「sync 源码对齐 V29 新基线」） | n_a=101 | **n_a=71（未同步）** | **6** |
+
+`d9e701c8` 把根副本的 `_REGISTRY_FALLBACK` 改成 n=101 新口径，漏了 legacy 那份，
+于是 `test_live_copy_is_semantically_identical_to_its_legacy_sibling` 变红。
+**处置不是修数据，而是把 6 条一起标 skip** —— 其中 5 条与该漂移毫无关系。
+
+漂移的三行：
+
+| 编号 | 根副本（与 `number_registry.json` 镜像 `declared` 一致） | legacy 副本 |
+|---|---|---|
+| NR-1 | 25.75% / p=0.003348 / d=0.4179 / n_a=101 | 28.17% / p=0.009524 / d=0.4412 / n_a=**71** |
+| NR-2 | 7.70% / p=1.142e-14 / d=1.1749 / n_a=101 | 7.92% / p=5.02e-11 / d=1.1962 / n_a=**71** |
+| NR-3 | 1.92% / p=1.504e-14 / d=1.1691 / n_a=101 | 1.95% / p=7.28e-11 / d=1.1858 / n_a=**71** |
+
+**这属于本报告第 10 节同一类问题的延续**：修复被静默回退/掩盖，而门禁没拦住。
+差别在于第 10 节是「修好的代码被换回旧版」，这里更隐蔽 ——
+**测试本身被关掉**，所以连红灯都不会出现。
+
+### 14.3 实测：6 条里只有 1 条真跑不了
+
+写了一个**运行时摘除 skip marker** 的探针插件（不修改仓库文件），6 条一起跑：
+
+| 用例 | 实测 |
+|---|---|
+| `test_no_github_badge_in_readme` | 通过 |
+| `test_bilingual_readme_exists` | 通过 |
+| `test_gate_source_is_machine_independent` | 通过 |
+| `test_duplicate_module_basenames_are_frozen` | 通过 |
+| `test_both_consumers_of_analyze_all_experiments_resolve_to_root_copy` | 通过 |
+| `test_live_copy_is_semantically_identical_to_its_legacy_sibling` | **失败**（打出三行漂移） |
+
+即：`F15 旧仓布局守卫` 这个理由对其中 5 条**根本不成立**。
+
+### 14.4 处置
+
+1. legacy 副本三行兜底值同步为 n=101，与根副本、与镜像 `declared` 三方一致；
+   两份文件现在**逐字节相同**（`diff -q` 无输出）。
+2. 摘掉 6 处 skip 装饰器，每处留注释指明原因与出处。
+3. **不改成薄转发**：legacy 的 `BASE = Path(__file__).parent / 'results'` 依赖自身
+   位置，转发会让它读错目录 —— 那是把「数据不一致」换成「路径不一致」，更隐蔽。
+
+### 14.5 同类问题：f11 那条在跑一个不存在的实现
+
+`tests/test_f11_grandchild_cleanup.py` 原先 `exec_module` 本仓库**没有**的
+`launcher/supervisor.py`（那边才叫 `_make_job/_assign_job/_close_job`）。模块级加载失败
+属收集期错误 ⇒ 整份套件中断，随后降级为整模块 skip ⇒ **实际覆盖为零**。
+
+真实实现自 2026-11-02 起在 `visualization/business_service._win_job_kill_on_close`，
+由 `business_service.py:248` 对每个训练子进程调用。现改为直接打真实实现。
+
+该用例此前**从未执行过**，因此不能只看它变绿。负对照实测：
+
+| 场景 | 直接子进程 | 孙进程 |
+|---|---|---|
+| 有 Job Object（关闭句柄，正测） | 死亡 | **死亡** |
+| 仅 terminate 子进程（无 Job，负对照） | 死亡 | **仍存活（孤儿）** |
+
+两个方向都验证到：断言不是空转，`_alive()` 探测不恒真也不恒假；负对照同时
+证明**病灶真实存在**（这正是 F11 要防的孤儿）。
+
+局限（须同报）：这条只在 Windows 生效，CI 跑 `ubuntu-latest`，在 CI 上仍会
+`skipif(os.name != 'nt')` 跳过。**它恢复的是本机覆盖，不是 CI 覆盖。**
+
+### 14.6 加固：无条件 skip 装饰器归零
+
+新增 `tests/test_no_unconditional_skip.py`，AST 扫 `@pytest.mark.skip(...)` 装饰器须为 0。
+
+刻意收窄判据，避免逼人绕过：
+
+- 不拦 `skipif` / `importorskip`（条件满足会自己恢复，正当用法）；
+- 不拦函数体内 `pytest.skip()`（通常前面有 `if <条件>:`，属「本环境不适用」）；
+- 确需永久放弃 → 登记 `ALLOWED` 并写明为什么不能写成 `skipif`。
+
+带两条自检：植入假 skip 必须被命中（防匹配写错退化成空转）、
+`skipif`/`importorskip` 必须不被误报。
+
+### 14.7 实测
+
+本机（Windows / py3.12 / 无 torch），同配置全量：
+
+| 项 | 改动前 | 改动后 | 差 |
+|---|---|---|---|
+| 收集 | 2260 | 2263 | +3（新增守卫3条） |
+| 通过 | 2233 | 2243 | +10 = +6（F15）+1（f11）+3（守卫） |
+| 跳过 | 25 | 18 | −7 = −6（F15）−1（f11 转执行） |
+| 失败 | 2 | 2 | 0 |
+
+残余两条失败为既有环境红灯：`test_deps_importable`（缺 torch）、
+`test_next_nr::test_threaded_no_duplicate`（Windows `PermissionError` 文件锁），
+与本次改动无关。
+
+**不宣称耗时变化**：300.30s 与上一节 445.92s 不可比 —— 同一天内同一条基线曾出现
+556.20s 与 866.36s（1.56×），本机热状态漂移远大于本次改动的量级。
+
+剩余 18 个 skip 已逐条核对，全部条件性且理由具体：缺 torch（qmix 2 + mappo 10 +
+torch_import_contract 2）、缺 Dilithium 后端（2）、仓库外脚本缺失（1）、
+容器环境派生不出用户名（1）、反向 skip「后端可用时回落路径不适用」（1）、
+hybrid 契约另测（1）。
+
+---
+
 ## 验证口径
 
 ```

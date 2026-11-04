@@ -304,9 +304,8 @@ def test_self_exempt_files_not_flagged():
 # ── 4. 机器无关：门禁源码自身零泄漏 ────────────────────────────────────────
 
 
-@pytest.mark.skip(reason="F15 旧仓布局守卫：app 树无对应布局/物料（2026-11-02 赛后 R10 登记）")
-
-
+# 2026-11-04 移除无条件 skip：实测可通过。原 skip 系 d9e701c8
+# 为掩盖 legacy 副本口径漂移所加，随漂移一并修复后恢复执行。
 def test_gate_source_is_machine_independent():
     """用门禁自己的规则扫门禁自己（ tracked 模式）——源码不得写死用户名。"""
     code, out = _run_gate("--tracked")

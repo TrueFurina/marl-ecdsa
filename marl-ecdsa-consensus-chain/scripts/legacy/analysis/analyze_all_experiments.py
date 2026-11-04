@@ -22,9 +22,9 @@ PYTHON = None  # Not needed for analysis
 # 口径真值：一律从权威登记簿程序化读取，禁手抄（防 n=22→n=71 这类口径漂移复发）
 # --------------------------------------------------------------------------- #
 _REGISTRY_FALLBACK = {
-    'NR-1': {'improvement_pct': 28.17, 'welch_p': 0.009524, 'cohens_d': 0.4412, 'n_a': 71},
-    'NR-2': {'improvement_pct': 7.92, 'welch_p': 5.02e-11, 'cohens_d': 1.1962, 'n_a': 71},
-    'NR-3': {'improvement_pct': 1.95, 'welch_p': 7.28e-11, 'cohens_d': 1.1858, 'n_a': 71},
+    'NR-1': {'improvement_pct': 25.75, 'welch_p': 0.003348, 'cohens_d': 0.4179, 'n_a': 101},
+    'NR-2': {'improvement_pct': 7.70, 'welch_p': 1.142e-14, 'cohens_d': 1.1749, 'n_a': 101},
+    'NR-3': {'improvement_pct': 1.92, 'welch_p': 1.504e-14, 'cohens_d': 1.1691, 'n_a': 101},
 }
 
 
