@@ -1,6 +1,6 @@
 """
 密钥管理器测试
-覆盖：密钥生成/加载、PEM持久化、缓存机制、损坏恢复、公共接口
+覆盖：密钥生成/加载、PEM持久化、缓存机制、损坏失败语义、公共接口
 """
 import pytest
 import sys
@@ -134,19 +134,43 @@ class TestListAgents:
 
 
 class TestCorruptedKeyRecovery:
-    """损坏密钥恢复"""
+    """损坏密钥的失败语义（fail-closed，不静默换钥）"""
 
-    def test_corrupted_priv_key_regenerates(self, key_dir):
+    def test_corrupted_priv_key_fails_closed(self, key_dir):
+        """私钥损坏 → 明确报错，绝不静默重新生成
+
+        原用例名为 `..._regenerates`、docstring 写「新实例应能检测损坏并重新
+        生成」，但既没有调用被测方法也没有任何断言——留下的是半成品。
+
+        实测的真实行为（2026-11-04 探针）：抛 `ValueError`，且
+          · 损坏的私钥文件不被改写（不留半成品）
+          · 公钥文件不被改写（链上身份仍可读）
+          · 重复调用仍以同样方式失败（不会第二次「自愈」）
+
+        fail-closed 才是对的：静默重新生成会换掉密钥对，而公钥可能已上链，
+        历史签名将全部失配，且用户不会知道自己被换了钥。
+        """
         from pathlib import Path
         km = KeyManager(key_dir=key_dir)
         km.generate_or_load("corrupt_agent")
-        # 损坏私钥文件
         priv_path = Path(key_dir) / "corrupt_agent_private.pem"
+        pub_path = Path(key_dir) / "corrupt_agent_public.pem"
+        pub_before = pub_path.read_bytes()
+
         priv_path.write_bytes(b"CORRUPTED_DATA")
-        # 新实例应能检测损坏并重新生成
+
         km2 = KeyManager(key_dir=key_dir)
-        # 清除缓存强制重新加载
-        km2._key_cache.clear()
-        # 公钥文件仍存在，私钥损坏 → generate_or_load 会尝试加载失败后重新生成
-        # 注意：实际行为取决于ECDSAUtils.private_key_from_bytes是否抛异常
-        # 此测试验证KeyManager在异常情况下的行为
+        km2._key_cache.clear()          # 清除缓存强制重新从磁盘加载
+        with pytest.raises(ValueError):
+            km2.generate_or_load("corrupt_agent")
+
+        # 失败必须干净：损坏的文件原样保留，供人工判断/恢复
+        assert priv_path.read_bytes() == b"CORRUPTED_DATA"
+        # 公钥不得被牵连改写
+        assert pub_path.read_bytes() == pub_before
+        assert km2.get_public_key("corrupt_agent") is not None
+        # 幂等失败：再来一次还是 ValueError，而不是「第二次自愈」
+        km3 = KeyManager(key_dir=key_dir)
+        km3._key_cache.clear()
+        with pytest.raises(ValueError):
+            km3.generate_or_load("corrupt_agent")

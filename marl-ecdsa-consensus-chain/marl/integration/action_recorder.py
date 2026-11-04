@@ -134,8 +134,17 @@ class ActionRecorder:
         """
         回合结束时刷新剩余行为缓冲到交易池
         P0-5: 仅刷新 verified=True 的行为
+
+        缓冲**一律排空**，与 ``batch_upload()`` 保持一致（那里 clear() 在
+        bc_node 判断之外）。此前 clear() 嵌在 ``bc_node is not None`` 之内，
+        stub 模式（bc_node=None）下 flush 是个空操作：record_action 无条件
+        append，flush 从不回收 ⇒ 缓冲随回合数单调增长，实测 20 回合 ×100 步
+        累积 2000 条从不释放。调用方 Bridge.on_episode_end() 只能靠自己
+        再补一句 ``_pending_actions.clear()`` 兜底——那正是本条缺陷的痕迹。
         """
-        if self.bc_node is not None and self._pending_actions:
+        if not self._pending_actions:
+            return
+        if self.bc_node is not None:
             # P0-5: 过滤未验证行为
             verified_actions = [
                 p for p in self._pending_actions
@@ -151,8 +160,11 @@ class ActionRecorder:
                 if tx is not None:
                     self.bc_node.add_transaction(tx)
                     self._tx_count += 1
-            self._pending_actions.clear()
             logger.debug("[ActionRecorder] 刷新剩余行为到交易池")
+        else:
+            logger.debug("[ActionRecorder] 刷新剩余行为（stub模式：无可上链节点，仅排空缓冲）")
+        # 与 batch_upload() 同一处置：交出或丢弃，都不留在缓冲里。
+        self._pending_actions.clear()
 
     def pending_to_transaction(self, pending: Dict) -> Optional[Transaction]:
         """将行为缓冲记录转为 Transaction 数据结构"""

@@ -69,8 +69,10 @@ class TestPlotExperimentComparison:
 
 class TestPlotLeaderboard:
     def test_empty_leaderboard_no_crash(self, tmp_path):
+        """空排行榜 → 不崩溃，且**不产出**空白图（无数据不该留下误导性文件）"""
         out = tmp_path / 'lb.png'
         pr.plot_leaderboard({}, str(out))  # 空数据不崩溃
+        assert not out.exists(), "无排行榜数据时不应写出空图"
 
 
 class TestGenerateAllPlots:

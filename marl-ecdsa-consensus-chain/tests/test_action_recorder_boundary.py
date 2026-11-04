@@ -96,12 +96,19 @@ class TestBatchUpload:
 
 
 class TestFlushPending:
-    def test_flush_without_bc_noop(self):
-        """无 bc_node → flush 不崩溃"""
+    def test_flush_without_bc_drains_buffer(self):
+        """无 bc_node → flush 不建交易，但缓冲必须排空
+
+        原断言是 ``len(...) >= 0``，对 list 恒真，任何实现都能过；
+        「不崩溃」已经被下一行 flush() 本身证明了，不需要假断言来充数。
+        真实契约是：排空缓冲且不计数。
+        """
         ar = ActionRecorder(n_agents=3)
         ar.record_action("a0", 1, [0.1], 1.0, 1000, 1, _pkg())
-        ar.flush_pending()  # bc_node=None 时直接返回
-        assert len(ar._pending_actions) >= 0  # 不崩溃即可
+        assert len(ar._pending_actions) == 1
+        ar.flush_pending()
+        assert ar._pending_actions == []
+        assert ar._tx_count == 0
 
 
 class TestStats:

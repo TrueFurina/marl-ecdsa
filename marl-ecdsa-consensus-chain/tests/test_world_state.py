@@ -53,8 +53,19 @@ class TestWorldStateScore:
             ws.get_score("ghost")
 
     def test_add_score_unregistered_noop(self):
+        """未注册积分更新：不崩溃，且不得凭空建条目
+
+        "noop" 必须可判定。只写「不抛异常」等于没断言——把 `add_score` 里的
+        `if agent_id not in self._scores: return` 改成 setdefault 风格会静默
+        造出幽灵积分，`get_all_scores()` 随之多出一项污染排行榜，而旧用例照样绿。
+        """
         ws = WorldState()
         ws.add_score("ghost", 10.0)  # Should not raise
+        assert "ghost" not in ws._scores
+        assert ws.get_all_scores() == {}
+        assert ws.get_contribution("ghost") == 0.0
+        with pytest.raises(KeyError):   # 未注册仍不可读分
+            ws.get_score("ghost")
 
     def test_get_all_scores(self):
         ws = WorldState()
@@ -102,8 +113,14 @@ class TestWorldStatePenalty:
         assert ws.get_consensus_weight("agent_0") == 0.0
 
     def test_betrayal_unregistered_noop(self):
+        """未注册背叛记录：不崩溃，且不建积分/行为档案、不影响共识权重"""
         ws = WorldState()
         ws.record_betrayal("ghost", 1)  # Should not raise
+        assert "ghost" not in ws._scores
+        assert "ghost" not in ws._behaviors
+        assert ws.get_betrayal_count("ghost") == 0
+        assert ws.get_consensus_weight("ghost") == 0.0   # fail-closed：无身份不得投票
+        assert ws.get_agent_summary("ghost") == {}
 
     def test_record_cooperation(self):
         ws = WorldState()

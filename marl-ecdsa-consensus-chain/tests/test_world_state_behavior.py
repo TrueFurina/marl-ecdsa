@@ -36,8 +36,17 @@ class TestRecordAction:
         assert ws._behaviors["agent_0"].last_active_block == 20
 
     def test_record_action_unregistered_noop(self, ws):
-        """未注册智能体记录行为不崩溃、无副作用"""
+        """未注册智能体记录行为不崩溃，且不得凭空建出行为档案
+
+        `record_action` 靠 `if agent_id in self._behaviors` 拦截；改成
+        `setdefault` 写法（很自然的重构）就会造出幽灵档案，并随调用次数
+        单调增长。旧用例只验证「不抛异常」，对这条毫无分辨力。
+        """
         ws.record_action("ghost", "h1", 1)  # 不抛异常
+        assert "ghost" not in ws._behaviors
+        assert len(ws._behaviors) == 2                  # 仅 agent_0 / agent_1
+        assert set(ws._behaviors) == {"agent_0", "agent_1"}
+        assert ws.get_all_agent_ids() == ["agent_0", "agent_1"]
 
 
 class TestBehaviorInit:
@@ -59,7 +68,12 @@ class TestBetrayalRounds:
         assert ws._scores["agent_0"].betrayal_count == before + 1
 
     def test_record_betrayal_unregistered_noop(self, ws):
+        """未注册背叛：不崩溃，且不建积分/行为档案（背叛计数仍为 0）"""
         ws.record_betrayal("ghost", 1)  # 不抛异常
+        assert "ghost" not in ws._scores
+        assert "ghost" not in ws._behaviors
+        assert ws.get_betrayal_count("ghost") == 0
+        assert ws.get_agent_summary("ghost") == {}
 
 
 class TestCooperationRounds:
@@ -68,7 +82,12 @@ class TestCooperationRounds:
         assert ws._scores["agent_0"].cooperation_rounds == 1
 
     def test_record_cooperation_unregistered_noop(self, ws):
+        """未注册合作：不崩溃，且不得凭空建出积分条目"""
         ws.record_cooperation("ghost")  # 不抛异常
+        assert "ghost" not in ws._scores
+        assert ws.get_agent_summary("ghost") == {}
+        # 已注册者的合作计数不受影响
+        assert ws._scores["agent_0"].cooperation_rounds == 0
 
 
 class TestGetAllAgentIds:

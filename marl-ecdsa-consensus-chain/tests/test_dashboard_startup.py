@@ -24,10 +24,20 @@ class TestNoFlaskFallback:
 
 
 class TestRunServer:
-    def test_run_server_flask_unavailable(self, monkeypatch):
-        """_run_server 无 Flask → 记录错误并返回"""
+    def test_run_server_flask_unavailable(self, monkeypatch, caplog):
+        """_create_app 返回 None → 记录 error 并直接返回，绝不去 run
+
+        只验证「不抛异常」抓不到静默失败：若实现改成静默 return，Flask
+        未安装就会表现成「启动成功但无响应」，使用者看不到任何原因。
+        docstring 的契约是「记录错误」，所以断言日志 —— 那是唯一可观察处。
+        """
         monkeypatch.setattr(dash, '_create_app', lambda: None)
-        dash._run_server(host='127.0.0.1', port=9292)  # 不抛异常
+        with caplog.at_level(logging.ERROR):
+            result = dash._run_server(host='127.0.0.1', port=9292)  # 不抛异常
+        assert result is None
+        assert any('Flask不可用' in r.message for r in caplog.records), (
+            "Flask 不可用时必须记录 error 日志，不能静默返回：%r"
+            % [r.message for r in caplog.records])
 
 
 class TestStartDashboard:
