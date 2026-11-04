@@ -37,7 +37,10 @@
     "max_r_entries": 1000,
     "packages_to_evict": 1002,
     "evicted_digest_count": 2,
-    "note": "r_registry 有上限，但淘汰时把 r 的摘要写入 _r_evicted_digests，重用仍被判为重用来 —— 该缺口已于 2026-11-03 关闭。残留边界：摘要档案仅在进程内，重启 / 换副本后不再保留，彻底闭合需持久化（存储层变更）。",
+    "survives_snapshot_roundtrip": true,
+    "evicted_digest_count_after_reload": 2,
+    "attack_successful_after_reload": false,
+    "note": "r_registry 有上限，但淘汰时把 r 的摘要写入 _r_evicted_digests，重用仍被判为重用来 —— 该缺口已于 2026-11-03 关闭。同日补测：该档案已随 to_snapshot() 落盘，快照往返（模拟重启）后仍拦得下、is_degraded 不再回落。残留边界收窄为「多副本各自持表」：裸 SecurityGuard 进程之间不共享档案，跨副本需共享状态存储。",
     "reachability": "depth_gap"
   }
 ]

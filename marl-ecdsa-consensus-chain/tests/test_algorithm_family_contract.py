@@ -22,7 +22,20 @@ import random
 import numpy as np
 import pytest
 
-from marl.algorithms.qmix import QMIXMixer, QMIXTrainer, VDNMixer
+# 2026-11-04：``VDNMixer`` 只在 qmix.py 的 PyTorch 分支里定义（NumPy 回退分支是纯
+# Q 表的 IQL，没有混合器）。这条 import 落在**收集期**：无 torch 的机器上它会抛
+# ImportError，pytest 记成收集期错误，整个 ``pytest tests/`` 一条都不跑（实测
+# Interrupted: 2 errors during collection，2259 条全灭）。
+# 不造假桩（假桩会让"三算法契约"在回退路径上绿得毫无意义），缺依赖就整模块 skip。
+try:
+    from marl.algorithms.qmix import QMIXMixer, QMIXTrainer, VDNMixer
+except ImportError as _exc:  # 无 torch：VDNMixer 不存在
+    pytest.skip(
+        "本文件锁的是 IQL / VDN / QMIX 三条**实现分支**的契约，其中 VDNMixer 只在 "
+        "PyTorch 分支定义（NumPy 回退分支按设计不提供混合器）；当前环境不可用：%s"
+        % _exc,
+        allow_module_level=True,
+    )
 
 
 N_AGENTS, OBS_DIM, STATE_DIM, N_ACTIONS = 3, 8, 12, 4

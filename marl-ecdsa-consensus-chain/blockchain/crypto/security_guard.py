@@ -54,6 +54,13 @@ class SecurityGuard:
         # 每个 agent 因超出 MAX_R_ENTRIES 被淘汰的条数（用于检测降级自查）
         self._r_evicted: Dict[str, int] = defaultdict(int)
         # 已被淘汰的 r 的摘要档案（跨窗口的自检测能力，见 _r_digest）
+        #
+        # ⚠️ 本集合**刻意不设上限**，请勿"优化"成有界队列：
+        #   淘汰是攻击者可廉价触发的（自己灌 1000 条 r 就能把窗口挤满），
+        #   一旦档案也有界，攻击者继续灌就能把**目标 agent** 的旧摘要挤出去，
+        #   等于用成本极低的流量把 C4 检测重置 —— 与 C4 本身是同一个洞。
+        #   代价是集合随淘汰量单调增长（每条 64 hex ≈ 80 字节，随快照落盘）；
+        #   数量由 get_detection_status()['evicted_digest_count'] 暴露，供运维观察。
         self._r_evicted_digests: Set[str] = set()
         # {agent_id: last_nonce} 用于重放攻击防护
         self._nonce_registry: Dict[str, int] = {}
@@ -242,12 +249,13 @@ class SecurityGuard:
             "max_r_entries": self.MAX_R_ENTRIES,
             "evicted_per_agent": degraded,
             "evicted_digest_count": len(self._r_evicted_digests),
-            # 淘汰过的 agent 仍需被关注：检测现在依赖摘要档案，
-            # 若要审计"到底淘汰了哪些原始 r"，得靠外部持久化。
+            # 淘汰过的 agent 仍需被关注：检测现在依赖摘要档案（该档案已随
+            # to_snapshot 持久化，跨重启不丢）；但要回溯"到底淘汰了哪些原始 r"，
+            # 仍得靠外部审计日志——摘要不可逆。
             "is_degraded": bool(degraded),
             "note": ("部分 agent 的 r 记录已超出内存窗口，转为摘要档案保留——"
-                     "重用仍会被拦下，但原始 r 已不可回溯。"
-                     "长期运行建议上调 MAX_R_ENTRIES 或改用持久化存储。"),
+                     "重用仍会被拦下（跨重启同样有效，档案随快照持久化），"
+                     "但原始 r 已不可回溯。长期运行建议上调 MAX_R_ENTRIES。"),
         }
 
     # -------------------------------------------------------------------------
@@ -357,7 +365,16 @@ class SecurityGuard:
             logger.info(f"[SecurityGuard] nonce_registry 部分清空: {agent_ids}")
 
     def reset_agent(self, agent_id: str):
-        """重置智能体的安全记录（封禁后重新接入时使用）"""
+        """重置智能体的安全记录（封禁后重新接入时使用）。
+
+        **刻意不动淘汰档案**（`_r_evicted_digests` / `_r_evicted`）：
+          1) 档案里存的是 `sha256(agent_id \\x00 r)`，没有反查表，按 agent 无法
+             定向清除 —— 要清就得清全部，那会把其他 agent 的窗口一起放弃；
+          2) 更根本的是语义：同一个 r 被用第二次，无论隔多久、无论该 agent 是否
+             被"重新准入"，都是私钥可能已泄露的硬事实。把它当作"可以随重置一起
+             忘掉的历史"是错的，清理只会削弱检测。
+        因此重置只清"当前准入状态"（r 表 / nonce 表 / 失败计数），历史重用证据保留。
+        """
         self._r_registry.pop(agent_id, None)
         self._nonce_registry.pop(agent_id, None)
         self._fail_counts.pop(agent_id, None)
@@ -374,9 +391,19 @@ class SecurityGuard:
         nonce_counters 写入【同一份快照文件】，才能保证重启后两边一致、
         不会把合法 nonce 误判为重放（即自伤式 DoS）。单独持久化本表是危险的，
         因此本方法仅供 SigningService.save_state 统一调用。
+
+        2026-11-04：**补入淘汰档案**（`r_evicted` / `r_evicted_digests`）。
+        此前只导出 `r_registry`，于是 C4 修复（淘汰即入摘要档案）在**跨重启**时
+        整体失效——实测：淘汰 2 条后重启，`digest_count` 由 2 掉到 0，同一个
+        被淘汰的 r 从「历史档案命中」变成「OK」放行，同时 `is_degraded` 由 True
+        变回 False，等于**自称未降级**。档案只有几 KB，没有理由不带上。
         """
         return {
             'r_registry': {aid: dict(rs) for aid, rs in self._r_registry.items()},
+            # 淘汰档案：跨重启保留 C4 自检测能力（键名加 r_ 前缀避免与
+            # nonce_registry 之类混读；digests 用有序列表，便于 diff 与人工审阅）
+            'r_evicted': dict(self._r_evicted),
+            'r_evicted_digests': sorted(self._r_evicted_digests),
             'nonce_registry': dict(self._nonce_registry),
             'fail_counts': dict(self._fail_counts),
             'alerts': list(self._alerts),
@@ -386,6 +413,11 @@ class SecurityGuard:
         """
         从快照恢复检测状态（须与 SigningService.nonce_counters 同源写入）。
         文件缺失/损坏时由调用方决定降级为全新状态，本方法只做尽力恢复。
+
+        `r_evicted` / `r_evicted_digests` 为 2026-11-04 新增字段。**旧快照没有**
+        这两个键时：既不能抛错（老状态文件会让启动失败），也**不能把它们当作空档案
+        覆盖当前内存档案**——缺字段只说明"写快照的那版没有档案功能"，推不出"当时
+        没淘汰过 r"。因此按字段逐个判断：存在才覆盖，缺席则保留内存里的。
         """
         if not isinstance(snap, dict):
             return
@@ -406,6 +438,20 @@ class SecurityGuard:
                 OrderedDict,
                 {aid: _coerce_r_keys(rs) for aid, rs in (snap.get('r_registry') or {}).items()},
             )
+            # 淘汰档案（C4 跨重启）：**只在字段存在时覆盖**。
+            # 旧格式快照没有这两个键 —— 那意味着"写快照的那个版本没有档案功能"，
+            # 不能据此推断"当时没淘汰过 r"，所以保留当前内存档案，不用空值冲掉。
+            if 'r_evicted' in snap:
+                _ev = snap.get('r_evicted') or {}
+                self._r_evicted = defaultdict(
+                    int,
+                    {str(a): int(n) for a, n in _ev.items()} if isinstance(_ev, dict) else {},
+                )
+            if 'r_evicted_digests' in snap:
+                _dg = snap.get('r_evicted_digests') or []
+                self._r_evicted_digests = (
+                    set(str(x) for x in _dg) if isinstance(_dg, (list, set, tuple)) else set()
+                )
             self._nonce_registry = dict(snap.get('nonce_registry') or {})
             self._fail_counts = defaultdict(int, snap.get('fail_counts') or {})
             self._alerts = list(snap.get('alerts') or [])

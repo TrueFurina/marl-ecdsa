@@ -14,8 +14,9 @@
   C3 r 字段省略：构造包不带 r ⇒ 无签名包允许缺 r（本来没有 k 可重用）
      → 防御纵深缺口（签名包已 fail-closed，非签名包仍放行）
   C4 FIFO 淘汰后重用：发 >MAX_R_ENTRIES 个包挤掉旧 r，再重用早期 r
-     → 2026-11-03 已关闭（淘汰时入摘要档案，重用仍被拦）；残留边界是
-       档案只在进程内，重启即遗忘
+     → 2026-11-03 已关闭（淘汰时入摘要档案，重用仍被拦）
+     → 同日补测：档案随 to_snapshot() 落盘，快照往返（模拟重启）后仍拦得下；
+       残留边界收窄为「多副本各持一张表」——裸进程之间不共享档案
 
 口径纪律：
   - 承诺绑定公式与 demo_observation_forgery 逐位一致：
@@ -185,16 +186,34 @@ def c4_fifo_eviction():
     print(f"  get_detection_status → evicted={st['evicted_per_agent']} "
           f"digests={st['evicted_digest_count']}")
     print(f"  → {'✅ 仍被检测' if not ok else '❌ 重用未被检测（已被 FIFO 淘汰）'}")
+
+    # 2026-11-04 补测：档案是否随快照跨重启存活（此前 to_snapshot 漏掉了它，
+    # 导致 C4 修复只在进程存活期内有效，且重启后 is_degraded 会谎报 False）
+    reloaded = SecurityGuard()
+    reloaded.from_snapshot(json.loads(json.dumps(guard.to_snapshot(), ensure_ascii=False)))
+    st2 = reloaded.get_detection_status()
+    ok2, reason2 = reloaded.check_package(_pkg(MAXN + 101, TRUE_POS, r=500001))
+    survived = (st2["evicted_digest_count"] == st["evicted_digest_count"]) and (not ok2)
+    print(f"  快照往返后（模拟重启）：digests={st2['evicted_digest_count']} "
+          f"degraded={st2['is_degraded']}")
+    print(f"  重启后重用 r=500001 → {ok2}（{reason2[:40]}）")
+    print(f"  → {'✅ 档案跨重启存活' if survived else '❌ 档案在快照往返中丢失'}")
+    assert survived, "淘汰档案未跨重启存活：C4 只在进程存活期内有效"
+
     return {
         "case": "C4_fifo_eviction",
         "attack_successful": ok,
         "max_r_entries": MAXN,
         "packages_to_evict": MAXN + 2,
         "evicted_digest_count": st["evicted_digest_count"],
+        "survives_snapshot_roundtrip": survived,
+        "evicted_digest_count_after_reload": st2["evicted_digest_count"],
+        "attack_successful_after_reload": ok2,
         "note": "r_registry 有上限，但淘汰时把 r 的摘要写入 _r_evicted_digests，"
                 "重用仍被判为重用来 —— 该缺口已于 2026-11-03 关闭。"
-                "残留边界：摘要档案仅在进程内，重启 / 换副本后不再保留，"
-                "彻底闭合需持久化（存储层变更）。",
+                "同日补测：该档案已随 to_snapshot() 落盘，快照往返（模拟重启）后"
+                "仍拦得下、is_degraded 不再回落。残留边界收窄为「多副本各自持表」："
+                "裸 SecurityGuard 进程之间不共享档案，跨副本需共享状态存储。",
     }
 
 
