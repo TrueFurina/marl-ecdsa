@@ -328,6 +328,14 @@ if HAS_TORCH:
                     critic_loss_sum += float(critic_loss.item())
                     n += 1
                 if n > 0:
+                    # 口径注记（诚实性，不改行为/历史曲线口径）：
+                    # 此处记录的 loss = actor_loss + value_coef * critic_loss，
+                    # 是「加权组合量」，**不是实际优化目标**。真实优化是
+                    # actor_opt 与 critic_opt 两个独立优化器分别 backward/step，
+                    # value_coef 从未作用于梯度。保留该返回值以维持既有 MAPPO
+                    # loss 曲线历史可比性；引用该曲线做结论时须知晓它是组合量、
+                    # 非任一网络的真实损失。若需对齐优化目标，应改为分别记录
+                    # actor_loss 与 critic_loss（会变历史口径，需项目所有者拍板）。
                     all_losses.append((actor_loss_sum + self.value_coef * critic_loss_sum) / n)
             return float(np.mean(all_losses)) if all_losses else None
 

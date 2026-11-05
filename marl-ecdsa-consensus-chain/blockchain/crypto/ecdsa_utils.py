@@ -255,6 +255,27 @@ class ECDSAUtils:
             return False
 
     @staticmethod
+    def _is_canonical_signature(signature: bytes, curve_order: int) -> bool:
+        """签名 r/s 越界校验（fail-closed）：拒 r/s = 0 或 >= n 的非法签名。
+
+        只做真正的「非法值」边界校验，**不强制低 s 形式**。原因（实测）：
+        RFC 6979 deterministic_signing 约 50% 概率产出 s > n/2 的「高 s」
+        签名（40 条实测：高 s 20 / 低 s 20），它们是**完全合法**的签名；
+        若强制 s <= n/2，会拒掉本仓一半自产签名。
+
+        ECDSA 可延展性 (r, n−s) 的伪造在此无可利用面：本仓防重放靠 nonce
+        （security_guard.check_package）、去重靠内容指纹（message_protocol）、
+        区块去重（blockchain._dedup）——不存在「同一签名只承认一次」的比对逻辑。
+
+        :param curve_order: 曲线阶 n（由调用方从 public_key.curve.group_order 取）
+        """
+        try:
+            _, s = decode_dss_signature(signature)
+        except Exception:
+            return False
+        return 0 < s < curve_order
+
+    @staticmethod
     def verify(
         public_key: ec.EllipticCurvePublicKey,
         message: bytes,
@@ -265,6 +286,12 @@ class ECDSAUtils:
         :return: True=验签通过，False=验签失败（消息被篡改/非法签名）
         """
         try:
+            # r/s 越界校验（先于密码学验签，fail-closed）。只挡非法值，
+            # 不强制低 s——见 _is_canonical_signature 文档串。
+            if not ECDSAUtils._is_canonical_signature(
+                    signature, public_key.curve.group_order):
+                logger.debug("[ECDSAUtils] 签名 r/s 越界（非法），拒绝")
+                return False
             public_key.verify(signature, message, ec.ECDSA(hashes.SHA256()))
             return True
         except InvalidSignature:

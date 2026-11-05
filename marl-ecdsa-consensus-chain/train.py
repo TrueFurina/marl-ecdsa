@@ -161,6 +161,16 @@ class MARLBlockchainTrainer:
         self.config = config
         self.stats = TrainingStats()
         np.random.seed(config.seed)
+        # A2 修复（实验可复现性）：PyTorch 全局 RNG 一并播种。
+        # 此前只播 numpy —— MAPPO 的 Actor/Critic 权重初始化与 Categorical
+        # 策略采样走 torch 全局 RNG，未播种导致 --algorithm mappo 跨次运行
+        # 权重/动作序列漂移，实验不可精确复现。
+        # 复用 HAS_TORCH 守卫（torch 缺失时 numpy-only 路径仍可跑）。
+        if HAS_TORCH:
+            import torch
+            torch.manual_seed(config.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(config.seed)
 
         self.env = SimpleSpreadEnv(n_agents=config.n_agents, n_landmarks=config.n_landmarks, max_steps=config.max_steps)
         self.agent_ids = [f"agent_{i}" for i in range(config.n_agents)]
