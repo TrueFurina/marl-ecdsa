@@ -218,17 +218,21 @@ def iter_staged(root: Path):
 
     比 --tracked 更准：pre-commit 只应对本批次进入索引的文件负责，
     不该为历史文件的既有泄漏阻塞新提交（历史泄漏由 CI 的 --tracked 兜底）。
+
+    用 ``-z`` 按 NUL 切：``--name-only`` 是逐行输出，文件名含换行（Linux 下合法）
+    会被切成两条不存在的路径，两条都扫不到，于是「含机器路径的文档」判通过。
     """
     proc = subprocess.run(
         ["git", "-c", "core.quotePath=false", "diff", "--cached",
-         "--name-only", "--diff-filter=ACM"],
+         "--name-only", "-z", "--diff-filter=ACM"],
         cwd=str(root), capture_output=True, text=True, encoding="utf-8",
         errors="replace")
     if proc.returncode != 0:
         print(f"[fail] git diff --cached 失败（root={root}）：{proc.stderr.strip()}",
               file=sys.stderr)
         sys.exit(2)
-    yield from _filter_paths((root / rel for rel in proc.stdout.splitlines()), root)
+    names = [rel for rel in proc.stdout.split("\0") if rel]
+    yield from _filter_paths((root / rel for rel in names), root)
 
 
 def iter_explicit(names, root: Path):

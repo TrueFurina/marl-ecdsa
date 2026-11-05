@@ -763,6 +763,141 @@
         "expect": "all_red"
       },
       "why": "git 不可用时拿到空文件列表就报「✅ 通过」，与「暂存区确实没有待扫文件」不可分（audited 2026-11-06）"
+    },
+    {
+      "id": "secrets-hash-field-line-exempt",
+      "file": "scripts/pre-commit/secrets_scan.py",
+      "locator": "                if hash_field_exempts(line, m.start()):",
+      "mutation": "                if HASH_FIELD_RE.search(line):  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_secrets_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "撤回精确豁免：整行只要出现 merkle_root/block_id 等字段名就跳过，单行 JSON 里的真 token 静默放行（audited 2026-11-06）"
+    },
+    {
+      "id": "secrets-utf16-not-decoded",
+      "file": "scripts/pre-commit/secrets_scan.py",
+      "locator": "    if raw.startswith((b\"\\xff\\xfe\", b\"\\xfe\\xff\")):",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_secrets_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "撤回 UTF-16 BOM 分支：UTF-16 文档（记事本「Unicode」另存）含 NUL 被判二进制，里面的密钥永不检出"
+    },
+    {
+      "id": "secrets-substring-skip",
+      "file": "scripts/pre-commit/secrets_scan.py",
+      "locator": "    return any(part in SKIP_DIR_NAMES for part in p.parts)",
+      "mutation": "    return any(ign in str(p) for ign in SKIP_DIR_NAMES)  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_secrets_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "撤回到子串匹配：'.git' 命中 '.github/workflows/ci.yml'、'build' 命中 scripts/build_*.py、'dist' 命中 static/v9-distributed.* —— 8 个已跟踪文件从未被扫（audited 2026-11-06）"
+    },
+    {
+      "id": "secrets-unreadable-folded-into-pass",
+      "file": "scripts/pre-commit/secrets_scan.py",
+      "locator": "            problems.append({\"path\": f, \"reason\": doc[\"reason\"]})",
+      "mutation": "            pass  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_secrets_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "读不出的路径不再进 problems：路径不存在/是目录时打印一句警告后仍然 exit 0，与「扫过且干净」不可分"
+    },
+    {
+      "id": "secrets-strict-zero-scan",
+      "file": "scripts/pre-commit/secrets_scan.py",
+      "locator": "        if strict:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_secrets_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--strict 下零个文件被扫描仍判通过：CI 里 git 取不到清单时正是这个形态（exit 0 + 「无暂存文件」）"
+    },
+    {
+      "id": "secrets-git-error-not-pass",
+      "file": "scripts/pre-commit/secrets_scan.py",
+      "locator": "    if error:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_secrets_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--staged/--tracked 模式下 git 报错被吞掉，空清单继续走「0 个文件」分支判通过"
+    },
+    {
+      "id": "structure-git-error-fail-open",
+      "file": "scripts/pre-commit/structure_guard.py",
+      "locator": "    if error:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_structure_guard_fail_open.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "git 不可用/不在仓库里时退回 exit 0（旧码的 fail-open for self）：一个文件都没检查却报「结构守卫通过」"
+    },
+    {
+      "id": "structure-strict-zero-scan",
+      "file": "scripts/pre-commit/structure_guard.py",
+      "locator": "        if strict:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_structure_guard_fail_open.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--strict 下零个变更文件仍判通过：cwd 跑偏时看到的 ✅ 与「检查了 614 个文件」长得一模一样"
+    },
+    {
+      "id": "structure-diff-filter-a-only",
+      "file": "scripts/pre-commit/structure_guard.py",
+      "locator": "DIFF_FILTER = \"ACMR\"",
+      "mutation": "DIFF_FILTER = \"A\"  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_structure_guard_fail_open.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "撤回重命名/复制/修改：git mv docs/report.md ./report.md 是 R100，只取 A 时文件列表为空 —— 而根级平铺恰恰最常由搬运既有文件产生"
     }
   ]
 }

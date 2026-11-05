@@ -5,13 +5,17 @@
 # 本文件是 hook 的**唯一真源模板**，由 scripts/pre-commit/install_hooks.py 幂等安装到
 # .git/hooks/pre-commit（.git/hooks/ 本身不受 git 跟踪，克隆后须重装）。
 echo "=== [1/7] 密钥扫描 ==="
-python scripts/pre-commit/secrets_scan.py $(git diff --cached --name-only --diff-filter=ACM) || exit 1
+# 传参交给脚本自己取（--staged 内部走 git -z）：此前是
+#   secrets_scan.py $(git diff --cached --name-only --diff-filter=ACM)
+# shell 按空格切词，`报告 记录.md` 被切成两个不存在的路径，两个都被静默跳过。
+python scripts/pre-commit/secrets_scan.py --staged || exit $?
 echo "=== [2/7] 诚实口径 ==="
 python scripts/pre-commit/honesty_scan.py --cached || exit 1
 echo "=== [3/7] 作废令牌/口径门禁（fail-closed，仅扫暂存区，覆盖 thesis 与对外 PDF）==="
 python scripts/scan_void_tokens.py --cached || exit 1
 echo "=== [4/7] 结构守卫 ==="
-python scripts/pre-commit/structure_guard.py || exit 1
+# 退出码 2 = git 不可用 / 不在仓库里（以前是打印警告后 return 0）
+python scripts/pre-commit/structure_guard.py || exit $?
 echo "=== [5/7] 测试文件禁改守卫 ==="
 python scripts/pre-commit/test_file_guard.py --staged || exit 1
 echo "=== [6/7] 锐评文档口径门禁（fail-closed，阻断作废口径回潮）==="
@@ -21,7 +25,7 @@ echo "=== [7/7] 匿名/机器路径门禁（补 secrets_scan 明确豁免的那�
 # （tests/test_secrets_scan.py::test_exempts_absolute_path），因此
 # C:/Users/<用户名>/... 这类机器身份泄漏从来挡不住 —— 2026-10-17 实测在提交包
 # 里仍有 9 处（start_dashboard.bat + 4 个 run_*.sh）。这里补的就是那半边。
-# 显式传暂存区文件（而非 --tracked）：pre-commit 只对本批次负责，
+# 只扫暂存区（而非 --tracked）：pre-commit 只对本批次负责，
 # 历史文件的既有泄漏由 CI 的 --tracked 全量复扫兜底。
-python scripts/check_submission_anonymity.py --files $(git diff --cached --name-only --diff-filter=ACM) || exit 1
+python scripts/check_submission_anonymity.py --staged || exit 1
 echo "✅ 全部门禁通过"

@@ -100,6 +100,19 @@ AUDIT_INVARIANT_IDS = {
     "honesty-strict-zero-scan",
     "honesty-substring-skip",
     "honesty-git-error-not-pass",
+    # 2026-11-06：密钥扫描的五处「扫了等于没扫」——哈希字段整行豁免、UTF-16 读出空白、
+    # 路径子串跳过（.github 含 .git）、读不出/超限/不存在静默跳过、零文件通过。
+    "secrets-hash-field-line-exempt",
+    "secrets-utf16-not-decoded",
+    "secrets-substring-skip",
+    "secrets-unreadable-folded-into-pass",
+    "secrets-strict-zero-scan",
+    "secrets-git-error-not-pass",
+    # 2026-11-06：结构守卫的三处 fail-open——git 失败 return 0、只取 A 看不到
+    # git mv 到根级（R100）、零文件在 --strict 下也通过。
+    "structure-git-error-fail-open",
+    "structure-strict-zero-scan",
+    "structure-diff-filter-a-only",
 }
 
 
