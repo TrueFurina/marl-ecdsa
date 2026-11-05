@@ -213,13 +213,6 @@ class WorldState:
     def get_betrayal_count(self, agent_id: str) -> int:
         return self._scores.get(agent_id, AgentScore(agent_id)).betrayal_count
 
-    def get_consensus_weight(self, agent_id: str) -> float:
-        """获取智能体共识投票权重（贡献度正相关）"""
-        identity = self._identities.get(agent_id)
-        if not identity:
-            return 0.0
-        return identity.consensus_weight
-
     # ── P2-13: 公共接口封装 ──
     # 避免合约直接访问 _identities/_scores/_behaviors 私有属性
 
