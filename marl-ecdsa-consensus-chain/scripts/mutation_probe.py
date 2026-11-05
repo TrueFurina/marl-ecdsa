@@ -61,10 +61,13 @@ REPORT_DIR = REPO / "reports" / "mutation"
 #   （`git ls-files | grep -i pack` 只有 scripts/pack_slim_testdata.py，
 #    全仓 grep "pack_submission" 只命中本文件的注释自己）。
 #   一条不存在的文件不能算盲区 —— 那是把"没查过"写成"查过但没测"。
+# 同日第二批划掉「marl/integration 的自适应 λ 与结算系数」：λ 调度（adaptive /
+# rl 两支）与奖励塑形的非有限值处置、统计口径已各登记为目标（共 7 条）。
+# 注意「结算系数」严格说仍未全覆盖 —— 已覆盖的是 shap 侧的权重系数与
+# settlement_coordinator 的 bc_reward 钳位，激励合约本身的 κ 三元组仍无变异目标。
 UNCOVERED_NOTE = (
     "未覆盖守卫类别：visualization/ 与 static/ 前端路由；train.py 等训练脚本；"
-    "marl/integration 的自适应 λ 与结算系数"
-    "（本表只覆盖其 NaN 钳位与行为缓冲排空）。"
+    "incentive_contract 的 κ 三元组权重推导（只覆盖了 settlement 侧的 bc_reward 钳位）；"
     "匿名门禁的容器/二进制通道只靠 pytest 家族兜底，未逐规则登记变异目标。"
     "（原列的 pack_submission_zips 打包链路由实为不存在的文件，2026-11-05 删除。）"
     "新增目标请带 why + 审计日期。"

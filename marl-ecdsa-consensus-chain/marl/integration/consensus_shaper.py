@@ -31,6 +31,24 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _finite_or_none(value) -> Optional[float]:
+    """有限 float 或 None（NaN/±inf/不可转换 一律 None）。
+
+    2026-11-05 修复：共识权重与贡献分此前不做任何值域检查。实测
+    ``consensus_weights={'agent_0': nan}`` 会让**塑形奖励本身**变成 NaN
+    （`inf` 同理），而塑形奖励直接加在 env_reward 上进入训练 —— 单步 NaN
+    奖励足以让整批策略梯度变成 NaN，且不回滚。统计侧更糟：`inf` 权重让
+    `total_consensus_bonus` 永久变 inf，`get_stats()` 之后永远报 inf。
+
+    处置与 §9 一致：非有限值按"无信号"处理（不加不扣），不钳成上界。
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
 class ConsensusRewardShaper:
     """
     CARS共识感知奖励塑形器
@@ -82,6 +100,10 @@ class ConsensusRewardShaper:
         self._total_verification_bonus = 0.0
         self._total_cooperation_bonus = 0.0
         self._total_consensus_bonus = 0.0
+        # 2026-11-05：势能项（potential-based）分量此前完全没被累计，
+        # 导致 get_stats() 的 "avg_shaping_per_step" 既不包含势能项、
+        # 又用 η 之前的原始分量求和 —— 实测高报 20 倍（η=0.05）。
+        self._total_potential_shaping = 0.0
 
     def _compute_potential(
         self,
@@ -126,7 +148,13 @@ class ConsensusRewardShaper:
             contribution_potential = 0.0
             if contribution_scores and agent_ids:
                 aid = agent_ids[i]
-                score = contribution_scores.get(aid, 0.0)
+                score = _finite_or_none(contribution_scores.get(aid, 0.0))
+                if score is None:
+                    logger.warning(
+                        "[Shaper] %s 的贡献分非有限值 %r，按无信号处理",
+                        aid, contribution_scores.get(aid),
+                    )
+                    score = 0.0
                 contribution_potential = score / 15.0  # 归一化（max reward=15）
 
             # 加权组合（降低空间势能权重，提高贡献势能权重，减少震荡）
@@ -192,16 +220,18 @@ class ConsensusRewardShaper:
         curr_potentials = self._compute_potential(observations, contribution_scores, agent_ids)
         next_potentials = self._compute_potential(next_observations, contribution_scores, agent_ids)
 
+        pb_total = 0.0
         for i in range(self.n_agents):
             pb_shaping = self.gamma * next_potentials[i] - curr_potentials[i]
             shaping[i] += pb_shaping
+            pb_total += pb_shaping
 
         # 2. 验证奖励：动作被ECDSA签名+SecurityGuard验证通过
         if verification_status is not None:
             for i in range(self.n_agents):
                 if i < len(verification_status) and verification_status[i]:
                     shaping[i] += self.verification_bonus
-                    self._total_verification_bonus += self.verification_bonus
+                    self._total_verification_bonus += self.eta * self.verification_bonus
 
         # 3. 合作对齐奖励：动作与合作模式对齐
         coop_flags = self._detect_cooperation(observations, actions)
@@ -210,27 +240,49 @@ class ConsensusRewardShaper:
             for i, aid in enumerate(agent_ids):
                 if i < self.n_agents and cooperation_status.get(aid, False):
                     shaping[i] += self.cooperation_bonus
-                    self._total_cooperation_bonus += self.cooperation_bonus
+                    self._total_cooperation_bonus += self.eta * self.cooperation_bonus
         else:
             for i in range(self.n_agents):
                 if coop_flags[i]:
                     shaping[i] += self.cooperation_bonus
-                    self._total_cooperation_bonus += self.cooperation_bonus
+                    self._total_cooperation_bonus += self.eta * self.cooperation_bonus
 
         # 4. 共识权重奖励：与CW-PBFT贡献权重成正比
         if consensus_weights is not None:
+            neutral = 1.0 / self.n_agents
             for i, aid in enumerate(agent_ids):
                 if i < self.n_agents:
-                    weight = consensus_weights.get(aid, 1.0 / self.n_agents)
+                    weight = _finite_or_none(consensus_weights.get(aid, neutral))
+                    if weight is None:
+                        # 非有限权重按"与均值持平"处理 → bonus 恰为 0，
+                        # 既不奖励也不惩罚，绝不让 NaN/inf 进入奖励向量。
+                        logger.warning(
+                            "[Shaper] %s 的共识权重非有限值 %r，按中性权重处理",
+                            aid, consensus_weights.get(aid),
+                        )
+                        weight = neutral
                     # 归一化权重：weight ∈ (0, 1]，bonus = scale * (weight - 1/n)
                     # 高于平均权重的智能体获得正奖励，低于的获得负奖励
-                    normalized = weight - (1.0 / self.n_agents)
+                    normalized = weight - neutral
                     bonus = self.consensus_weight_scale * normalized
                     shaping[i] += bonus
-                    self._total_consensus_bonus += bonus
+                    self._total_consensus_bonus += self.eta * bonus
 
         # 5. 应用eta缩放
         shaping = [self.eta * s for s in shaping]
+        self._total_potential_shaping += self.eta * pb_total
+
+        # 5.5 出口兜底：塑形奖励会直接加到 env_reward 上进入训练，非有限值
+        # 必须挡在这里。上面已对权重/贡献分做了入境检查，但观测本身若含 NaN，
+        # `np.linalg.norm` 会把 NaN 带进空间势能——这条路径无法在入境处覆盖。
+        # 处置：该分量记 0（无塑形信号）并告警，绝不让 NaN/inf 进入梯度。
+        for i, v in enumerate(shaping):
+            if not math.isfinite(v):
+                logger.warning(
+                    "[Shaper] 第 %d 号智能体塑形奖励非有限值 %r，置 0（请检查观测/权重是否含 NaN）",
+                    i, v,
+                )
+                shaping[i] = 0.0
 
         # 更新势能历史
         self._prev_potentials = next_potentials
@@ -238,16 +290,31 @@ class ConsensusRewardShaper:
         return shaping
 
     def get_stats(self) -> Dict:
-        """获取塑形统计信息"""
+        """获取塑形统计信息
+
+        口径（2026-11-05 修正）：四个 ``total_*`` 与 ``avg_shaping_per_step``
+        统计的都是**实际加进奖励里**的量，即已经乘过 η 的数值。
+        修正前累计的是 η 之前的原始分量、且完全不含势能项，而字段名写的是
+        "每步塑形"——实测 η=0.05 时 `avg_shaping_per_step` 比真实均值高 20 倍
+        （0.18 vs 0.009）。该字段经 `train.py` 的 `shaping_stats` /
+        `consensus_shaping_stats` 导出到训练结果，属对外口径，故按实测值修正。
+        """
+        applied_total = (
+            self._total_potential_shaping
+            + self._total_verification_bonus
+            + self._total_cooperation_bonus
+            + self._total_consensus_bonus
+        )
         return {
             'step_count': self._step_count,
-            'total_verification_bonus': round(self._total_verification_bonus, 4),
-            'total_cooperation_bonus': round(self._total_cooperation_bonus, 4),
-            'total_consensus_bonus': round(self._total_consensus_bonus, 4),
+            'total_potential_shaping': round(self._total_potential_shaping, 6),
+            'total_verification_bonus': round(self._total_verification_bonus, 6),
+            'total_cooperation_bonus': round(self._total_cooperation_bonus, 6),
+            'total_consensus_bonus': round(self._total_consensus_bonus, 6),
             'eta': self.eta,
+            # 每步每智能体的平均塑形（含势能项与三个 bonus，均为 η 之后）
             'avg_shaping_per_step': round(
-                (self._total_verification_bonus + self._total_cooperation_bonus + self._total_consensus_bonus) 
-                / max(1, self._step_count * self.n_agents), 6
+                applied_total / max(1, self._step_count * self.n_agents), 6
             ),
         }
 

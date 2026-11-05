@@ -15,6 +15,127 @@
 
 ---
 
+## 2026-11-05（续二）— BC→MARL 反馈层：五条 NaN 通道，外加一个高报 20 倍的统计字段
+
+> 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
+> `deliverables/number_registry.json`）。
+
+上一节收尾时 `UNCOVERED_NOTE` 还剩「`marl/integration` 的自适应 λ 与结算系数」。
+去补这块时先做的不是写用例，而是**灌数据**：把三个模块的入口逐个喂 NaN / ±inf，
+看会发生什么。结果是五条独立的通道全部 fail-open —— 而且每一条的方向都恰好是
+"坏数据反而让系统更激进"。
+
+### 一、`adaptive_lambda`：NaN 指标把 λ 顶到上限（真实 fail-open）
+
+收尾裁剪写的是 `max(lambda_min, min(lambda_max, x))`。对 `x=NaN` 来说，
+`min(hi, nan)` 返回 `hi`（比较恒 False，`min` 保留首个参数），于是 `max` 再把它
+传到上限 —— **NaN 被裁剪"洗"成了上界**。实测三项指标任一为 NaN：
+
+| 输入 | 修复前 λ | 修复后 λ |
+|---|---|---|
+| 全 0.8（基线） | 0.1015 | 0.1015 |
+| 共识率 NaN | **0.1500**（= 1.5·λ_base 上限） | 0.1009 |
+| 合作率 NaN | **0.1500** | 0.1010 |
+| 安全计数 NaN | 0.1011（静默变"无数据"） | 0.1011 |
+
+更糟的是这一次跳变**绕过了 EMA**：`0.9*0.1 + 0.1*nan = nan`，NaN 顺着 EMA 走，
+裁剪再把它洗成上限 —— 平滑机制在最需要它的时候完全失效。也就是说，链上指标
+算崩的那一回合，区块链激励权重会瞬间拉满。这与审计简报 §9「NaN 被钳成满分」
+是同一类错误，只是发生在参数侧而不是分数侧。
+
+修法：新增 `_finite_float` / `_clamp_unit`，非有限值一律按"该指标缺失"处理
+（回退文档既有的中性 0.5），比率越界按文档声明的 `[0,1]` 值域裁剪并告警；
+收尾裁剪前加有限性判断，非有限 λ 保持上一回合值，**不再交给 `max/min`**。
+顺带修掉 `_extract_security_rate` 里 `"8" + 2` 这类字符串计数直接 `TypeError` 崩掉
+的路径（原来先做加法再判断 `> 0`）。
+
+### 二、`rl_lambda`：F01 的键契约只修了一半 —— 这项指标恒为默认值
+
+`adaptive_lambda` 在 2026-11-02 修过 F01（读 `consensus_success_rate`），
+同族的 `rl_lambda._composite_metric` 漏了：它优先读 `success_rate`，回退读
+`success_count` / `total_rounds`，而 `cw_pbft.get_consensus_stats()` **只提供**
+`consensus_success_rate`。合作率同样读 `detector_stats`，但 `bridge.get_stats()`
+从不产出这个键（真实合作率由 `on_episode_end` 以顶层 `cooperation_rate` 注入）。
+两项同时落空，`composite` 里 60% 的权重被钉死在 0.5。
+
+实测（真实 `CWPBFTConsensus`，10 轮全失败 vs 全成功）：
+
+| 共识状态 | 修复前 composite | 修复后 composite |
+|---|---|---|
+| 0 成功 / 10 轮 | 0.5000 | 0.3000 |
+| 10 成功 / 10 轮 | 0.5000 | 0.7000 |
+
+也就是说，`select_lambda_by_metric` 这条"可解释性子调度器"此前输出的是**常数**，
+与链上状态无关 —— 而它的 docstring 写着"与 AdaptiveLambdaController 口径一致"。
+现在一致了。
+
+**诚实边界**：`RLLambdaScheduler` 在生产路径上**没有消费者**（`grep` 全仓只有它
+自己的用法示例与测试）。所以这一条是**潜伏缺陷**，不影响任何已归档结果；
+修它是为了让"口径一致"这句话成立，而不是因为它正在造成危害。
+
+### 三、一次 NaN 回报永久劫持元学习器
+
+`episode_reward=NaN` 经 EMA 写进 `_bucket_rewards` 之后，`np.argmax` 在含 NaN 的
+数组上返回 **NaN 的那个下标**，而该桶的估值永远是 NaN，于是永远被选中。实测
+（ε=0，先喂 1.0 再喂 NaN）：此后 20 个回合 100% 选中同一桶，其余桶估值停在 0，
+**单次 NaN 让元学习器永久失去探索能力**。
+
+修法：非有限回报不参与元学习（不更新桶估值、不刷新回报基线），历史记录里存
+净化后的值。后者不只是洁癖 —— `json.dumps(nan)` 会写成非标准 JSON 的 `NaN`
+字面量，Dashboard 侧 `JSON.parse` 直接抛错，而 `get_adaptation_history()` 正是
+要导出给 Dashboard 的。
+
+### 四、NaN 共识权重直接进奖励向量（`consensus_shaper`）
+
+`consensus_weights` 与 `contribution_scores` 此前不做任何值域检查：
+
+| 输入 | 修复前 | 修复后 |
+|---|---|---|
+| 权重 NaN | 塑形奖励 = `[nan, 0.0044, 0.0037]` → 进训练 | 全部有限（按中性权重，bonus=0） |
+| 权重 inf | `total_consensus_bonus` 永久 = `inf`，`get_stats()` 之后永远报 inf | 有限 |
+| 贡献分 NaN | 势能 NaN → 塑形 NaN | 按无信号处理 |
+| 观测含 NaN | 空间势能 NaN → 塑形 NaN | 出口兜底置 0 并告警 |
+
+塑形奖励是**直接加在 env_reward 上**进训练的，单步 NaN 足以让整批策略梯度变 NaN
+且不回滚。前三条在入境处挡（权重/贡献分），第四条挡不住 —— NaN 藏在观测里，
+`np.linalg.norm` 把它带进空间势能，只能在出口兜底。
+
+### 五、`avg_shaping_per_step` 高报 20 倍（统计口径）
+
+三个 `_total_*_bonus` 累加的都是 **η 之前**的原始分量，而字段名写的是"每步塑形"；
+势能项（potential-based）则**完全没被累计**。实测 η=0.05、10 步、3 智能体、
+每步全部验证通过：
+
+| 项 | 修复前 | 实测真值 | 修复后 |
+|---|---|---|---|
+| `avg_shaping_per_step` | **0.180000** | 0.009000 | 0.009000 |
+| `total_verification_bonus` | **3.0000** | 0.1500 | 0.1500 |
+
+高报倍数恰为 `1/η = 20`。这不是内部字段：`train.py` 把它以 `shaping_stats` /
+`consensus_shaping_stats` 导出到训练结果，属对外口径。
+
+**口径变更声明**：`total_verification_bonus` / `total_cooperation_bonus` /
+`total_consensus_bonus` 改为累计 η 之后实际加进奖励的量，新增
+`total_potential_shaping`，`avg_shaping_per_step` 改为四项之和的均值。
+字段名与键名不变，只改数值口径。已 grep 全仓：**没有任何交付物或归档 JSON 引用
+这三个字段**（`deliverables/` 与仓库内 `.json` 均零命中），故不影响任何 NR。
+
+### 六、承重证据：变异目标 16 → 23
+
+新增 7 条目标（λ 有限性 / λ 值域 / 共识键契约 / NaN 回报 / 塑形权重 / η 口径 /
+塑形出口），全部登记进 `tests/mutation_targets.json` 与 `AUDIT_INVARIANT_IDS`。
+新增用例 `tests/test_feedback_layer_nonfinite_contract.py`（23 条）。
+
+**承重验证（双向）**：把这 23 条用例拿去跑**修复前**的三份源码，实测
+**16 条红 / 7 条绿**；换回修复版后 23/23 绿。那 7 条本来就不该红 —— 它们是
+"净化后仍要满足"的契约（值域、可 JSON 序列化、势能不变量），不是缺陷探测器。
+全量探针 23/23 承重，恢复逐字节一致。
+
+`UNCOVERED_NOTE` 相应划掉「自适应 λ 与结算系数」一条，但**没有**顺手宣称全覆盖：
+激励合约的 κ 三元组权重推导仍无变异目标，这条显式写进了盲区声明。
+
+---
+
 ## 2026-11-05（续）— 匿名门禁的两处 fail-open：占位豁免整行短路、同名即豁免
 
 > 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
