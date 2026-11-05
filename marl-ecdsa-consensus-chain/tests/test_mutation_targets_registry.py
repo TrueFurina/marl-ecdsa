@@ -78,6 +78,14 @@ AUDIT_INVARIANT_IDS = {
     "caliber-strict-requires-truth",
     "caliber-office-text-extracted",
     "caliber-unparsed-format-fail-closed",
+    # 2026-11-06：证据闭合门禁的「读不懂 = 没有」——声明写成 500.0/"500" 被当
+    # 没声明、非数值列与空数组被静默丢出可核对集合、顶层非对象的 JSON 不进分母、
+    # --compare 零样本仍 exit 0。
+    "closure-float-declared-count",
+    "closure-empty-array-is-truncation",
+    "closure-malformed-column-blocks",
+    "closure-non-object-json-recorded",
+    "closure-compare-requires-samples",
 }
 
 

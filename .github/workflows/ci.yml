@@ -169,6 +169,13 @@ jobs:
       - name: Registry mirror integrity
         run: python scripts/check_registry_mirror.py
 
+      # 闭合门禁此前只由 doctor.py 手动调用，于是"读不懂 = 没有"的四处静默
+      # 一直没人发现。自证 + 严格扫描一起进 CI：先证明门禁不空，再拿它判仓库。
+      - name: Evidence-closure gate (fail-closed)
+        run: |
+          python -X utf8 scripts/check_evidence_closure.py --self-test
+          python -X utf8 scripts/check_evidence_closure.py --strict
+
   # ---------------------------------------------------------------------------
   # 第三道：无 torch 回退档 —— 全量套件跑在 NumPy 实现上
   # ---------------------------------------------------------------------------
