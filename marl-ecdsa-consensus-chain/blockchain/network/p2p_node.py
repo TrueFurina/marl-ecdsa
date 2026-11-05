@@ -344,7 +344,12 @@ class P2PNode:
         """接受新的入站连接"""
         peer_addr = writer.get_extra_info('peername')
         logger.debug(f"[P2PNode] 新连接来自 {peer_addr}")
-        node_id = f"unknown_{peer_addr}"
+        # 修复（健壮性）：入站连接先用唯一临时键占位。原实现 `unknown_{peer_addr}`
+        # 会在同一 (ip, port) 发起多条入站连接（NAT 复用/重连竞态/扫描）时相互覆盖，
+        # 被覆盖的 writer 从未 close() 且其 _read_loop 仍在跑——socket 句柄泄漏 +
+        # 僵尸读循环。唯一键（id(writer)）保证不碰撞；REGISTER 成功后仍按消息
+        # from_node remap 到真实 node_id（见 _on_register），不受占位键影响。
+        node_id = f"unknown_{peer_addr}_{id(writer)}"
         self._connections[node_id] = (reader, writer)
         await self._read_loop(node_id, reader, writer)
 

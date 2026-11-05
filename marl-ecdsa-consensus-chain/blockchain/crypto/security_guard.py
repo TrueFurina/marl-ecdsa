@@ -8,7 +8,7 @@
 import hashlib
 import time
 import logging
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, deque, OrderedDict
 from typing import Dict, Set, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,9 @@ class SecurityGuard:
         # {agent_id: fail_count}
         self._fail_counts: Dict[str, int] = defaultdict(int)
         # 告警事件列表
-        self._alerts: List[Dict] = []
+        # 修复（健壮性）：_alerts 改用有界环形缓冲，避免长期运行的共识节点被持续
+        # 触发失败的攻击线性撑爆内存。maxlen 与 _r_registry 的 FIFO 淘汰策略一致。
+        self._alerts: "deque" = deque(maxlen=500)
 
     # -------------------------------------------------------------------------
     # 核心校验入口
@@ -326,7 +328,7 @@ class SecurityGuard:
                 aid for aid in self._fail_counts
                 if self._fail_counts[aid] >= self.MAX_FAIL_COUNT
             ],
-            'recent_alerts': self._alerts[-10:],
+            'recent_alerts': list(self._alerts)[-10:],  # deque 不支持切片，先转 list
         }
 
     def register_nonce_baseline(self, agent_id: str, nonce: int):
@@ -454,6 +456,6 @@ class SecurityGuard:
                 )
             self._nonce_registry = dict(snap.get('nonce_registry') or {})
             self._fail_counts = defaultdict(int, snap.get('fail_counts') or {})
-            self._alerts = list(snap.get('alerts') or [])
+            self._alerts = deque(snap.get('alerts') or [], maxlen=500)
         except Exception as e:  # 快照结构异常时保留内存状态，避免崩溃
             logger.warning(f"[SecurityGuard] 快照恢复部分失败，保留当前状态: {e}")
