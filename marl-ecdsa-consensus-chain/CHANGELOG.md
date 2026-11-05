@@ -15,6 +15,72 @@
 
 ---
 
+## 2026-11-06 — 证据闭合门禁的「读不懂 = 没有」：截断、坏列、非对象 JSON 五处静默放行
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+`scripts/check_evidence_closure.py` 的口径写得很硬：**fail / unknown / unsupported /
+truncated 永不被聚合成 pass**。但它的**读取层**先做了五件事，把「读不懂」折叠成
+「没有」——聚合层再严格也没用。同一份 10 个 JSON 的目录实测：
+
+| # | 形态 | 旧判定 | 应为 |
+|---|---|---|---|
+| 1 | `config.n_episodes: 500.0`，`episode_rewards` 只有 100 条 | `pass: undeclared` | truncated |
+| 2 | `config.n_episodes: "500"`，同上 | `pass: undeclared` | truncated |
+| 3 | `cooperation_rates` 是 500 个字符串 `"0.5"` | `pass: closed` | unknown |
+| 4 | `cooperation_rates` 是 500 个 `null` | `pass: closed` | unknown |
+| 5 | `cooperation_rates: []`（声明 500 回合） | `pass: closed` | truncated |
+| 6 | 顶层是数组 / 标量的 JSON | **不出现**（输出「扫描 5 个 JSON」，目录里 7 个） | unknown |
+| 7 | `--compare` 的 glob 零匹配 | 打印空表 + exit 0 | exit 3 |
+
+三处根因，各自把「不懂」折叠成「没有」：
+
+1. `_declared_episodes()` 只认 `isinstance(value, int)`。`500.0`（numpy `/` 的产物）
+   与 `"500"`（配置被序列化成字符串）当场退化成「没声明」，再走
+   `undeclared` 那条「仅记录不判罚」的分支——**写了的声明被读成没写**。
+2. `usable = {name: arr for name, arr in present.items() if arr}`。函数注释写着
+   「数组里若混入非数值就整列不认（宁可 unknown，不猜）」，实现却是把非数值列
+   与空数组**一起丢出**可核对集合；剩下任一列正常，就判 `pass: closed`。
+3. `scan_root()` 对 `not isinstance(doc, dict)` 直接 `continue`：文件既不进分母
+   也不留记录，输出里的「扫描 N 个 JSON」从此不再等于目录里的文件数。
+
+第四处同族问题在比较侧：`build_partial_order()` 有四处 `continue` 静默丢样本，
+`main()` 又只把 glob 结果交给它，于是「一条都没比到」与「比完了」都是 exit 0。
+
+### 改法
+
+1. 新增 `_as_episode_count()`：认 `int`、整值 `float`、纯数字字符串；`null` 仍按
+   「没写」处理（JSON 的 null 就是没有值），其余（`0` / `"abc"` / 对象）记
+   `invalid_declaration`——读不懂与没写是两件事，不许互相顶替。
+2. 列分三态：`arrays`（键在、值可解析，**含空数组**）/ `nonempty`（零填充与退化
+   判定只用它）/ `malformed`（键在但读不成数值数组）。空数组参与长度核对，
+   非数值列记 `malformed_column`；两者都不许聚合成 pass。
+3. `scan_root()` 对非对象 JSON 记 `not_an_object`（unknown），不再静默跳过。
+4. `build_partial_order()` 返回 `skipped`（`unreadable / not_object / no_seed /
+   no_metric`）；`--compare` 零匹配、或匹配到文件但无一条同时具备种子与口径，
+   一律 exit 3 并写明丢弃计数。
+5. 自证夹具 7 → 10（补 `float_declared_truncated` / `malformed_column` /
+   `list_root`），**每一类静默都必须在 `--self-test` 里被抓住**。
+6. 这道门禁此前**只由 `doctor.py` 手动调用**，所以上面五处静默一直没人发现。
+   CI 加一步：先 `--self-test` 证明门禁不空，再 `--strict` 判仓库。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_evidence_closure_silent_skip.py` **16 项**；原有 23 项不回归 |
+| 自证 | 10/10 夹具命中，聚合规则 fail-closed |
+| 变异目标 | 38 → **43**；新增 5 条逐条承重（分别 1 / 1 / 3 / 2 / 2 个用例变红） |
+| 仓库自身 | 3 个 JSON → 1 pass + 2 not_applicable，`--strict` rc=0 |
+| 本机全量 pytest | 2489 收集 / 2466 passed / 20 skipped / 3 failed（1 条缺 torch；2 条 `next_nr` 锁竞争为本机瞬时，单独复跑 3/3 通过，未改动相关代码） |
+| 全量探针 | 25/43，其余 18 条**全部**带本机批量删除守卫指纹（首个失败 #24，与既有环境局限同源；同一现象在未改动的 main 快照上可复现） |
+
+边界（不粉饰）：`malformed_column` 只判「这列读不出数」，不判断「读出来的数对不对」；
+`not_an_object` 目前一律 unknown——若将来真有「逐回合记录写成数组」的格式，需要专门
+实现而不是放宽这一条。
+
+---
+
 ## 2026-11-06 — 口径门禁的「零真值通过」：读不到真值时它一直判 ✅
 
 > 本节只记工具与测试变更，不含任何实验数字。

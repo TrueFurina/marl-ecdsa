@@ -523,6 +523,81 @@
         "expect": "all_red"
       },
       "why": "读不出文字的文件不得计入『已通过』：PDF 无解析器、docx 坏包、GBK 文本都是『没检查过』，不是『检查没问题』（audited 2026-11-06）"
+    },
+    {
+      "id": "closure-float-declared-count",
+      "file": "scripts/check_evidence_closure.py",
+      "locator": "        return int(value) if value.is_integer() and value > 0 else None",
+      "mutation": "        return None  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_evidence_closure_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "n_episodes=500.0 是真声明：只认 int 会让它退化成『没声明』，100/500 的截断以 pass:undeclared 出线（audited 2026-11-06）"
+    },
+    {
+      "id": "closure-empty-array-is-truncation",
+      "file": "scripts/check_evidence_closure.py",
+      "locator": "    arrays = {name: arr for name, arr in present.items() if arr is not None}",
+      "mutation": "    arrays = {name: arr for name, arr in present.items() if arr}",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_evidence_closure_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "声明 500 却给 [] 是 0/500（截断），不是『缺这列』；旧实现用 if arr 把空数组一起丢掉（audited 2026-11-06）"
+    },
+    {
+      "id": "closure-malformed-column-blocks",
+      "file": "scripts/check_evidence_closure.py",
+      "locator": "    if malformed:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_evidence_closure_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "列存在却读不成数值数组（字符串/null/嵌套）是『有东西但读不懂』，不许当作这列不存在；剩下某一列正常就判 closed 是静默放行（audited 2026-11-06）"
+    },
+    {
+      "id": "closure-non-object-json-recorded",
+      "file": "scripts/check_evidence_closure.py",
+      "locator": "            records.append({\"file\": _rel(path, root), \"status\": STATUS_UNKNOWN,\n                            \"reason_code\": \"not_an_object\",\n                            \"detail\": f\"JSON 顶层是 {type(doc).__name__}，不是对象；无法判断闭合\",\n                            \"declared_episodes\": None, \"actual\": None})\n            continue",
+      "mutation": "            pass  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_evidence_closure_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "顶层不是对象的 JSON 曾直接 continue：文件不进分母也不留记录，输出里的『扫描 N 个 JSON』从此不等于目录文件数（audited 2026-11-06）"
+    },
+    {
+      "id": "closure-compare-requires-samples",
+      "file": "scripts/check_evidence_closure.py",
+      "locator": "    if compare_broken:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_evidence_closure_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--compare 的 glob 零匹配、或匹配到的文件全无种子/口径时，输出空表却 exit 0，等于把『什么都没比』报成『比较完成』（audited 2026-11-06）"
     }
   ]
 }
