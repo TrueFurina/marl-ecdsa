@@ -71,6 +71,8 @@
 | 自证 | `secrets_scan --self-test` **30/30**；`structure_guard --self-test` **16/16** |
 | 变异目标 | 54 → **63**；新增 9 条逐条承重（分别 3 / 2 / 4 / 2 / 2 / 1 / 4 / 2 / 3 个用例变红） |
 | 本仓实跑 | `secrets_scan --tracked --strict`：614 个文件（600 文本 + 14 二进制）**0 命中**；`structure_guard --all --strict`：614 个文件**0 违规** |
+| CI 实测 | 3.11 / 3.12 均 **2623 passed / 7 skipped**（上轮 2574，**差 49 = 新增用例数**）；回退档 **2581 passed / 21 skipped / 1 deselected**；两个 job 的日志里都打印「自证通过 30/30」与「自证通过 16/16」 |
+| 本机全量 | 2605 项 / **2582 passed** / 20 skipped / 3 failed：`test_deps_importable`（本机 python 3.13 未装 torch）、`test_next_nr` 两条（文件锁并发瞬时，单独复跑 8/8 通过）—— 均与本次改动无关 |
 | 其余门禁 | honesty / caliber `--strict` / closure `--strict` / registry mirror / anonymity `--tracked` 全过 |
 
 ## 2026-11-06 — 诚实扫描器的四种「扫了等于没扫」：空格文件名被切碎 / UTF-16 文档读成空白 / CI 文件自己从不被扫 / 零扫描报 ✅
