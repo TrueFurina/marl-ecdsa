@@ -403,7 +403,11 @@ if HAS_TORCH:
             self._train_steps += 1
             self._update_targets(hard=False, tau=0.01)
 
-            return total_loss / len(loss_terms)
+            # 修复 Q1：返回值须与实际 backward 的 avg_loss 一致。原实现返回
+            # total_loss/len(loss_terms)（total_loss 为各 agent loss.item() 之和，
+            # 未除 agent 数），使返回 loss ≈ 优化 loss × n_agents，跨 n_agents 的
+            # loss 曲线对比失真。VDN/QMIX 返回的均与 backward 一致，此处对齐。
+            return avg_loss.item()
 
         def _train_step_vdn(self, batch_size: int = 64) -> Optional[float]:
             """

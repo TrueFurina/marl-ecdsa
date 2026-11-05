@@ -18,8 +18,9 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass, field, replace
+from collections import deque
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Deque, Dict, List, Optional, Set, Tuple
 
 from ..contribution_weights import (
     get_contribution_weights as _contribution_weights,
@@ -169,7 +170,10 @@ class CWPBFTConsensus:
         # 在 NTP 回拨时可致 elapsed 为负而永不超时；0 = 未开始）
         self._consensus_start_ms: int = 0
         # 权重演化追踪：每轮记录权重变化
-        self._weight_history: List[Dict] = []
+        # 修复 C2：权重历史用有界环形缓冲（deque maxlen），避免长训练/长链下
+        # 每次更新复制整张权重表导致内存 O(更新次数×节点数) 无界增长。
+        # maxlen 足够大，不影响既有测试（断言初始为空、少量更新后长度）。
+        self._weight_history: "Deque[Dict]" = deque(maxlen=500)
         # 共识成功/失败计数
         self.consensus_success_count: int = 0
         self.consensus_fail_count: int = 0
@@ -652,7 +656,7 @@ class CWPBFTConsensus:
             # get_weights() 的 dict(...) 口径一致。
             'weights': dict(self._weights),
             'consensus_success_rate': consensus_success_rate,
-            'weight_history': self._weight_history[-10:],
+            'weight_history': list(self._weight_history)[-10:],  # deque 不支持切片，先转 list
             # P1-4修复：κ 三元组不再内联硬编码，改从 config.json 的
             # blockchain.contribution_weights 读取（与 incentive_contract 同源），
             # 缺失/不自洽时回退 0.40/0.35/0.25。返回键名与取值均保持不变。

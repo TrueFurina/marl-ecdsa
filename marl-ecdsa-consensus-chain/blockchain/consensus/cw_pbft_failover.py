@@ -347,7 +347,13 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
                 results["byzantine_events"] += 1
 
             if record:
-                results["successful_failovers"] += 1
+                # 修复 F2：仅当切换后共识真正恢复才计为成功转移，与
+                # get_failover_stats 的 failover_success_rate（按 consensus_recovered
+                # 统计）口径统一。原实现 `if record:` 会把"检测到故障并触发切换"
+                # 误计为"成功转移"，在 simulate_byzantine 注入场景下 record 必然非空，
+                # 导致该计数虚高、不反映真实恢复情况。
+                if record.consensus_recovered:
+                    results["successful_failovers"] += 1
                 latencies.append(record.failover_latency_ms)
                 results["failover_records"].append({
                     "round": r,
