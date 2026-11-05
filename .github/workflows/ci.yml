@@ -155,7 +155,10 @@ jobs:
       - name: Pre-commit gates — repo-wide (fail-closed)
         run: |
           python scripts/pre-commit/secrets_scan.py $(git -c core.quotePath=false ls-files)
-          python scripts/pre-commit/honesty_scan.py
+          # 自证先行：先证明诚实扫描器不是空转，再拿它判仓库。
+          # --strict 让「一个文件都没扫到」也失败 —— cwd 跑偏时正是这种假绿形态。
+          python scripts/pre-commit/honesty_scan.py --self-test
+          python scripts/pre-commit/honesty_scan.py --strict
           python scripts/pre-commit/caliber_check.py --strict
           python scripts/pre-commit/structure_guard.py --all
 
