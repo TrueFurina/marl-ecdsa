@@ -298,6 +298,81 @@
         "expect": "all_red"
       },
       "why": "2026-11-05：观测含 NaN 时 np.linalg.norm 把 NaN 带进空间势能，这条路径无法在入境处覆盖，只能出口兜底；变异去掉兜底即复原 NaN 进奖励（audited 2026-11-05）"
+    },
+    {
+      "id": "kappa-scoring-ignores-config",
+      "file": "blockchain/contracts/incentive_contract.py",
+      "locator": "        k_task, k_coop, k_compliance = get_contribution_weights()",
+      "mutation": "        k_task, k_coop, k_compliance = 0.40, 0.35, 0.25  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_contribution_weight_single_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：P1-4 声称 κ 单一真源，实际只让统计回显读 config，算分处仍是 0.40/0.35/0.25 字面量——config 改 0.6/0.3/0.1 后 weighted_score 实际 0.65 vs 声明 0.70，静默差 0.05。变异退回字面量即复原该漂移（audited 2026-11-05）"
+    },
+    {
+      "id": "kappa-normalization-check",
+      "file": "blockchain/contribution_weights.py",
+      "locator": "    if abs(total - 1.0) > NORMALIZATION_TOL:",
+      "mutation": "    if abs(total - 1.0) > 1e9:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_contribution_weight_single_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "归一约束 Σκ=1 是 weighted_score ∈ [0,1] 的前提：放宽容差后 {0.6,0.3,0.3} 这类 Σ=1.2 的配置被原样采纳，权重上限被整体抬高（audited 2026-11-05）"
+    },
+    {
+      "id": "kappa-unit-interval-guard",
+      "file": "blockchain/contribution_weights.py",
+      "locator": "    if not (0.0 <= value <= 1.0):",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_contribution_weight_single_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：旧实现只校验 Σκ=1，不校验单个 κ 值域，故 {1.5,-0.5,0.0}（和为 1 但有负权重）被照单全收——高任务分智能体 weighted_score 冲到 1.5、高协作分被压到 -0.5，结算两端都被 clamp 成极端档（audited 2026-11-05）"
+    },
+    {
+      "id": "kappa-invalid-value-partial-adoption",
+      "file": "blockchain/contribution_weights.py",
+      "locator": "                logger.warning(\n                    f\"[κ] {key}={section[key]!r} 非法（需 [0,1] 内有限数），\"\n                    f\"回退默认值 {defaults}\"\n                )\n                return defaults",
+      "mutation": "                logger.warning(\n                    f\"[κ] {key}={section[key]!r} 非法（需 [0,1] 内有限数），\"\n                    f\"回退默认值 {defaults}\"\n                )\n                return tuple(resolved)  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_contribution_weight_single_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "非法值必须整体回退：部分采纳会返回长度不足或 Σ≠1 的三元组，把一次配置错误变成一条静默错分的结算链路（audited 2026-11-05）"
+    },
+    {
+      "id": "kappa-stats-read-same-cache",
+      "file": "blockchain/consensus/cw_pbft.py",
+      "locator": "        kappa_task, kappa_coop, kappa_compliance = _contribution_weights()",
+      "mutation": "        kappa_task, kappa_coop, kappa_compliance = 0.40, 0.35, 0.25  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_contribution_weight_single_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "统计出口若改回 import 期快照/字面量，就重新出现『报告口径 ≠ 算分口径』——本 PR 修的正是这个分叉；变异后 stats 不再跟随同一缓存（audited 2026-11-05）"
     }
   ]
 }

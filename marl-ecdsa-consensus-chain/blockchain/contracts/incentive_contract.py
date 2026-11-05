@@ -12,6 +12,7 @@ import logging
 import math
 from typing import Dict, List, Optional, Tuple
 
+from ..contribution_weights import get_contribution_weights
 from ..ledger.world_state import WorldState, AgentStatus
 
 logger = logging.getLogger(__name__)
@@ -81,11 +82,18 @@ class ContributionScore:
 
         约束：κ_task + κ_coop + κ_compliance = 1
         实验校准：σ(task_variance)≈0.1, φ(coop_externality)≈0.05
+
+        2026-11-05 审计修复：κ 不再在此处内联字面常量，改由
+        ``blockchain.contribution_weights.get_contribution_weights()`` 统一提供
+        （config.json 的 blockchain.contribution_weights，非法则整体回退默认值）。
+        修复前 cw_pbft 已按 config 出统计、本方法仍用 0.40/0.35/0.25 字面量，
+        把 config 改成 0.6/0.3/0.1 后两侧口径差 0.05 且无任何告警。
         """
+        k_task, k_coop, k_compliance = get_contribution_weights()
         return (
-            0.40 * self.task_score +
-            0.35 * self.cooperation_score +
-            0.25 * self.compliance_score
+            k_task * self.task_score +
+            k_coop * self.cooperation_score +
+            k_compliance * self.compliance_score
         )
 
 
