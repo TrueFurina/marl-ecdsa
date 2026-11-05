@@ -484,7 +484,20 @@ if HAS_TORCH:
             P1批量forward修复：改为真正的批量forward，减少GPU kernel launch开销
             """
             batch = self.replay_buffer.sample(batch_size)
+            # 修复 Q3：Mixer 需要 state/next_state，若 batch 内部分 transition 缺全局
+            # 状态（store_episode 在 state_list 短于 obs_list 时末尾置 None），原实现
+            # 会构造出 len(states) < bs 而 all_q_values 恒为 bs，送入 mixer.hyper_w1
+            # 时形状不匹配报错。此处先把 batch 过滤为 state/next_state 均存在的
+            # transition，使 states/all_q_values/r_total/done_mask 同源对齐。
+            batch = [t for t in batch
+                     if t.get('state') is not None and t.get('next_state') is not None]
             bs = len(batch)
+
+            if not batch:
+                # 过滤后无有效 transition：无全局状态可训，回退 IQL（语义同 Q2）
+                logger.warning("[QMIX] 无有效全局状态 transition，回退到 IQL 训练")
+                return self._train_step_iql(batch_size)
+
 
             all_q_values = []       # [n_agents] 各agent Q(s_i, a_i) [batch_size]
             all_target_q = []       # [n_agents] 各agent max Q_target [batch_size]
