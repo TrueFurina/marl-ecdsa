@@ -69,6 +69,10 @@ AUDIT_INVARIANT_IDS = {
     "verify-path-unknown-aggregation",
     "verify-path-min-max-aggregation",
     "wire-notes-append-idempotent",
+    # 2026-11-06：探针自身的判定口径（假红事故）——变异侧不再认「rc=1 但零失败」，
+    # 缺失汇总行不再被当成证据。
+    "probe-mutated-requires-failure-evidence",
+    "probe-truncated-output-not-evidence",
 }
 
 
