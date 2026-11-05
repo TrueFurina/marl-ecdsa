@@ -373,6 +373,81 @@
         "expect": "all_red"
       },
       "why": "统计出口若改回 import 期快照/字面量，就重新出现『报告口径 ≠ 算分口径』——本 PR 修的正是这个分叉；变异后 stats 不再跟随同一缓存（audited 2026-11-05）"
+    },
+    {
+      "id": "verify-empty-declared-failopen",
+      "file": "scripts/verify_numbers.py",
+      "locator": "    if not isinstance(declared, dict) or not declared:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_unverified_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-06 缺陷：compare() 只遍历 declared 的键，declared 为空时循环体一次不进、ok 保持 True ⇒ 零比对判 PASS。实测两例：清空 results/ 后 NR-180~183 判 PASS 而其余 187 条全是 DATA_MISSING；NR-121 喂进与主张相反的数据（吞吐 1 pkg/s、拦截 0/999999）仍 PASS、deltas={}、退出码 0。变异去掉该守卫即复原该 fail-open（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-unverified-status-blocks",
+      "file": "scripts/verify_numbers.py",
+      "locator": "                status = \"UNVERIFIED\"",
+      "mutation": "                status = \"PASS\"  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_unverified_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "「登记 PASS 但 declared 为空」必须判 UNVERIFIED 并阻断；改回 PASS 后它重新混进 PASS 计数，零断言条目又变成『已核验』（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-path-unknown-aggregation",
+      "file": "scripts/verify_numbers.py",
+      "locator": "        if agg not in _PATH_AGG:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_unverified_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "paths 语法的聚合名拼错（如 #median）必须报错，否则会静默按 mean 返回一个『看起来对』的数 —— 把登记写错变成静默错值（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-path-min-max-aggregation",
+      "file": "scripts/verify_numbers.py",
+      "locator": "        if agg == \"min\":",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_unverified_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "#min/#max 若退化成均值，『最差种子』类主张（L2 自适应下界 0.175）会被平滑成均值 0.653，等于把最坏情况报好（audited 2026-11-06）"
+    },
+    {
+      "id": "wire-notes-append-idempotent",
+      "file": "scripts/wire_unverified_entries_20261106.py",
+      "locator": "        if _AUDIT_NOTE not in (entry.get(\"notes\") or \"\"):",
+      "mutation": "        if True:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_unverified_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "迁移脚本必须幂等：重复执行若再次追加审计说明，镜像与权威源的字节会持续漂移，check_registry_mirror 的指纹比对随之永远不一致（audited 2026-11-06）"
     }
   ]
 }

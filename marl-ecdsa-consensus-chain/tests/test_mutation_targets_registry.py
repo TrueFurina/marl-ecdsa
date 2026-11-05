@@ -62,6 +62,13 @@ AUDIT_INVARIANT_IDS = {
     "kappa-unit-interval-guard",
     "kappa-invalid-value-partial-adoption",
     "kappa-stats-read-same-cache",
+    # 2026-11-06：数字门禁的「零断言 PASS」——空 declared 曾被 compare() 判通过，
+    # 4 条 ML 指标条目在无任何数据时也 PASS；连同嵌套取数与迁移幂等一并承重。
+    "verify-empty-declared-failopen",
+    "verify-unverified-status-blocks",
+    "verify-path-unknown-aggregation",
+    "verify-path-min-max-aggregation",
+    "wire-notes-append-idempotent",
 }
 
 
