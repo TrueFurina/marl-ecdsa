@@ -41,6 +41,9 @@ class FailoverRecord:
     new_primary: str
     reason: str
     view_number: int
+    # F1：此字段度量的是视图更换（trigger_view_change）的纯内存计算开销，
+    # 不含协议级的故障检测/切换等待时延；对外引用须明确此口径，勿当作真实
+    # 故障转移时延。
     failover_latency_ms: float
     consensus_recovered: bool
 
@@ -191,6 +194,11 @@ class CWPBFTConsensusWithFailover(CWPBFTConsensus):
         Trigger view change to elect a new primary.
 
         Returns the new primary ID, or None if max view changes exceeded.
+
+        注意（F1）：本方法为纯内存计算（一次 list.index + 最多 n 次轮询循环），
+        不含任何超时等待或网络往返。因此调用方据此测得的 failover_latency_ms
+        度量的是"视图更换的计算开销"，与 HEARTBEAT_TIMEOUT_MS / VIEW_CHANGE_
+        TIMEOUT_MS 声明的协议级时延量级无关，不可作为真实故障转移时延对外引用。
         """
         if self._view_change_count >= self.MAX_VIEW_CHANGES:
             logger.error(
