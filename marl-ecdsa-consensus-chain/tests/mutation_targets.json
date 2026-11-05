@@ -448,6 +448,36 @@
         "expect": "all_red"
       },
       "why": "迁移脚本必须幂等：重复执行若再次追加审计说明，镜像与权威源的字节会持续漂移，check_registry_mirror 的指纹比对随之永远不一致（audited 2026-11-06）"
+    },
+    {
+      "id": "probe-mutated-requires-failure-evidence",
+      "file": "scripts/mutation_probe.py",
+      "locator": "    if mut_failed < 1:",
+      "mutation": "    if mut_failed < 0:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_mutation_probe_pytest_evidence.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-06 假红事故的反向风险：变异侧曾把『rc=1 但零失败』读成守卫承重。这条判定哪怕只放宽一个字，回归网也必须变红（audited 2026-11-06）"
+    },
+    {
+      "id": "probe-truncated-output-not-evidence",
+      "file": "scripts/mutation_probe.py",
+      "locator": "    if mut_counts is None:",
+      "mutation": "    if mut_counts is not None:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_mutation_probe_pytest_evidence.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "『没有 pytest 汇总行』必须 fail-closed：一旦允许在无汇总行时继续判定，缺失的证据就又被当成了证据（audited 2026-11-06）"
     }
   ]
 }

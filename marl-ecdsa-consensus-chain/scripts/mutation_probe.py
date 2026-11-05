@@ -20,6 +20,13 @@
        一个本来就红的文件可以让任何变异体都"通过"；
      · rc=2/3/4/5（中断 / 内部错误 / 用法错 / 一条没收集）都不是"有用例
        失败"，却是非零——此前一律被当成承重，属于把门禁噪音读成通过了。
+     **2026-11-06 再收紧一层：rc==1 本身也不算「有用例失败」的证据。** 实测
+     子进程可以「用例进度全是点 + 没有 pytest 汇总行 + rc=1」——那是会话收尾
+     被打断（本机是临时目录清理撞上批量删除守卫），一个用例都没失败。旧判定
+     把它读成承重，等于用一个来路不明的 1 给守卫背书；同一份输出落在基线侧又
+     被读成「关联测试本来就红」，把人引去修根本没坏的测试。现在两侧都必须先从
+     stdout 里解析出汇总行（如 `1 failed, 62 passed in 0.8s`）才能下结论，
+     拿不到汇总行一律 fail-closed，并把子进程输出落盘备查。
      command 类仍是「基线匹配 expect_pattern、注入后不匹配」（#157）；
   6. 行尾必须逐字节往返（2026-11-05 加）：`read_text/write_text` 默认做
      universal newline 转换，在 Windows 上把 LF 文件整份改写成 CRLF——
@@ -49,6 +56,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TARGETS_FILE = REPO / "tests" / "mutation_targets.json"
 REPORT_DIR = REPO / "reports" / "mutation"
+# 子进程输出留档目录（reports/ 已在 .gitignore 内）：判定出现"解释不了的
+# 非零退出码"时把 stdout/stderr 原样存下来，下次不必重现就能取证。
+ARTIFACT_DIR = REPORT_DIR / "artifacts"
+_RUN_STAMP = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 # 已知未覆盖的守卫类别（诚实声明盲区，REA #168）。
 # 2026-11-05 起，审计简报 §1/§2/§3/§4/§5/§6/§7/§8/§9 的九处修复与 11-04 的
@@ -206,15 +217,143 @@ def validate_targets(targets) -> list[str]:
     return problems
 
 
-def check_pytest(args: list[str]) -> tuple[int, str]:
-    """跑关联测试，返回 (退出码, 末行摘要)。
+# ── pytest 输出取证 ────────────────────────────────────────────────────────
+# 只信退出码的两处误判（2026-11-06 实测，见 CHANGELOG）：
+#   基线侧 rc=1 → 说"关联测试本来就红"，实际一个用例都没失败；
+#   变异侧 rc=1 → 直接记"守卫承重"，实际同样一个用例都没失败。
+# 两次错在同一处：把"进程非零退出"当成"有用例失败"。现在必须从 stdout 解析
+# 出 pytest 的计数汇总行，拿不到就 fail-closed。
+_SUMMARY_TOKEN_RE = re.compile(
+    r"^(\d+) (failed|passed|error|errors|skipped|deselected|xfailed|xpassed|warnings?)$")
+_SUMMARY_IN_RE = re.compile(r" in [\d.]+s$")
+_SUMMARY_ALIAS = {"errors": "error", "warnings": "warning"}
+# 环境层拦截的指纹（本机实测：pytest 收尾清理临时目录时撞上批量删除守卫，
+# 进程在打印汇总行之前就退出，退出码 1）。命中就把话说清楚，别让下一个人
+# 再去改测试。
+_GUARD_HINTS = ("SAFE_DELETE", "safe-delete", "PermissionError",
+                "Permission denied", "沙盒", "Sandbox")
+
+
+def parse_pytest_summary(stdout: str) -> dict | None:
+    """解析 pytest 末尾的计数行，如 ``{"failed": 13, "passed": 9, "skipped": 1}``。
+
+    返回 ``None`` 表示**整份输出里没有可解析的汇总行**。这本身就是一条情报：
+    用例进度打完后进程就结束了（被终止 / 输出被截断 / 会话收尾抛异常），
+    此时退出码不能当作"有失败"的依据。
+    """
+    for line in reversed((stdout or "").splitlines()):
+        s = line.strip().strip("=").strip()
+        if not s:
+            continue
+        if s.startswith("no tests ran"):
+            return {"collected": 0}
+        body = _SUMMARY_IN_RE.sub("", s)
+        counts: dict[str, int] = {}
+        ok = True
+        for part in (p.strip() for p in body.split(",")):
+            if not part:
+                continue
+            m = _SUMMARY_TOKEN_RE.match(part)
+            if not m:
+                ok = False
+                break
+            counts[_SUMMARY_ALIAS.get(m.group(2), m.group(2))] = int(m.group(1))
+        if ok and counts:
+            return counts
+    return None
+
+
+def _fmt_counts(counts: dict | None) -> str:
+    if not counts:
+        return "无汇总行"
+    order = ("failed", "error", "passed", "skipped", "deselected",
+             "xfailed", "xpassed", "warning", "collected")
+    keys = [k for k in order if k in counts] + [k for k in counts if k not in order]
+    return "、".join(f"{k}={counts[k]}" for k in keys)
+
+
+def guard_hint(stderr: str) -> str:
+    """从子进程 stderr 里认出环境拦截，返回一句说明（认不出返回空串）。"""
+    text = stderr or ""
+    hits = [h for h in _GUARD_HINTS if h in text]
+    if not hits:
+        return ""
+    return (f"子进程 stderr 命中环境拦截指纹 {hits}：更像「被运行环境打断」，"
+            "而不是关联测试真的红（对照 reports/mutation/artifacts/ 下的完整输出）")
+
+
+def judge_baseline(rc: int, stdout: str) -> tuple[bool, str]:
+    """基线（未注入）判定：只负责证明"改动前本来是对的"。"""
+    base_counts = parse_pytest_summary(stdout)
+    if rc == 0:
+        return True, f"基线（未注入）绿 ✓（{_fmt_counts(base_counts)}）"
+    if base_counts is None:
+        return False, (f"基线（未注入）退出码 {rc}，但输出里没有 pytest 汇总行——"
+                       "用例进度打完后进程就结束了，这不是「关联测试红」；"
+                       "先查运行环境/子进程输出，别去改测试")
+    if base_counts.get("collected") == 0:
+        return False, (f"基线（未注入）退出码 {rc}，一条用例都没收集到"
+                       f"（{_fmt_counts(base_counts)}）")
+    base_failed = base_counts.get("failed", 0)
+    base_errored = base_counts.get("error", 0)
+    if base_failed or base_errored:
+        return False, (f"基线（未注入）退出码 {rc}——{base_failed} 失败 / {base_errored} 错误"
+                       f"（{_fmt_counts(base_counts)}）；红基线下的「变异后仍红」不证明"
+                       "任何承重（先修关联测试再探）")
+    return False, (f"基线（未注入）退出码 {rc}，但汇总行是 {_fmt_counts(base_counts)}"
+                   "——零失败零错误。退出码与用例结果自相矛盾，既不能判红也不认绿，"
+                   "fail-closed 记 FAIL")
+
+
+def judge_mutated(rc: int, stdout: str) -> tuple[bool, str]:
+    """变异（已注入）判定：必须拿到「有失败用例」的证据，rc==1 本身不算。"""
+    mut_counts = parse_pytest_summary(stdout)
+    if rc == 0:
+        return False, f"变异后仍绿 ✗（守卫不承重）— {_fmt_counts(mut_counts)}"
+    if rc != 1:
+        return False, (f"变异后退出码 {rc}（不是「有用例失败」）✗ — {_fmt_counts(mut_counts)}；"
+                       "按 fail-closed 记 FAIL（2=中断 / 3=内部错误 / 4=用法错 / 5=一条没收集）")
+    if mut_counts is None:
+        return False, ("变异后退出码 1，但输出里没有 pytest 汇总行：拿不到「N failed」"
+                       "证据，可能只是进程被终止或输出被截断——rc=1 本身不足以证明守卫承重")
+    mut_failed = mut_counts.get("failed", 0)
+    if mut_failed < 1:
+        return False, (f"变异后退出码 1，但汇总行是 {_fmt_counts(mut_counts)}——零失败。"
+                       "退出码 1 不等于有用例失败，按 fail-closed 记 FAIL，不认承重")
+    return True, f"变异后 {mut_failed} 个用例失败 ✓（守卫承重）— {_fmt_counts(mut_counts)}"
+
+
+def _save_artifact(label: str, proc: subprocess.CompletedProcess) -> str:
+    """把子进程 stdout/stderr 落盘备查；失败不抛（取证不能反过来搞挂探针）。"""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", label or "child")
+    try:
+        d = ARTIFACT_DIR / _RUN_STAMP
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{safe}.stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
+        (d / f"{safe}.stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
+        return str((d / f"{safe}.stdout.txt").relative_to(REPO))
+    except OSError:
+        return ""
+
+
+def check_pytest(args: list[str], label: str = "") -> tuple[int, str, str, str]:
+    """跑关联测试，返回 (退出码, 完整 stdout, 完整 stderr, 落盘路径或空串)。
 
     退出码语义必须区分：0=全绿、1=有用例失败、2=被中断、3=内部错误、
-    4=用法错、5=一条都没收集。只有 1 才算"变异被抓到"。
+    4=用法错、5=一条都没收集。但**退出码不能单独作证**，判定交给
+    judge_baseline / judge_mutated——它们要求先读到 pytest 的计数汇总行。
+
+    完整 stdout/stderr 必须带回来：只看末行会把"没有汇总行"与"有失败"混为
+    一谈；stderr 里的环境拦截指纹往往是假红的唯一线索。出现解释不了的非零
+    （无汇总行，或汇总行说零失败）时把子进程输出落盘。
     """
     r = run([sys.executable, "-m", "pytest", *args])
-    tail = [ln for ln in (r.stdout or "").strip().splitlines() if ln.strip()]
-    return r.returncode, (tail[-1][-160:] if tail else "(无输出)")
+    stdout = r.stdout or ""
+    stderr = r.stderr or ""
+    counts = parse_pytest_summary(stdout)
+    unexplained = r.returncode != 0 and (counts is None or counts.get("failed", 0) < 1)
+    saved = _save_artifact(label, r) if unexplained else ""
+    return r.returncode, stdout, stderr, saved
 
 
 def check_command(cmd: list[str], pattern: str, injected: bool) -> tuple[bool, str]:
@@ -277,14 +416,18 @@ def probe(target: dict, dry_run: bool) -> dict:
                 return result
             result["steps"].append(f"基线对照 ✓（{detail}）")
         else:
-            rc, detail = check_pytest(check.get("args", []))
+            rc, out, err, saved = check_pytest(check.get("args", []),
+                                               label=f"{tid}-baseline")
             result["baseline_rc"] = rc
-            if rc != 0:
-                result["steps"].append(
-                    f"FAIL: 基线（未注入）退出码 {rc}——{detail}；"
-                    "红基线下的『变异后仍红』不证明任何承重（先修关联测试再探）")
+            if saved:
+                result["steps"].append(f"子进程输出已落盘: {saved}")
+            hint = guard_hint(err)
+            if hint:
+                result["steps"].append(hint)
+            ok_base, why_base = judge_baseline(rc, out)
+            result["steps"].append(why_base if ok_base else f"FAIL: {why_base}")
+            if not ok_base:
                 return result
-            result["steps"].append(f"基线（未注入）绿 ✓（{detail}）")
 
         mutated = original.replace(target["locator"], target["mutation"], 1)
         if mutated == original:
@@ -293,19 +436,15 @@ def probe(target: dict, dry_run: bool) -> dict:
         write_source(path, mutated, crlf)
 
         if check["kind"] == "pytest":
-            rc, detail = check_pytest(check.get("args", []))
+            rc, out, err, saved = check_pytest(check.get("args", []),
+                                               label=f"{tid}-mutated")
             result["mutated_rc"] = rc
-            if rc == 1:
-                ok = True
-                verdict = f"变异后 {detail} ✓（守卫承重）"
-            elif rc == 0:
-                ok = False
-                verdict = f"变异后仍绿 ✗（守卫不承重）— {detail}"
-            else:
-                ok = False
-                verdict = (
-                    f"变异后退出码 {rc}（不是『有用例失败』）✗ — {detail}；"
-                    "按 fail-closed 记 FAIL（2=中断 / 3=内部错误 / 4=用法错 / 5=一条没收集）")
+            if saved:
+                result["steps"].append(f"子进程输出已落盘: {saved}")
+            hint = guard_hint(err)
+            if hint:
+                result["steps"].append(hint)
+            ok, verdict = judge_mutated(rc, out)
         else:
             ok, detail = check_command(check["cmd"], check["expect_pattern"], injected=True)
             verdict = f"变异后断言失效 ✓（守卫承重）— {detail}" if ok else f"变异后断言仍成立 ✗ — {detail}"
