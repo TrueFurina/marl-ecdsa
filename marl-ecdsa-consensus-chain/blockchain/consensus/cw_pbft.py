@@ -15,13 +15,16 @@ Contribution-Weighted Practical Byzantine Fault Tolerance
 - 支持多节点贡献权重计算
 """
 import hashlib
-import json
 import logging
 import time
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+
+from ..contribution_weights import (
+    get_contribution_weights as _contribution_weights,
+    load_contribution_weights as _load_weights_from,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +32,20 @@ logger = logging.getLogger(__name__)
 # P1-4：Shapley 贡献维度权重（κ）单一真源
 #
 # κ 三元组此前在 3 处各自内联：config.json / incentive_contract.ContributionScore /
-# cw_pbft.get_consensus_stats()，改一处忘两处即口径漂移。此处统一从 config.json 的
-# blockchain.contribution_weights 读取，兜底默认值 0.40 / 0.35 / 0.25 与修复前内联
-# 常量逐值一致 —— **对外口径零变化**（设计报告/答辩材料中的 0.40/0.35/0.25 不变）。
+# cw_pbft.get_consensus_stats()，改一处忘两处即口径漂移。
+#
+# 2026-11-05 审计更正：P1-4 当时只把**本文件**改成读 config，真正参与算分的
+# incentive_contract.ContributionScore.weighted_score 仍是字面常量 ——
+# 所谓"单一真源"实际只喂了统计回显。实测（config 改 0.6/0.3/0.1）：
+# weighted_score 实际 0.65 vs 声明 0.70，差 0.05 且无告警。现已把读取与校验
+# 收敛到 blockchain.contribution_weights，两处共用同一个缓存三元组。
+# 兜底默认值 0.40 / 0.35 / 0.25 与修复前内联常量逐值一致
+# —— **对外口径零变化**（设计报告/答辩材料中的 0.40/0.35/0.25 不变）。
+#
+# 实现要点：不再在 import 期把三元组展开成三个模块常量。import 期快照与
+# 缓存的读取顺序一旦分叉，又会出现"统计口径 vs 算分口径"两套值 —— 正是本轮
+# 修的缺陷本身。统计出口改为每次向同一个缓存取数（命中缓存，无额外读盘）。
 # --------------------------------------------------------------------------- #
-_CONFIG_PATH: Path = Path(__file__).resolve().parent.parent.parent / "config.json"
-_KAPPA_DEFAULTS: Dict[str, float] = {
-    'task_score': 0.40,
-    'cooperation_score': 0.35,
-    'compliance_score': 0.25,
-}
 # Shapley 校准输入（σ / φ）：答辩材料已明确 κ 是「公式值再校准」的终值
 # （κ_task: 1/3+σ/3≈0.37 → 上调至 0.40；κ_compliance: 1/3−σ/3−φ/3≈0.28 → 下调至 0.25）。
 # 因此 κ **不可**按 σ/φ 反算重出 —— 那会把对外口径改成 0.3667/0.2833。σ/φ 仅作声明值回显。
@@ -47,40 +54,12 @@ PHI: float = 0.05       # 协作正外部性系数（校准输入，非实时统
 
 
 def _load_contribution_weights() -> Tuple[float, float, float]:
-    """从 config.json 读取 κ 三元组，缺失或非法时回退默认值。
+    """兼容包装：委托给 blockchain.contribution_weights.load_contribution_weights。
 
-    校验 Shapley 归一约束 κ_task + κ_coop + κ_compliance = 1；不满足则整体回退
-    默认值并告警（fail-safe：宁可用已知正确的常量，也不用一份不自洽的配置）。
-
-    :return: (κ_task, κ_coop, κ_compliance)
+    保留本名字是因为历史代码/文档引用过它；实现已迁出，避免两套校验逻辑
+    各自演化（旧实现只校验 Σκ=1，不校验单个 κ 的值域）。
     """
-    try:
-        if _CONFIG_PATH.exists():
-            with open(_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            cw = cfg.get('blockchain', {}).get('contribution_weights', {})
-            k_task = float(cw.get('task_score', _KAPPA_DEFAULTS['task_score']))
-            k_coop = float(cw.get('cooperation_score', _KAPPA_DEFAULTS['cooperation_score']))
-            k_comp = float(cw.get('compliance_score', _KAPPA_DEFAULTS['compliance_score']))
-            if abs(k_task + k_coop + k_comp - 1.0) < 1e-6:
-                return (k_task, k_coop, k_comp)
-            logger.warning(
-                f"[CW-PBFT] config.json contribution_weights 之和 "
-                f"={k_task + k_coop + k_comp:.6f} ≠ 1，回退默认值 {_KAPPA_DEFAULTS}"
-            )
-    except Exception as e:
-        logger.warning(
-            f"[CW-PBFT] 加载 config.json contribution_weights 失败: {e}，"
-            f"回退默认值 {_KAPPA_DEFAULTS}"
-        )
-    return (
-        _KAPPA_DEFAULTS['task_score'],
-        _KAPPA_DEFAULTS['cooperation_score'],
-        _KAPPA_DEFAULTS['compliance_score'],
-    )
-
-
-_KAPPA_TASK, _KAPPA_COOP, _KAPPA_COMPLIANCE = _load_contribution_weights()
+    return _load_weights_from()
 
 
 class ConsensusState(str, Enum):
@@ -657,6 +636,9 @@ class CWPBFTConsensus:
             self.consensus_success_count / total_rounds
             if total_rounds > 0 else 0.0
         )
+        # 2026-11-05：κ 只取一次，三个分量来自同一个三元组 —— 逐项调用若
+        # 中间发生缓存重置，同一份统计里可能出现两个版本的权重。
+        kappa_task, kappa_coop, kappa_compliance = _contribution_weights()
         return {
             'node_id': self.node_id,
             'state': self._state,
@@ -674,11 +656,13 @@ class CWPBFTConsensus:
             # P1-4修复：κ 三元组不再内联硬编码，改从 config.json 的
             # blockchain.contribution_weights 读取（与 incentive_contract 同源），
             # 缺失/不自洽时回退 0.40/0.35/0.25。返回键名与取值均保持不变。
+            # 2026-11-05：改为每次向同一个缓存取数，不再用 import 期快照常量
+            # —— 快照与缓存一旦分叉就是"统计口径 ≠ 算分口径"。
             # σ/φ 为声明的校准输入（模块级 SIGMA / PHI），非实时统计量。
             'weight_derivation': {
-                'κ_task': _KAPPA_TASK,
-                'κ_coop': _KAPPA_COOP,
-                'κ_compliance': _KAPPA_COMPLIANCE,
+                'κ_task': kappa_task,
+                'κ_coop': kappa_coop,
+                'κ_compliance': kappa_compliance,
                 'sigma': SIGMA,
                 'phi': PHI,
             },
