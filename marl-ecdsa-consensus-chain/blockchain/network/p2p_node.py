@@ -437,12 +437,25 @@ class P2PNode:
         port = data.get('port', 0)
 
         # P1-9修复：防止已注册的node_id被新连接覆盖（Eclipse攻击防护）
+        # 修复（liveness）：原实现只要 node_id 在 _peers 就无条件拒绝，而
+        # _mark_offline 仅置 is_online=False 不移除条目，导致短暂断线后 30s 内
+        # 重连的合法节点被永久拒绝注册（直到对端进程重启），构成活性锁死。
+        # 现改为：仅当既有条目仍在线、或仍有活跃连接时才拒绝（Eclipse 防护保留）；
+        # 若条目已下线且无活跃连接，则视为陈旧残留，先驱逐再接受新注册。
         if node_id in self._peers:
-            logger.warning(
-                f"[P2PNode] 拒绝重复注册: node_id={node_id} 已存在于peer表中，"
-                f"防止Eclipse攻击覆盖"
+            existing = self._peers[node_id]
+            still_connected = node_id in self._connections
+            if existing.is_online or still_connected:
+                logger.warning(
+                    f"[P2PNode] 拒绝重复注册: node_id={node_id} 已在线（连接活跃），"
+                    f"防止Eclipse攻击覆盖"
+                )
+                return
+            logger.info(
+                f"[P2PNode] node_id={node_id} 存在陈旧下线条目（无活跃连接），"
+                f"驱逐后接受重新注册"
             )
-            return
+            self._peers.pop(node_id, None)
 
         # P1-9修复：ECDSA签名身份验证
         signature_hex = MessageProtocol.get_signature(msg)
