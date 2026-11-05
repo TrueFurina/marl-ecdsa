@@ -12,15 +12,16 @@ repo 与 backup 双数据源一致性。**绝不粉饰**：注册表被改坏即
         --registry ../deliverables/number_registry.json \\
         --data-root results \\
         --mirror ../backup/pkg_old_src_20260917/results \\
-        [--only NR-1,NR-3] [--strict] [--check-mirror] [--overwrite]
+        [--only NR-1,NR-3] [--strict] [--check-mirror] [--overwrite] \\
+        [--self-test]
 
 退出码（架构 §4.2）::
 
     0  全部非 PENDING/PLANNED 条目 PASS，且无 FAIL / UNVERIFIED（PENDING 不阻断）
-    1  至少一条 FAIL（复算值≠声明值，或 n 不符）；或至少一条 UNVERIFIED
-       （登记声称已核验但 ``declared`` 为空 —— 零断言的 PASS 不算通过，见 compare）
+    1  至少一条 FAIL（复算值≠声明值、n 不符、**或该条复算抛异常**）；或至少一条
+       UNVERIFIED（登记声称已核验但 ``declared`` 为空 —— 零断言的 PASS 不算通过）
     2  用法 / IO / 注册表 schema 错误
-    3  数据文件缺失（data-root 不可读）
+    3  数据文件缺失（data-root 不可读 / 条目所需结果文件一个都没有）
     4  --strict 下存在 PENDING/PLANNED 条目
 
 设计约束：被 import 时零副作用；所有 IO 均在 ``main()`` 之后。
@@ -34,6 +35,7 @@ import os
 import re
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -47,6 +49,19 @@ logger = ac.get_logger("verify_numbers")
 # --------------------------------------------------------------------------- #
 # 取值 / 复算
 # --------------------------------------------------------------------------- #
+class SourceReadError(RuntimeError):
+    """取数失败（文件读不出 / 字段取不到 / 取到的不是数）。
+
+    为什么要专门一个异常类型：``_collect_source`` 里 ``ac.extract_field`` 会抛
+    ``KeyError``、``float(v)`` 对 ``None`` 抛 ``TypeError``、``load_json`` 对半截
+    JSON 抛 ``JSONDecodeError`` —— 这些都不是"数据缺失"，但都不是 ``OSError``，
+    于是旧 ``main()`` 的 ``except (FileNotFoundError, ..., OSError)`` 一个都接不住：
+    **整份报告消失**，读者只看到一段 traceback（实测见 ``_crash_reason``）。
+    现在把每一处取值失败都包成带文件名与字段名的一句话，由 ``main()`` 的单条
+    隔离分支判该条 FAIL，其余条目照常校验。
+    """
+
+
 def _source_patterns(src: Dict[str, Any]) -> List[str]:
     """取数模式：``globs``（多个，取并集）优先，否则单个 ``glob``。
 
@@ -81,14 +96,24 @@ def _collect_source(data_root: Path, src: Dict[str, Any]) -> Tuple[List[Path], L
     sl = src.get("slice")
     vals: List[float] = []
     for f in files:
-        data = ac.load_json(f)
-        v = ac.extract_field(data, field)
+        try:
+            data = ac.load_json(f)
+            v = ac.extract_field(data, field)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise SourceReadError(
+                f"{f.name}: 字段 {field!r} 取不到（{exc.__class__.__name__}: {exc}）"
+            ) from exc
         if isinstance(v, (list, tuple)):
             seq = list(v)
             if sl:
                 seq = seq[int(sl["start"]):int(sl["end"])]
             v = ac.mean(seq)
-        vals.append(float(v))
+        try:
+            vals.append(float(v))
+        except (TypeError, ValueError) as exc:
+            raise SourceReadError(
+                f"{f.name}: 字段 {field!r} 的值不是数值（{type(v).__name__}: {v!r}）"
+            ) from exc
     return files, vals
 
 
@@ -951,42 +976,193 @@ def compare(entry: Dict[str, Any], computed: Dict[str, Any]) -> Tuple[bool, Dict
 # --------------------------------------------------------------------------- #
 # 双数据源一致性
 # --------------------------------------------------------------------------- #
-def check_mirror(registry: Dict[str, Any], data_root: Path, mirror_root: Path) -> Dict[str, Any]:
-    """repo↔backup 双源一致性：按注册表 glob 的文件名逐个比字段值。"""
+#: 只有「纯点路径」形态的 ``field`` 才能两边各取一次再比数值。
+#: 注册表里还有大量描述性 ``field``（如 ``"DILITHIUM_AVAILABLE / 签名长度常量"``、
+#: ``"per_attack[].defense_rate / wilson_ci_95"``）—— 它们是给人读的口径说明，
+#: 不是可机读路径。旧实现对这类源直接 ``extract_field`` 后由 ``except`` 记成
+#: 「差异」，等于把「读不懂」报成「两边不一致」。
+_PLAIN_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*$")
+
+
+def _mirror_field_value(doc: Any, src: Dict[str, Any]) -> Tuple[Any, Optional[str]]:
+    """从一份数据文件里取出可比对的标量；取不到时返回 ``(None, 原因码)``。"""
+    field = (src.get("field") or "").strip()
+    if not field:
+        return None, "no_field"
+    if not _PLAIN_FIELD_RE.match(field):
+        return None, "field_not_path"
+    try:
+        v = ac.extract_field(doc, field)
+    except (KeyError, TypeError, AttributeError) as exc:
+        return None, f"field_unreadable:{exc.__class__.__name__}"
+    if isinstance(v, (list, tuple)):
+        seq = list(v)
+        if not seq:
+            return None, "empty_sequence"
+        v = ac.mean(seq)
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None, f"not_numeric:{type(v).__name__}"
+    return v, None
+
+
+def _mirror_file(mirror_path: Path, rel: str) -> Optional[Path]:
+    """把注册表里的 ``file``（相对工作区）解析成镜像侧路径。
+
+    两种基准都要试：镜像根本身就是 ``results/`` 目录，所以 ``results/x.json``
+    对应 ``mirror/x.json``；而 ``deliverables/x.json`` 这类只能整体挂在镜像根下。
+    猜不到就返回 ``None``（由调用方记 ``skipped``），**不回落到 repo 路径**——
+    用同一份文件比两次永远"一致"。
+    """
+    cands = [mirror_path / rel]
+    p = Path(rel)
+    if p.parts and p.parts[0] == "results":
+        cands.append(mirror_path / Path(*p.parts[1:]))
+    for c in cands:
+        if c.exists():
+            return c
+    return None
+
+
+def check_mirror(registry: Dict[str, Any], data_root: Path, mirror_root: Path,
+                 only: Optional[set] = None) -> Dict[str, Any]:
+    """repo↔backup 双源一致性：按注册表的**全部**取数模式逐个比字段值。
+
+    2026-11-06 审计：此项「repo↔backup 一致性」承诺自加入起**一次都没跑通**，
+    三处缺陷，实测复现（真实注册表，第一条 NR-1 就崩）：
+
+    1. ``src["glob"]`` 直接取键 ⇒ ``globs``（135 处，多批次并集）/ ``file``
+       （31 处）/ 字符串式静态引用（NR-19 的 junit ``path#attr`` 三元组）全部
+       抛异常 —— 前者 ``KeyError: 'glob'``，后者
+       ``TypeError: string indices must be integers``。崩溃点在报告写出**之前**，
+       所以 ``--check-mirror`` 的产物是一段 traceback，一份报告都没有。
+    2. 只认单个 ``glob`` ⇒ 即便不崩，用 ``globs`` 登记的条目也只比了多批次并集
+       的**前半截**，比较样本比声明少一截，而报告仍写"一致"。
+    3. 零比较判「一致」：镜像根不存在 / glob 全不匹配时 ``diffs==0`` ⇒
+       ``consistent=True``，报告抬头写「双源一致：是（比较 0 个文件）」。
+       这与 ``declared`` 为空的 fail-open 同源 —— **未判定 ≠ 一致**。
+
+    现在的返回值是三元结论：``True``（真比过且全同）/ ``False``（有差异）/
+    ``None``（一次都没比成）。``reason`` 给可诊断的原因，``skipped`` 记录
+    "有源但比不了"的每一处，避免它们静默消失。
+    """
     diffs: List[Dict[str, Any]] = []
-    checked = 0
-    seen_globs: set[str] = set()
-    for entry in registry["entries"]:
-        for src in entry.get("sources", []):
-            g = src["glob"]
-            if g in seen_globs:
+    skipped: List[Dict[str, Any]] = []
+    compared = 0
+    sources_seen = 0
+    seen_patterns: set[str] = set()
+    mirror_path = Path(mirror_root)
+    if not mirror_path.exists():
+        return {
+            "consistent": None, "files_compared": 0, "sources_checked": 0,
+            "diffs": [], "skipped": [],
+            "reason": (f"镜像根不存在（{mirror_path}）—— 双源一致性未判定"
+                       "（未判定 ≠ 一致）"),
+        }
+
+    # 先把「两边各是哪份文件」配好，再统一比数值：这样 file 源（相对工作区解析）
+    # 与 glob 源（相对 data-root 解析）不会各用一套规则、把配对悄悄错位。
+    pairs: List[Tuple[str, str, Path, Path, Dict[str, Any]]] = []
+    for entry in registry.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        if only and entry.get("id") not in only:
+            continue
+        for src in entry.get("sources") or []:
+            eid = entry.get("id")
+            if isinstance(src, str):
+                # NR-19 这类：sources 是 junit 的 "path#testsuite@attr" 引用，
+                # 不是数据文件路径。没有可比的数值字段，显式记录而不是崩掉。
+                skipped.append({"entry": eid, "reason": "static_ref",
+                                "detail": src[:120]})
                 continue
-            seen_globs.add(g)
-            rf = ac.resolve_glob(data_root, g)
-            mf = ac.resolve_glob(mirror_root, g)
-            rmap = {p.name: p for p in rf}
-            mmap = {p.name: p for p in mf}
-            if set(rmap) != set(mmap):
-                diffs.append({"glob": g, "only_repo": sorted(set(rmap) - set(mmap)),
-                              "only_mirror": sorted(set(mmap) - set(rmap))})
-            for name, rp in rmap.items():
-                mp = mmap.get(name)
-                if mp is None:
+            if not isinstance(src, dict):
+                skipped.append({"entry": eid, "reason": "not_an_object",
+                                "detail": type(src).__name__})
+                continue
+            pats = _source_patterns(src)
+            file_rel = (src.get("file") or "").strip()
+            is_file_src = not pats and bool(file_rel)
+            if is_file_src:
+                pats = [file_rel]
+            if not pats:
+                skipped.append({"entry": eid, "reason": "no_pattern"})
+                continue
+            sources_seen += 1
+            for g in pats:
+                if g in seen_patterns:
                     continue
-                checked += 1
-                try:
-                    rv = ac.extract_field(ac.load_json(rp), src["field"])
-                    mv = ac.extract_field(ac.load_json(mp), src["field"])
-                except Exception as exc:  # noqa: BLE001
-                    diffs.append({"file": name, "error": str(exc)})
+                seen_patterns.add(g)
+                if is_file_src:
+                    rp = _resolve_file(data_root, g)
+                    try:
+                        rp.resolve().relative_to(Path(data_root).resolve())
+                        in_scope = True
+                    except ValueError:
+                        in_scope = False
+                    if not in_scope:
+                        # 双源镜像备的是 data-root 内的结果文件；deliverables/ 里的
+                        # 派生物本来就不在镜像范围。报成「差异」会让 --check-mirror
+                        # 永远红，报成「一致」又是假话 —— 记录原因后跳过。
+                        skipped.append({"entry": eid, "reason": "outside_data_root",
+                                        "detail": g})
+                        continue
+                    mp = _mirror_file(mirror_path, g)
+                    have_r, have_m = rp.exists(), mp is not None
+                    if have_r and have_m:
+                        pairs.append((g, rp.name, rp, mp, src))  # type: ignore[arg-type]
+                    elif have_r or have_m:
+                        diffs.append({"glob": g,
+                                      "only_repo": [g] if have_r else [],
+                                      "only_mirror": [g] if have_m else []})
+                    else:
+                        skipped.append({"entry": eid, "reason": "file_not_found",
+                                        "detail": g})
                     continue
-                if isinstance(rv, (list, tuple)):
-                    rv = ac.mean(rv)
-                if isinstance(mv, (list, tuple)):
-                    mv = ac.mean(mv)
-                if abs(float(rv) - float(mv)) > 1e-9:
-                    diffs.append({"file": name, "repo": rv, "mirror": mv})
-    return {"consistent": len(diffs) == 0, "files_compared": checked, "diffs": diffs}
+                rmap = {p.name: p for p in ac.resolve_glob(data_root, g)}
+                mmap = {p.name: p for p in ac.resolve_glob(mirror_path, g)}
+                if set(rmap) != set(mmap):
+                    diffs.append({"glob": g, "only_repo": sorted(set(rmap) - set(mmap)),
+                                  "only_mirror": sorted(set(mmap) - set(rmap))})
+                for name, rp in rmap.items():
+                    mp = mmap.get(name)
+                    if mp is not None:
+                        pairs.append((g, name, rp, mp, src))
+
+    for g, name, rp, mp, src in pairs:
+        try:
+            rdoc, mdoc = ac.load_json(rp), ac.load_json(mp)
+        except (OSError, ValueError) as exc:
+            diffs.append({"file": name, "glob": g,
+                          "error": f"{exc.__class__.__name__}: {exc}"})
+            continue
+        rv, why = _mirror_field_value(rdoc, src)
+        if why is None:
+            mv, why = _mirror_field_value(mdoc, src)
+        if why is not None:
+            skipped.append({"file": name, "glob": g, "reason": why,
+                            "detail": f"field={src.get('field')!r}"})
+            continue
+        compared += 1
+        try:
+            same = abs(float(rv) - float(mv)) <= 1e-9
+        except (TypeError, ValueError):
+            same = False
+        if not same:
+            diffs.append({"file": name, "glob": g, "repo": rv, "mirror": mv})
+
+    if diffs:
+        consistent: Optional[bool] = False
+        reason = f"{len(diffs)} 处差异"
+    elif compared == 0:
+        consistent = None
+        reason = ("零次比较：没有任何同名且可取数的文件（镜像侧缺文件 / 字段不可机读）"
+                  f"—— 未判定 ≠ 一致；跳过 {len(skipped)} 处")
+    else:
+        consistent = True
+        reason = ""
+    return {"consistent": consistent, "files_compared": compared,
+            "sources_checked": sources_seen, "diffs": diffs, "skipped": skipped,
+            "reason": reason}
 
 
 # --------------------------------------------------------------------------- #
@@ -1019,6 +1195,28 @@ def _editorial_target(target: str) -> Dict[str, Any]:
     return {"sha": target, "current_head": head, "match": target == head}
 
 
+def _render_mirror_line(report: Dict[str, Any]) -> str:
+    """双源结论一行（四种状态必须互不混淆）。
+
+    旧实现只有两态（"是" / "否" / 未启用），把「跑过但一次都没比成」和
+    「没跑」都归到「未检查」；更糟的是零比较时 ``consistent=True`` 直接显示
+    「是（比较 0 个文件）」。这里把 ``None`` 再分成两态：
+    ``mirror is None`` ⇒ 未启用；``mirror`` 在但 ``consistent is None`` ⇒ 未判定。
+    """
+    mi = report.get("mirror")
+    if mi is None:
+        return "- 双源一致：**未检查**（未启用 --check-mirror；未检查 ≠ 一致）"
+    compared = mi.get("files_compared", 0)
+    reason = mi.get("reason") or ""
+    state = report.get("mirror_consistent")
+    if state is True:
+        return f"- 双源一致：是（同名文件比较 {compared} 个，全部相同）"
+    if state is False:
+        return (f"- 双源一致：**否**（同名文件比较 {compared} 个，"
+                f"差异 {len(mi.get('diffs') or [])} 处）")
+    return f"- 双源一致：**未判定**（{reason or '一次都没比成'}）"
+
+
 def _render_markdown(report: Dict[str, Any]) -> str:
     s = report["summary"]
     et = report.get("editorial_target") or {}
@@ -1037,12 +1235,9 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         f"- 数据源：`{report['data_root']}`（镜像：`{report['mirror_root']}`，commit `{report['commit']}`）",
         f"- 汇总：total={s['total']} PASS={s['pass']} FAIL={s['fail']} PENDING={s['pending']} INVALID={s['invalid']}"
         + (f" UNVERIFIED={s['unverified']}" if s.get("unverified") else "")
-        + (f" DATA_MISSING={s['data_missing']}" if s.get("data_missing") else ""),
-        (f"- 双源一致：{'是' if report.get('mirror_consistent') else '**否**'}"
-         + (f"（比较 {report['mirror']['files_compared']} 个文件，{len(report['mirror']['diffs'])} 处差异）"
-            if report.get("mirror") else "")
-         if report.get("mirror_consistent") is not None
-         else "- 双源一致：**未检查**（未启用 --check-mirror；未判定 ≠ 不一致）"),
+        + (f" DATA_MISSING={s['data_missing']}" if s.get("data_missing") else "")
+        + (f" CRASHED={s['crashed']}" if s.get("crashed") else ""),
+        _render_mirror_line(report),
         "",
         "| ID | 状态 | 复算值（摘要） | 差异 | 备注 |",
         "|---|---|---|---|---|",
@@ -1069,6 +1264,251 @@ def _emit_report(report: Dict[str, Any], report_json: Path, overwrite: bool) -> 
     ac.safe_write_text(_render_markdown(report), pj.with_suffix(".md"), overwrite=overwrite)
     logger.info("报告已写出：%s", ac.rel_to_workspace(pj))
     logger.info("人读清单：%s", ac.rel_to_workspace(pj.with_suffix('.md')))
+
+
+# --------------------------------------------------------------------------- #
+# 自证（--self-test）
+# --------------------------------------------------------------------------- #
+#: 自证里复用的口径字段（与 NR-1 同口径，避免自证与真实登记各说各话）
+_ST_FIELD = ac.PRIMARY_FIELD
+
+
+def _st_write_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+
+
+def _st_arm(root: Path, prefix: str, arm: str, values: List[Any]) -> None:
+    """在 ``root/prefix`` 下造 ``arm_seed*.json`` 批次（值可为 None，用来造坏数据）。"""
+    for i, v in enumerate(values):
+        _st_write_json(root / prefix / f"{arm}_seed{i}.json",
+                       {"summary": {"avg_env_reward_last_50": v}})
+
+
+def _st_two_sample(eid: str, prefix: str,
+                   declared: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": eid, "analysis": "two_sample", "status": "PASS",
+        "sources": [
+            {"globs": [f"{prefix}/a_seed*.json"], "field": _ST_FIELD, "role": "a"},
+            {"globs": [f"{prefix}/b_seed*.json"], "field": _ST_FIELD, "role": "b"},
+        ],
+        "declared": declared, "tolerance": {"abs": 0.01},
+    }
+
+
+def _st_ok_declared() -> Dict[str, Any]:
+    """与 ``_st_arm(..., "a", [-7.0,-7.1,-6.9])`` / ``b=[-9.0,-9.1,-8.9]`` 对得上。"""
+    return {"mean_a": -7.0, "mean_b": -9.0, "n_a": 3, "n_b": 3}
+
+
+def _st_run(d: Path, entries: List[Dict[str, Any]], extra: Optional[List[str]] = None
+            ) -> Tuple[int, Dict[str, Any], Path]:
+    """跑一次 ``main()``，返回 ``(退出码, 报告, 数据根)``。"""
+    data = d / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    regp = d / "registry.json"
+    _st_write_json(regp, {"version": 1, "commit": "self-test", "entries": entries})
+    rep = d / "report.json"
+    argv = ["--registry", str(regp), "--data-root", str(data),
+            "--report", str(rep), "--overwrite"] + list(extra or [])
+    rc = main(argv)
+    doc = ac.load_json(rep) if rep.exists() else {}
+    return rc, doc, data
+
+
+def _st_by_id(doc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {e["id"]: e for e in doc.get("entries") or []}
+
+
+def _self_test() -> int:
+    """内置自证：用合成注册表/数据/镜像证明 2026-11-06 三处修复真的承重。
+
+    为什么不只靠 pytest：``--check-mirror`` 从加入起就没跑通过（对真实注册表
+    第一条 NR-1 就 ``KeyError: 'glob'``），而它不在任何 CI 步骤里 —— 一个从不
+    执行的校验，红绿都是传说。这里把每处缺陷的**实测形态**写成用例，并让它
+    能被 CI 直接跑（``python scripts/verify_numbers.py --self-test``）：
+    修复被回退时用例立刻变红，而不是安静通过。
+
+    不读仓库里的注册表 / results / 镜像；全部数据在临时目录里现造。
+    """
+    import tempfile
+
+    cases: List[Tuple[str, Any]] = []
+
+    def case(name: str):
+        def deco(fn):
+            cases.append((name, fn))
+            return fn
+        return deco
+
+    # ---- 1. 崩溃隔离 ---------------------------------------------------- #
+    @case("崩溃隔离：一条坏数据不让整份报告消失")
+    def _(d: Path) -> None:
+        bad = _st_two_sample("NR-T1", "bad", _st_ok_declared())
+        good = _st_two_sample("NR-T2", "ok", _st_ok_declared())
+        data = d / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        _st_arm(data, "bad", "a", [None, -7.0, -7.0])   # ← 一次跑挂了写成 null
+        _st_arm(data, "bad", "b", [-9.0, -9.0, -9.0])
+        _st_arm(data, "ok", "a", [-7.0, -7.1, -6.9])
+        _st_arm(data, "ok", "b", [-9.0, -9.1, -8.9])
+        regp = d / "registry.json"
+        _st_write_json(regp, {"version": 1, "commit": "self-test",
+                              "entries": [bad, good]})
+        rep = d / "report.json"
+        rc = main(["--registry", str(regp), "--data-root", str(data),
+                   "--report", str(rep), "--overwrite"])
+        assert rep.exists(), "报告没产出：整跑被一条坏数据带崩了（旧缺陷回归）"
+        doc = ac.load_json(rep)
+        by = _st_by_id(doc)
+        assert rc == ac.EXIT_FAIL, f"有 FAIL 却退出码 {rc}"
+        assert by["NR-T1"]["status"] == "FAIL", by["NR-T1"]["status"]
+        assert "复算抛异常" in by["NR-T1"]["reason"], by["NR-T1"]["reason"]
+        assert by["NR-T1"]["crashed"] is True, "崩溃标记丢失"
+        assert by["NR-T2"]["status"] == "PASS", \
+            f"同批的干净条目被连坐：{by['NR-T2']['status']}"
+        assert doc["summary"]["crashed"] == 1, doc["summary"]
+
+    # ---- 2. 登记缺陷 ≠ 数据缺失 ----------------------------------------- #
+    @case("登记缺 role 判 FAIL（不是「数据缺失」退出码 3）")
+    def _(d: Path) -> None:
+        data = d / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        _st_arm(data, "p", "a", [-7.0, -7.1, -6.9])
+        entry = _st_two_sample("NR-T3", "p", _st_ok_declared())
+        entry["sources"] = [s for s in entry["sources"] if s["role"] == "a"]
+        rc, doc, _ = _st_run(d, [entry])
+        status = _st_by_id(doc)["NR-T3"]["status"]
+        assert status == "FAIL", f"登记缺陷被报成 {status}（数据明明在盘上）"
+        assert "缺 role=b" in _st_by_id(doc)["NR-T3"]["reason"], \
+            _st_by_id(doc)["NR-T3"]["reason"]
+        assert rc == ac.EXIT_FAIL, f"退出码 {rc}（3 = 被误诊成数据缺失）"
+
+    # ---- 3. 双源校验：globs / file / 字符串引用都要能比 ------------------ #
+    @case("双源：globs 与 file 源都能比（旧实现 KeyError）")
+    def _(d: Path) -> None:
+        repo, mir = d / "repo", d / "mirror"
+        for root in (repo, mir):
+            _st_arm(root, "p", "a", [-7.0, -7.1, -6.9])
+            _st_write_json(root / "flat.json", {"sign_ms": 1.5})
+        reg = {"entries": [
+            {"id": "NR-T4", "sources": [
+                {"globs": ["p/a_seed*.json"], "field": _ST_FIELD, "role": "a"},
+                {"file": "flat.json", "field": "sign_ms"}]},
+            {"id": "NR-T5", "sources": ["reports/junit.xml#testsuite@tests"]},
+        ]}
+        info = check_mirror(reg, repo, mir)
+        assert info["files_compared"] == 4, info["files_compared"]
+        assert info["consistent"] is True, info
+        assert any(s.get("reason") == "static_ref" for s in info["skipped"]), \
+            "字符串式静态引用必须留痕，不能静默消失"
+
+    @case("双源：数值不同必须报差异")
+    def _(d: Path) -> None:
+        repo, mir = d / "repo", d / "mirror"
+        _st_arm(repo, "p", "a", [-7.0, -7.1, -6.9])
+        _st_arm(mir, "p", "a", [-7.0, -7.2, -6.9])
+        reg = {"entries": [{"id": "NR-T6", "sources": [
+            {"globs": ["p/a_seed*.json"], "field": _ST_FIELD, "role": "a"}]}]}
+        info = check_mirror(reg, repo, mir)
+        assert info["consistent"] is False, "数值不同却报「一致」"
+        assert len(info["diffs"]) == 1, info["diffs"]
+
+    @case("双源：镜像缺失/零比较判「未判定」，缺文件判差异")
+    def _(d: Path) -> None:
+        repo = d / "repo"
+        _st_arm(repo, "p", "a", [-7.0])
+        reg = {"entries": [{"id": "NR-T7", "sources": [
+            {"globs": ["p/a_seed*.json"], "field": _ST_FIELD, "role": "a"}]}]}
+        # (a) 镜像根不存在 ⇒ 未判定（不是「一致」）
+        absent = check_mirror(reg, repo, d / "no_such_mirror")
+        assert absent["consistent"] is None, absent
+        assert "不存在" in absent["reason"], absent["reason"]
+        # (b) 镜像根在但整份文件都没复制 ⇒ 这是**差异**，不是未判定
+        empty = d / "empty"
+        empty.mkdir()
+        missing_files = check_mirror(reg, repo, empty)
+        assert missing_files["consistent"] is False, missing_files
+        assert missing_files["diffs"][0]["only_repo"] == ["a_seed0.json"], \
+            missing_files["diffs"]
+        # (c) 文件名对得上但字段不可机读 ⇒ 未判定（读不懂 ≠ 一致）
+        unreadable = d / "unreadable"
+        _st_arm(unreadable, "p", "a", [-7.0])
+        vague = {"entries": [{"id": "NR-T7b", "sources": [
+            {"globs": ["p/a_seed*.json"], "field": "签名长度常量 / 说明文字",
+             "role": "a"}]}]}
+        info = check_mirror(vague, repo, unreadable)
+        assert info["files_compared"] == 0, info
+        assert info["consistent"] is None, info
+        assert info["skipped"], "不可机读的字段必须留痕"
+
+    # ---- 4. 比对器本身不空转 -------------------------------------------- #
+    @case("数值错得离谱必须 FAIL（证明比对器不空转）")
+    def _(d: Path) -> None:
+        data = d / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        _st_arm(data, "p", "a", [-7.0, -7.1, -6.9])
+        _st_arm(data, "p", "b", [-9.0, -9.1, -8.9])
+        wrong = _st_ok_declared()
+        wrong["mean_a"] = -3.0
+        rc, doc, _ = _st_run(d, [_st_two_sample("NR-T8", "p", wrong)])
+        assert _st_by_id(doc)["NR-T8"]["status"] == "FAIL", "错值被判 PASS"
+        assert rc == ac.EXIT_FAIL, rc
+
+    @case("真缺数据仍走 DATA_MISSING（不把缺数据读成算错）")
+    def _(d: Path) -> None:
+        rc, doc, _ = _st_run(d, [_st_two_sample("NR-T9", "nowhere", _st_ok_declared())])
+        assert _st_by_id(doc)["NR-T9"]["status"] == "DATA_MISSING", \
+            _st_by_id(doc)["NR-T9"]["status"]
+        assert rc == ac.EXIT_DATA_MISSING, rc
+
+    # ---- 5. --check-mirror 端到端（旧实现连报告都写不出来） ------------- #
+    @case("--check-mirror 端到端：能出报告且结论为「未判定」")
+    def _(d: Path) -> None:
+        data = d / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        _st_arm(data, "p", "a", [-7.0, -7.1, -6.9])
+        _st_arm(data, "p", "b", [-9.0, -9.1, -8.9])
+        rc, doc, _ = _st_run(d, [_st_two_sample("NR-T10", "p", _st_ok_declared())],
+                             ["--check-mirror", "--mirror", str(d / "no_mirror")])
+        assert doc, "没有报告：--check-mirror 又把主流程带崩了"
+        assert doc["mirror_consistent"] is None, doc["mirror_consistent"]
+        assert rc == ac.EXIT_OK, f"条目全 PASS 却退出码 {rc}"
+        md = (d / "report.md").read_text(encoding="utf-8")
+        assert "未判定" in md, "人读报告把「未判定」写成了别的结论"
+
+    # ---- 执行 ---------------------------------------------------------- #
+    prev_level = logger.level
+    saved_sha = os.environ.pop("GITHUB_SHA", None)  # 自证必须与外部 CI 变量无关
+    logger.setLevel("WARNING")
+    failed = 0
+    try:
+        with tempfile.TemporaryDirectory(prefix="verify_numbers_selftest_") as td:
+            print(f"verify_numbers --self-test：{len(cases)} 条用例")
+            for idx, (name, fn) in enumerate(cases, 1):
+                root = Path(td) / f"c{idx}"
+                root.mkdir(parents=True, exist_ok=True)
+                try:
+                    fn(root)
+                except AssertionError as exc:
+                    failed += 1
+                    print(f"  [{idx}/{len(cases)}] FAIL {name} —— {exc}")
+                except Exception as exc:  # noqa: BLE001 - 用例自身抛错同样是失败
+                    failed += 1
+                    print(f"  [{idx}/{len(cases)}] FAIL {name} —— 用例自身抛 "
+                          f"{exc.__class__.__name__}: {exc}")
+                else:
+                    print(f"  [{idx}/{len(cases)}] PASS {name}")
+    finally:
+        logger.setLevel(prev_level)
+        if saved_sha is not None:
+            os.environ["GITHUB_SHA"] = saved_sha
+    if failed:
+        print(f"自证失败 {failed}/{len(cases)} —— 门禁不承重，不得据此判仓库")
+        return ac.EXIT_FAIL
+    print(f"自证通过 {len(cases)}/{len(cases)}")
+    return ac.EXIT_OK
 
 
 # --------------------------------------------------------------------------- #
@@ -1102,14 +1542,26 @@ def build_parser() -> argparse.ArgumentParser:
                     help="拟提交/编辑目标版本 SHA（40 位小写十六进制）；写入报告抬头 "
                          "editorial_target，证明报告对应哪批字节（不给则显式「未 pin」）")
     ap.add_argument("--report", default=str(ac.REPORTS_DIR / "number_verification_report.json"))
+    ap.add_argument("--self-test", action="store_true",
+                    help="跑内置自证用例（合成注册表/数据/镜像），证明本门禁不空转；"
+                         "不读仓库数据，可与真实复算并存于 CI")
     return ap
 
 
 def _sources_present(entry: Dict[str, Any], data_root: Path) -> bool:
     """条目所需数据源是否至少命中一个文件。
 
-    只用于区分「数据缺失」与「数字算错」：任一 glob 命中即视为有数据可复算。
+    只用于区分「数据缺失」与「数字算错」：任一取数模式命中即视为有数据可复算。
     没有 sources 的条目（如纯 code_check）不适用此判据，一律视为有数据。
+
+    🔴 2026-11-06 审计缺陷（误诊）：旧实现只读 ``src.get("glob")``，而注册表里
+    ``globs`` 有 135 处（多批次并集，如 NR-1 的 60 种子跨两个批次落盘）、
+    ``file`` 有 31 处。用 ``globs`` 登记的条目**永远被判成「没有数据」**，于是
+    「登记缺 role=b」这类**登记缺陷**被报成
+    「数据源缺失：本数据包不含该条目所需的任何结果文件」并以退出码 3 结束 ——
+    数据明明都在盘上（实测：只有角色 a 的 NR-1 被这么判）。这正是本模块反复
+    警告的「把门禁失败伪装成数据缺失」，只不过这次伪装的是**登记错误**。
+    现在与 ``_collect_source`` 用同一套模式解析（``_source_patterns`` + ``file``）。
     """
     srcs = entry.get("sources") or []
     if not isinstance(srcs, list) or not srcs:
@@ -1117,15 +1569,59 @@ def _sources_present(entry: Dict[str, Any], data_root: Path) -> bool:
     for src in srcs:
         if not isinstance(src, dict):
             continue
-        g = src.get("glob")
-        if not g:
-            continue
-        try:
-            if ac.resolve_glob(data_root, g):
-                return True
-        except Exception:  # noqa: BLE001 - glob 解析异常不阻断，交由复算阶段处理
-            continue
+        for pat in _source_patterns(src):
+            try:
+                if ac.resolve_glob(data_root, pat):
+                    return True
+            except Exception:  # noqa: BLE001 - glob 解析异常不阻断，交由复算阶段处理
+                continue
+        rel = src.get("file")
+        if rel:
+            try:
+                if _resolve_file(data_root, rel).exists():
+                    return True
+            except OSError:
+                continue
     return False
+
+
+def _crash_reason(exc: BaseException, fatal_read: bool = False) -> str:
+    """把「未捕获异常」翻成一句可定位的 FAIL 原因（含出错文件:行号）。
+
+    🔴 2026-11-06 审计缺陷（一条坏数据 = 全部 191 条失去校验）：
+
+    主循环原来的 ``except (FileNotFoundError, NotADirectoryError,
+    PermissionError, OSError)`` 只接文件系统错误。可 ``recompute`` 家族还会抛
+    别的：``ac.extract_field`` 的 ``KeyError``（字段被改名/缺失）、
+    ``float(None)`` 的 ``TypeError``（某次跑挂了把指标写成 null）、
+    ``load_json`` 的 ``JSONDecodeError``（半截文件）、``_recompute_attack`` 的
+    ``doc["summary"][...]``。这些一旦发生，异常穿透 ``main()``，而报告是在
+    **循环之后**才写的 ⇒ 产物是一段 traceback，**一份报告都不产出**，
+    其余条目连 PASS/FAIL 都没有 —— 门禁从「有一条红」退化成「没有门禁」。
+
+    实测（本次修复前）：把 NR-1 的一份数据文件的
+    ``summary.avg_env_reward_last_50`` 写成 ``null``，整跑输出
+    ``TypeError: float() argument must be a string or a real number, not
+    'NoneType'`` 后退出，``--report`` 指定的文件根本不存在。
+
+    现在：异常只让**该条**判 FAIL，理由里带异常类型、消息和出错位置；
+    其余条目照常复算。``fatal_read=True`` 用于「文件在盘上但读不出」——
+    那也不是数据缺失，不能退化成退出码 3。
+    """
+    # 定位要指到**最初的**出错帧：``raise ... from exc`` 之后本异常的最后一帧
+    # 永远是那行 raise，对排查没用；沿 __cause__ 链走到根因再取帧。
+    root: BaseException = exc
+    while isinstance(root.__cause__, BaseException):
+        root = root.__cause__
+    tb = traceback.extract_tb(root.__traceback__) or traceback.extract_tb(exc.__traceback__)
+    where = ""
+    if tb:
+        frame = tb[-1]
+        where = (f"；位置 {Path(frame.filename).name}:{frame.lineno}"
+                 f" {(frame.line or '').strip()}")
+    head = "读取失败（文件存在但读不出）" if fatal_read else "复算抛异常"
+    return (f"{head}：{exc.__class__.__name__}: {exc}{where}"
+            " —— 只判该条 FAIL，其余条目继续校验")
 
 
 def _data_missing_applies(analysis: str, errors: List[str], files: int,
@@ -1151,6 +1647,8 @@ def _data_missing_applies(analysis: str, errors: List[str], files: int,
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.self_test:
+        return _self_test()
 
     registry_path = _resolve(args.registry, ac.REGISTRY_PATH)
     data_root = _resolve(args.data_root, ac.RESULTS_DIR)
@@ -1181,7 +1679,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     only = {x.strip() for x in args.only.split(",") if x.strip()}
     counts = {"total": 0, "pass": 0, "fail": 0, "pending": 0, "invalid": 0, "planned": 0,
-              "data_missing": 0, "unverified": 0}
+              "data_missing": 0, "unverified": 0, "crashed": 0}
     entries_out: List[Dict[str, Any]] = []
     has_fail = False
 
@@ -1204,6 +1702,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         errors: List[str] = []
         deferred = ""
         missing = ""
+        crashed = ""
         if analysis == "pytest" and not args.run_tests:
             # 测试数量只能在真实复跑时核实；未加 --run-tests 时显式标 PENDING，
             # 既不伪绿也不阻断（PENDING 不产生退出码 1）。
@@ -1214,9 +1713,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             # 也绝不能计入 PASS 或伪装成 FAIL（避免"缺数据"被读成"数字算错了"）。
             try:
                 computed, files, errors = recompute(entry, data_root)
-            except (FileNotFoundError, NotADirectoryError, PermissionError, OSError) as exc:
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                # 「这份文件不存在」是缺数据，不是门禁失败 —— 与旧行为一致，
+                # 也是 DATA_MISSING 通道唯一该接的情形（实测：本机 191 条里
+                # 174 条属于它，绝大多数是 results/ 不入库所致）。
                 computed, files, errors = {}, 0, []
-                missing = f"数据源缺失（{exc.__class__.__name__}）：本数据包不含该条目所需文件"
+                missing = (f"数据源缺失（{exc.__class__.__name__}）："
+                           "本数据包不含该条目所需文件")
+            except OSError as exc:
+                # 其余 OSError（权限 / 被占用 / 目录当文件）意味着「文件在，但读不出」：
+                # 报成数据缺失会把门禁失败伪装成「本数据包没有」，故判 FAIL。
+                computed, files, errors = {}, 0, []
+                crashed = _crash_reason(exc, fatal_read=True)
+            except Exception as exc:  # noqa: BLE001 —— 单条失败隔离，见 _crash_reason
+                computed, files, errors = {}, 0, []
+                crashed = _crash_reason(exc)
             else:
                 # 复算报错了，才回溯判断：是不是因为数据源根本不存在。
                 # 放在报错之后再判，是为了不干扰「复算本就不依赖 data-root」的条目
@@ -1233,6 +1744,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if declared_status in ("INVALID", "PLANNED"):
             status = declared_status
+        elif crashed:
+            # 崩溃 ≠ 缺数据：该条判 FAIL 并带上异常与出错位置（见 _crash_reason）。
+            # 位置必须**先于** not has_declared：复算出不来是硬失败，不能因为
+            # 「declared 待补登」就降级成 PENDING —— PENDING 不阻断，等于把崩溃放过。
+            status = "FAIL"
         elif not has_declared:
             # 2026-11-06 审计缺陷：`declared` 为空 ⇒ 无可复算值 ⇒ `compare()` 旧实现
             # 零比对返回 True ⇒ 判 PASS。PASS 数里因此混进 7 条空断言
@@ -1265,6 +1781,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if status == "FAIL":
             has_fail = True
             counts["fail"] += 1
+            if crashed:
+                counts["crashed"] += 1
         elif status == "UNVERIFIED":
             has_fail = True
             counts["unverified"] += 1
@@ -1279,7 +1797,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             counts["pass"] += 1
 
-        reason = missing or deferred or undetermined or ("; ".join(errors) if errors else "")
+        reason = crashed or missing or deferred or undetermined or (
+            "; ".join(errors) if errors else "")
         entries_out.append({
             "id": entry["id"],
             "status": status,
@@ -1290,6 +1809,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "files_scanned": files,
             "n_expected": entry.get("n_expected"),
             "reason": reason,
+            "crashed": bool(crashed),
             "notes": entry.get("notes", ""),
         })
         logger.info("%-6s %s%s", entry["id"], status, f"  [{reason}]" if reason else "")
@@ -1297,7 +1817,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     mirror_info = None
     mirror_consistent = None
     if args.check_mirror:
-        mirror_info = check_mirror(registry, data_root, mirror_root)
+        # 与条目循环共用 --only 子集：否则「只校验 NR-1」仍会把 191 条全比一遍，
+        # 报告里的双源结论与 entries 列表描述的不是同一批条目。
+        mirror_info = check_mirror(registry, data_root, mirror_root, only=only)
         mirror_consistent = mirror_info["consistent"]
 
     try:
@@ -1324,9 +1846,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     report_json = _resolve(args.report, ac.REPORTS_DIR / "number_verification_report.json")
     _emit_report(report, report_json, overwrite=args.overwrite)
 
-    logger.info("汇总：total=%d PASS=%d FAIL=%d UNVERIFIED=%d PENDING=%d INVALID=%d DATA_MISSING=%d",
+    logger.info("汇总：total=%d PASS=%d FAIL=%d UNVERIFIED=%d PENDING=%d INVALID=%d DATA_MISSING=%d%s",
                 counts["total"], counts["pass"], counts["fail"], counts["unverified"],
-                counts["pending"], counts["invalid"], counts["data_missing"])
+                counts["pending"], counts["invalid"], counts["data_missing"],
+                # CRASHED 是 FAIL 的子集，只在非零时追加（不改变既有汇总行前缀，
+                # doctor.py 的正则仍按 total/PASS/FAIL 取数）
+                f" CRASHED={counts['crashed']}" if counts["crashed"] else "")
 
     if has_fail:
         if counts["fail"]:
