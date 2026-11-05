@@ -223,9 +223,15 @@ class NetworkConsensusNode:
                           f"({vote.block_hash[:8]} vs {self.cw_pbft._current_block_hash[:8]})")
             return None, False
 
-        # 确保当前节点处于 PREPARE 状态
+        # 确保当前节点至少进入 PREPARE 状态（只向前推进，不回退）
         from ..consensus.cw_pbft import ConsensusState as _CS
-        if self.cw_pbft._state != _CS.COMMITTED:
+        # 修复（网络层状态回退）：原实现 `if _state != COMMITTED: _state = PREPARE`
+        # 会把已进入 COMMIT 的节点打回 PREPARE——随后 COMMIT 阶段的状态约束
+        # (见 _on_commit: 要求 state in (COMMIT, COMMITTED)) 会拒收合法 COMMIT 票，
+        # 节点需重新凑 prepare 阈值，特定乱序/重放时序下造成活性抖动，影响共识
+        # 时延/成功率可复现性。改为单向推进：仅从 IDLE/PRE_PREPARE 提升到 PREPARE，
+        # 已在 PREPARE/COMMIT/COMMITTED 的节点保持不变。
+        if self.cw_pbft._state in (_CS.IDLE, _CS.PRE_PREPARE):
             self.cw_pbft._state = _CS.PREPARE
 
         commit_vote = self.cw_pbft.receive_vote(vote)
