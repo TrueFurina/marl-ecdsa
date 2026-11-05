@@ -73,6 +73,11 @@ AUDIT_INVARIANT_IDS = {
     # 缺失汇总行不再被当成证据。
     "probe-mutated-requires-failure-evidence",
     "probe-truncated-output-not-evidence",
+    # 2026-11-06：口径门禁的「零真值通过」——登记簿缺失/损坏/真值残缺时
+    # --strict 仍判 ✅；以及宣称覆盖 .docx/.pptx 却按 UTF-8 读二进制。
+    "caliber-strict-requires-truth",
+    "caliber-office-text-extracted",
+    "caliber-unparsed-format-fail-closed",
 }
 
 
