@@ -15,6 +15,67 @@
 
 ---
 
+## 2026-11-06 — 诚实扫描器的四种「扫了等于没扫」：空格文件名被切碎 / UTF-16 文档读成空白 / CI 文件自己从不被扫 / 零扫描报 ✅
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+`scripts/pre-commit/honesty_scan.py` 是 pre-commit 第 2 步、也在 CI 的
+`Pre-commit gates — repo-wide` 里跑，职责是拦「假水位」表述（「解出数 5→13」、
+「冲第一」、「真实水位 92%」之类）。它此前**零测试覆盖的失败路径**里，有四种情况
+会让「含假水位的文档」判成「✅ 通过」。
+
+| # | 形态 | 旧行为（实测） | 应有 |
+|---|---|---|---|
+| 1 | 文件名含空格 | `git diff --name-only` 输出按 `split()` 切 ⇒ `报告 记录.md` 变成 `报告` + `记录.md` 两个不存在的路径，读失败被 `except: return []` 吞掉 | 按 `-z` 的 NUL 切分 |
+| 2 | UTF-16 / GBK 文档 | `read_text(errors="ignore")` 把中文整段丢弃，剩下 ASCII 里没有短语 ⇒ 通过 | 多编码探测，读得出就扫 |
+| 3 | 路径含 `.git` / `build` / `dist` 子串 | `.github/workflows/ci.yml`（含 `".git"`）**从未被扫过**，连带 `scripts/build_*.py`、`static/v9-distributed.*` 共 8 个文件 | 只按**路径段**精确跳过 |
+| 4 | 读不出 / 什么都没扫到 | 目录、悬空链接、git 不可用、零文件——四种都打印「✅ 诚实口径扫描通过」 | 分别是 1 / 1 / 2 / （`--strict` 下）1 |
+
+### 实测证据（都在临时目录里现造，不依赖仓库状态）
+
+1. 暂存 3 个各含「解出数 5→13」的文件（`control.md` / `报告 记录.md` /
+   `.github/workflows/ci.yml`）：旧版只报 `control.md` 一处，另两个静默通过；
+   新版三个文件各命中 2 处（短语 + 正则），共 6 处。
+2. 同一句话存成 UTF-16（记事本「Unicode」，带 BOM）与 GBK：旧版对两者均
+   `✅ 通过`；新版分别命中 2 处。
+3. 真·非 git 目录下跑 `--cached`：旧版 `✅ 通过`、`rc=0`；新版
+   `❌ 无法取得待扫文件列表（git 退出码 129：fatal: not a git repository…）`、`rc=2`。
+4. 传一个目录当参数：旧版 `✅ 通过`；新版 `❌ adir: 读不出（是目录不是文件）`、`rc=1`。
+5. 覆盖面差异（同一份 611 文件的工作树）：旧版自报「扫过」603 个，其中 14 个是 PNG
+   （按 `errors="ignore"` 当文本读），实际含文本 589 个，且**不含**那 8 个被误伤的文件；
+   新版 `597 个文本 + 14 个二进制`，文本数正好 = 589 + 8，二进制不再冒充文本。
+
+### 改法
+
+1. `split_z()`：只按 `\0` 切 `git diff -z` 的输出；`get_staged_files()` 显式返回
+   `(文件列表, 错误说明)`，git 失败时错误说明非空，`main()` 据此 `exit 2`。
+2. `classify_bytes()`：UTF-16 BOM → 解码；含 NUL 无 BOM → `binary`（无法与 PNG/PDF
+   安全区分，显式跳过并计数，不假装扫过）；否则依次 `utf-8` → `utf-8-sig` → `gbk`，
+   并过一道「控制字符占比 ≤ 2%」的可读性闸门（GBK 几乎能解出任何字节，这道闸门
+   负责把「解出来了但明显不是文本」挡回去）。全部失败 → `decode_failed`，
+   是**状态**而不是空字符串。
+3. `read_document()`：目录 / 权限 / 悬空链接 → `unreadable`，与「读到了、没命中」
+   彻底分开；`PROBLEM_STATUSES` 两种状态在默认模式下即判失败
+   （读不懂不等于没有假水位）。
+4. `is_skipped()` 成为**唯一**跳过规则（路径段精确匹配）；`main()` 里那层
+   `any(ign in str(f) for ign in [...])` 子串过滤删除，并加测试防止回潮。
+5. 新增 `--strict`（零个文件被扫描 ⇒ 失败，防 CI 里 cwd 跑偏）与 `--self-test`
+   （16 条夹具）。收尾打印`扫过 N 个文本文件，跳过 M 个二进制、K 个忽略路径`，
+   「通过」不再与「什么都没扫」同形。
+6. `scan_file()` 保留旧签名（只返回命中列表）以免破坏外部调用；新增
+   `scan_document()` 返回完整状态。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_honesty_scan_blind_spots.py` **38 项**（含一条"子串过滤不得回潮"的源码断言）；既有 `test_gate_scripts.py` 13 项不回归 |
+| 自证 | `--self-test` **16/16** |
+| 变异目标 | 48 → **54**；新增 6 条逐条承重（分别 6 / 3 / 3 / 3 / 4 / 1 个用例变红） |
+| 本仓实跑 | `--strict` 全仓 0 命中；`caliber_check --strict`、`structure_guard --all`、`check_evidence_closure --strict`、`check_registry_mirror` 均通过 |
+| 本机全量 pytest | 2552 收集 / **2532 passed** / 20 skipped / 2 failed：`test_deps_importable`（本机 python 3.13 未装 torch，与本次无关）、`test_gate_source_is_machine_independent`（工作副本无 `.git`，`git ls-files` 越界扫到外层仓库；在带 `.git` 的副本里单跑通过） |
+| CI | 两个 workflow 的 `Pre-commit gates` 步骤改为先 `--self-test` 再 `--strict` |
+
 ## 2026-11-06 — 数字复算器的三处「报告说了假话」：一条坏数据让 191 条失去校验 / 登记缺陷报成缺数据 / `--check-mirror` 从未跑通
 
 > 本节只记工具与测试变更，不含任何实验数字。

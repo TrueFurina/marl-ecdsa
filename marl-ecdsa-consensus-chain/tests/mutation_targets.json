@@ -673,6 +673,96 @@
         "expect": "all_red"
       },
       "why": "崩溃条目若不单独判 FAIL，理由会退化成「declared 键 MISSING」——读者把它读成「数字算错了」，而真相是该条根本没算出来（audited 2026-11-06）"
+    },
+    {
+      "id": "honesty-z-split",
+      "file": "scripts/pre-commit/honesty_scan.py",
+      "locator": "    return [item for item in text.split(\"\\0\") if item]",
+      "mutation": "    return [item for item in text.split() if item]  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_honesty_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "按空白切 git 输出，文件名含空格时被切成不存在的碎片，读失败又被吞成「无命中」——含假水位的文档判通过（audited 2026-11-06）"
+    },
+    {
+      "id": "honesty-utf16-bom",
+      "file": "scripts/pre-commit/honesty_scan.py",
+      "locator": "    if raw.startswith(_UTF16_BOMS):",
+      "mutation": "    if False and raw.startswith(_UTF16_BOMS):  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_honesty_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "不认 UTF-16 BOM 就等于把 Windows 记事本「Unicode」文档当二进制跳过：整篇中文里的假水位从未进入扫描（audited 2026-11-06）"
+    },
+    {
+      "id": "honesty-unreadable-blocks",
+      "file": "scripts/pre-commit/honesty_scan.py",
+      "locator": "    if problems:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_honesty_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "读不出（目录/权限/悬空链接）若不算失败，就把「读不懂」折叠成「没有假水位」——这正是本仓反复出现的假绿形态（audited 2026-11-06）"
+    },
+    {
+      "id": "honesty-strict-zero-scan",
+      "file": "scripts/pre-commit/honesty_scan.py",
+      "locator": "        if strict:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_honesty_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--strict 下零个文件被扫描仍判通过，等于把「什么都没扫」当成「全部干净」；CI 里 cwd 跑偏时就是这个形态（audited 2026-11-06）"
+    },
+    {
+      "id": "honesty-substring-skip",
+      "file": "scripts/pre-commit/honesty_scan.py",
+      "locator": "    if parts & _SKIP_DIRS:",
+      "mutation": "    if parts & _SKIP_DIRS or \".git\" in str(path):  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_honesty_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "子串匹配跳过会因 \".git\" in \".github/workflows/ci.yml\" 而永不扫描 CI 配置本身，并吞掉 scripts/build_*.py、static/v9-distributed.*（本仓 8 个文件）（audited 2026-11-06）"
+    },
+    {
+      "id": "honesty-git-error-not-pass",
+      "file": "scripts/pre-commit/honesty_scan.py",
+      "locator": "    if error:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_honesty_scan_blind_spots.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "git 不可用时拿到空文件列表就报「✅ 通过」，与「暂存区确实没有待扫文件」不可分（audited 2026-11-06）"
     }
   ]
 }

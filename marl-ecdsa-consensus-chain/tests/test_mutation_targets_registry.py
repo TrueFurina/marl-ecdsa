@@ -94,6 +94,12 @@ AUDIT_INVARIANT_IDS = {
     "verify-mirror-zero-not-consistent",
     "verify-mirror-all-patterns",
     "verify-crashed-entry-is-fail",
+    "honesty-z-split",
+    "honesty-utf16-bom",
+    "honesty-unreadable-blocks",
+    "honesty-strict-zero-scan",
+    "honesty-substring-skip",
+    "honesty-git-error-not-pass",
 }
 
 
