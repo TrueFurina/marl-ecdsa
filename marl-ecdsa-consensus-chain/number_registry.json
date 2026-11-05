@@ -1,7 +1,7 @@
 {
  "_mirror_of": "deliverables/number_registry.json",
  "_mirror_note": "只读镜像，供版本库内离线查阅与文档引用。**唯一权威源在工作区 deliverables/number_registry.json**（代码经 assurance_common.REGISTRY_PATH 读取该份）。由 scripts/check_registry_mirror.py --sync 生成，勿手改。",
- "_mirror_sha256": "sha256:8e9b61c82dd2c621",
+ "_mirror_sha256": "sha256:00db05e0d468261e",
  "_mirror_generated_by": "scripts/check_registry_mirror.py --sync",
  "schema_version": "1.0",
  "generated_at": "2026-10-15T11:49:44",
@@ -6856,13 +6856,13 @@
     "p_abs": 0.001,
     "pct_abs": 0.05
    },
-   "status": "PASS",
+   "status": "PENDING",
    "pre_registered": true,
    "requires": [
     "NR-16",
     "NR-30"
    ],
-   "notes": "2026-10-14 服务器实测。直接调用 blockchain/crypto/security_guard.py SecurityGuard.check_package 真实代码路径（不改代码）。A/B/C/D 拦截率 1.0（Wilson CI[0.9812,1.0]）；E/F 拦截率 0.0（Wilson CI[0,0.0188]）。预注册 docs/PREREG_e22_e23_sec.md。数据 results/security_replay_20261014/e22_replay_matrix.json。图 results/plots_summary_20261013/fig_e22_replay_matrix.png。",
+   "notes": "2026-10-14 服务器实测。直接调用 blockchain/crypto/security_guard.py SecurityGuard.check_package 真实代码路径（不改代码）。A/B/C/D 拦截率 1.0（Wilson CI[0.9812,1.0]）；E/F 拦截率 0.0（Wilson CI[0,0.0188]）。预注册 docs/PREREG_e22_e23_sec.md。数据 results/security_replay_20261014/e22_replay_matrix.json。图 results/plots_summary_20261013/fig_e22_replay_matrix.png。 【2026-11-06 审计】本条原登记 status=PASS 但 declared 为空 ⇒ 门禁对它是零断言通过（compare() 旧实现对空 declared 返回 True）。E22/E23/E24 结果文件不在版本库内，本机无法实测 declared，故降级为 PENDING：不得在 declared 补齐前标回 PASS。补齐方式见 scripts/wire_unverified_entries_20261106.py 文件头。",
    "evidence_kind": "experiment"
   },
   {
@@ -6885,14 +6885,14 @@
     "p_abs": 0.001,
     "pct_abs": 0.05
    },
-   "status": "PASS",
+   "status": "PENDING",
    "pre_registered": true,
    "requires": [
     "NR-16",
     "NR-30",
     "NR-120"
    ],
-   "notes": "2026-10-14 服务器实测。SecurityGuard.check_package 真实代码路径。G 34.4万 pkg/s、H 35.4万 pkg/s、J 26.6万 pkg/s（交错校验含一半非法）。warn_at_fail_no=5 与 MAX_FAIL_COUNT=5 一致。预注册 docs/PREREG_e22_e23_sec.md。数据 results/security_dos_20261014/e23_dos_flood.json。图 results/plots_summary_20261013/fig_e23_dos_flood.png。",
+   "notes": "2026-10-14 服务器实测。SecurityGuard.check_package 真实代码路径。G 34.4万 pkg/s、H 35.4万 pkg/s、J 26.6万 pkg/s（交错校验含一半非法）。warn_at_fail_no=5 与 MAX_FAIL_COUNT=5 一致。预注册 docs/PREREG_e22_e23_sec.md。数据 results/security_dos_20261014/e23_dos_flood.json。图 results/plots_summary_20261013/fig_e23_dos_flood.png。 【2026-11-06 审计】本条原登记 status=PASS 但 declared 为空 ⇒ 门禁对它是零断言通过（compare() 旧实现对空 declared 返回 True）。E22/E23/E24 结果文件不在版本库内，本机无法实测 declared，故降级为 PENDING：不得在 declared 补齐前标回 PASS。补齐方式见 scripts/wire_unverified_entries_20261106.py 文件头。",
    "evidence_kind": "experiment"
   },
   {
@@ -6915,12 +6915,12 @@
     "p_abs": 0.001,
     "pct_abs": 0.05
    },
-   "status": "PASS",
+   "status": "PENDING",
    "pre_registered": true,
    "requires": [
     "NR-1"
    ],
-   "notes": "2026-10-14 服务器实测。数据源 results/convergence_3000/bc_marl_seed*.json + pure_marl_seed*.json（NR-1 同源，n=71）。脚本 scripts/run_e24_sensitivity.py。Jackknife p 全 <0.05；配对 p=0.000081；bootstrap seed=20261014 共 10,000 次。预注册：实验后补注（复用 PREREG 纪律——敏感性分析为 NR-1 的派生稳健性检验，方法与假设在脚本注释中固化，seed 固定）。数据 results/sensitivity_20261014/e24_sensitivity.json。图 results/plots_summary_20261013/fig_e24_sensitivity.png。",
+   "notes": "2026-10-14 服务器实测。数据源 results/convergence_3000/bc_marl_seed*.json + pure_marl_seed*.json（NR-1 同源，n=71）。脚本 scripts/run_e24_sensitivity.py。Jackknife p 全 <0.05；配对 p=0.000081；bootstrap seed=20261014 共 10,000 次。预注册：实验后补注（复用 PREREG 纪律——敏感性分析为 NR-1 的派生稳健性检验，方法与假设在脚本注释中固化，seed 固定）。数据 results/sensitivity_20261014/e24_sensitivity.json。图 results/plots_summary_20261013/fig_e24_sensitivity.png。 【2026-11-06 审计】本条原登记 status=PASS 但 declared 为空 ⇒ 门禁对它是零断言通过（compare() 旧实现对空 declared 返回 True）。E22/E23/E24 结果文件不在版本库内，本机无法实测 declared，故降级为 PENDING：不得在 declared 补齐前标回 PASS。补齐方式见 scripts/wire_unverified_entries_20261106.py 文件头。",
    "evidence_kind": "experiment"
   },
   {
@@ -11353,11 +11353,24 @@
    "evidence_level": "observed",
    "claim": "ML 异常检测器（ExtraTreesClassifier）训练集准确率 98.82%（源 marl-ecdsa-consensus-chain/scripts/security/ml_blindspot_result.json，ml_defender.train_accuracy=0.9882，即 98.82%）。",
    "allowed_wording": "ML 异常检测器（ExtraTreesClassifier）训练集准确率 98.82%（源 marl-ecdsa-consensus-chain/scripts/security/ml_blindspot_result.json，ml_defender.train_accuracy=0.9882，即 98.82%）。",
-   "analysis": "none",
-   "sources": [],
+   "analysis": "benchmark",
+   "sources": [
+    {
+     "file": "scripts/security/ml_blindspot_result.json",
+     "paths": {
+      "train_accuracy": "ml_defender.train_accuracy",
+      "train_samples": "ml_defender.train_samples",
+      "heldout_samples": "ml_defender.heldout_samples"
+     }
+    }
+   ],
    "n_expected": null,
    "statistic": [],
-   "declared": {},
+   "declared": {
+    "train_accuracy": 0.9882,
+    "train_samples": 9600,
+    "heldout_samples": 2400
+   },
    "tolerance": {
     "abs": 0.01,
     "p_abs": 0.001
@@ -11373,11 +11386,24 @@
    "evidence_level": "observed",
    "claim": "ML 异常检测器 held-out 准确率 98.79%（源 ml_blindspot_result.json，ml_defender.heldout_accuracy=0.9879，即 98.79%）；训练/held-out 严格分离，off-manifold 良性误报 0/12000（可用性前提）。",
    "allowed_wording": "ML 异常检测器 held-out 准确率 98.79%（源 ml_blindspot_result.json，ml_defender.heldout_accuracy=0.9879，即 98.79%）；训练/held-out 严格分离，off-manifold 良性误报 0/12000（可用性前提）。",
-   "analysis": "none",
-   "sources": [],
+   "analysis": "benchmark",
+   "sources": [
+    {
+     "file": "scripts/security/ml_blindspot_result.json",
+     "paths": {
+      "heldout_accuracy": "ml_defender.heldout_accuracy",
+      "off_manifold_samples": "ml_defender.benign_diag.off_manifold_samples",
+      "total_samples": "ml_defender.benign_diag.total_samples"
+     }
+    }
+   ],
    "n_expected": null,
    "statistic": [],
-   "declared": {},
+   "declared": {
+    "heldout_accuracy": 0.9879,
+    "off_manifold_samples": 0,
+    "total_samples": 12000
+   },
    "tolerance": {
     "abs": 0.01,
     "p_abs": 0.001
@@ -11393,11 +11419,26 @@
    "evidence_level": "observed",
    "claim": "L1 全知攻击者（规则基线）合作率 0.995（源 marl-ecdsa-consensus-chain/scripts/security/adaptive_attacker_result.json，runs.rule_L1 五种子 coop_rate 均 = 0.995）。",
    "allowed_wording": "L1 全知攻击者（规则基线）合作率 0.995（源 marl-ecdsa-consensus-chain/scripts/security/adaptive_attacker_result.json，runs.rule_L1 五种子 coop_rate 均 = 0.995）。",
-   "analysis": "none",
-   "sources": [],
+   "analysis": "benchmark",
+   "sources": [
+    {
+     "file": "scripts/security/adaptive_attacker_result.json",
+     "paths": {
+      "L1_coop_mean": "runs.L1_omniscient[].coop_rate",
+      "L1_coop_min": "runs.L1_omniscient[].coop_rate#min",
+      "L1_coop_max": "runs.L1_omniscient[].coop_rate#max",
+      "L1_n_seeds": "runs.L1_omniscient[].coop_rate#n"
+     }
+    }
+   ],
    "n_expected": null,
    "statistic": [],
-   "declared": {},
+   "declared": {
+    "L1_coop_mean": 0.995,
+    "L1_coop_min": 0.995,
+    "L1_coop_max": 0.995,
+    "L1_n_seeds": 5
+   },
    "tolerance": {
     "abs": 0.01,
     "p_abs": 0.001
@@ -11413,11 +11454,20 @@
    "evidence_level": "observed",
    "claim": "L2 自适应攻击者合作率（seed 11 代表值 0.825；源 adaptive_attacker_result.json runs.rule_L2_adaptive seed 11）。文本以 0.995→0.825 作与 L1 的配对示例。",
    "allowed_wording": "L2 自适应攻击者合作率（seed 11 代表值 0.825；源 adaptive_attacker_result.json runs.rule_L2_adaptive seed 11）。文本以 0.995→0.825 作与 L1 的配对示例。",
-   "analysis": "none",
-   "sources": [],
+   "analysis": "benchmark",
+   "sources": [
+    {
+     "file": "scripts/security/adaptive_attacker_result.json",
+     "paths": {
+      "L2_seed11_coop": "runs.L2_adaptive[seed=11].coop_rate"
+     }
+    }
+   ],
    "n_expected": null,
    "statistic": [],
-   "declared": {},
+   "declared": {
+    "L2_seed11_coop": 0.825
+   },
    "tolerance": {
     "abs": 0.01,
     "p_abs": 0.001

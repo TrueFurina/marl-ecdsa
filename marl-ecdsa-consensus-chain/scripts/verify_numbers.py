@@ -16,8 +16,9 @@ repo 与 backup 双数据源一致性。**绝不粉饰**：注册表被改坏即
 
 退出码（架构 §4.2）::
 
-    0  全部非 PENDING/PLANNED 条目 PASS，且无 FAIL（PENDING 不阻断）
-    1  至少一条 FAIL（复算值≠声明值，或 n 不符）
+    0  全部非 PENDING/PLANNED 条目 PASS，且无 FAIL / UNVERIFIED（PENDING 不阻断）
+    1  至少一条 FAIL（复算值≠声明值，或 n 不符）；或至少一条 UNVERIFIED
+       （登记声称已核验但 ``declared`` 为空 —— 零断言的 PASS 不算通过，见 compare）
     2  用法 / IO / 注册表 schema 错误
     3  数据文件缺失（data-root 不可读）
     4  --strict 下存在 PENDING/PLANNED 条目
@@ -338,6 +339,80 @@ def _r_key(r: float) -> str:
     return ("%g" % float(r)).replace(".", "")
 
 
+_PATH_AGG = ("mean", "min", "max", "n", "sum")
+
+
+def _json_path_value(doc: Any, path: str) -> Tuple[Any, Optional[str]]:
+    """按点路径从嵌套 JSON 取值，支持列表聚合与等值定位。
+
+    语法（供 ``analysis == "benchmark"`` 的 ``sources[].paths`` 使用）::
+
+        ml_defender.train_accuracy           # 嵌套字段
+        runs.L1_omniscient[].coop_rate       # 列表逐项取字段，默认取均值
+        runs.L1_omniscient[].coop_rate#min   # 指定聚合：mean/min/max/n/sum
+        runs.L2_adaptive[seed=11].coop_rate  # 按字段等值定位唯一列表项
+
+    返回 ``(value, err)``；路径不存在、定位命中数 ≠ 1、聚合对象为空时
+    ``value=None`` 且给出 ``err``，由调用方记 error（→ FAIL）。**不静默当 0**：
+    "取不到数"与"取到 0"是两件事，混同会让空断言重新变成安静通过。
+
+    2026-11-06：此前 benchmark 类只能取**顶层**数值字段，NR-180~183 的数值在
+    ``ml_defender.*`` 与 ``runs.*[].coop_rate`` 里取不到，于是这四条以
+    ``declared={}`` 登记，门禁对它们零比对判 PASS（见 ``compare`` 的审计注释）。
+    """
+    agg = "mean"
+    if "#" in path:
+        path, _, agg_raw = path.partition("#")
+        agg = agg_raw.strip().lower()
+        if agg not in _PATH_AGG:
+            return None, f"未知聚合 {agg_raw!r}（可用：{'/'.join(_PATH_AGG)}）"
+    node: Any = doc
+    for seg in path.split("."):
+        name, sel = seg, None
+        if seg.endswith("]"):
+            name, _, rest = seg.partition("[")
+            sel = rest[:-1]
+        if isinstance(node, list):
+            mapped = []
+            for item in node:
+                if not isinstance(item, dict) or name not in item:
+                    return None, f"路径 {path}: 列表元素缺字段 {name!r}"
+                mapped.append(item[name])
+            node = mapped
+        else:
+            if not isinstance(node, dict):
+                return None, f"路径 {path} 在 {name!r} 处遇到非对象"
+            if name not in node:
+                return None, f"路径 {path} 缺字段 {name!r}"
+            node = node[name]
+        if sel == "":
+            if not isinstance(node, list):
+                return None, f"路径 {path}: {name!r} 不是列表"
+        elif sel is not None:
+            if not isinstance(node, list):
+                return None, f"路径 {path}: {name!r} 不是列表"
+            key, _, want = sel.partition("=")
+            hit = [it for it in node
+                   if isinstance(it, dict) and str(it.get(key)) == want]
+            if len(hit) != 1:
+                return None, f"路径 {path}: [{sel}] 命中 {len(hit)} 项（须恰为 1）"
+            node = hit[0]
+    if isinstance(node, list):
+        vals = [v for v in node if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if not vals:
+            return None, f"路径 {path}: 聚合对象为空或非数值"
+        if agg == "n":
+            return len(vals), None
+        if agg == "min":
+            return min(vals), None
+        if agg == "max":
+            return max(vals), None
+        if agg == "sum":
+            return sum(vals), None
+        return ac.mean(vals), None
+    return node, None
+
+
 def _recompute_benchmark(entry, data_root, errors):
     """基准类：JSON 源取数值字段；``.py`` 源按正则取常量（如 ``DILITHIUM_AVAILABLE``）。"""
     computed: Dict[str, Any] = {}
@@ -362,6 +437,16 @@ def _recompute_benchmark(entry, data_root, errors):
                     errors.append(f"未在 {rel} 命中常量 {key}")
             continue
         doc = ac.load_json(p)
+        if src.get("paths"):
+            # 显式嵌套取数（2026-11-06）。与下面的「顶层数值字段全收」口径互斥：
+            # paths 存在时只取列出的键，避免把整份报告的所有数值都拖进比对。
+            for key, path in src["paths"].items():
+                val, err = _json_path_value(doc, path)
+                if err:
+                    errors.append(f"{rel}: {err}")
+                    continue
+                computed[key] = val
+            continue
         spec = src.get("field") or ""
         wanted = [f.strip() for f in spec.split(",") if f.strip()] if "/" not in spec else []
         for k, v in doc.items():
@@ -824,11 +909,23 @@ def compare(entry: Dict[str, Any], computed: Dict[str, Any]) -> Tuple[bool, Dict
     * ``evidence_kind == "test_count"``：``passed`` / ``collected`` 按**下限**比对
       （只增不减）；``skipped`` 为**信息键**（环境相关、不计判定）；
       ``failed`` 等其余键仍精确比对。见 ``_FLOOR_COMPARE_KEYS`` / ``_INFO_COMPARE_KEYS``。
+    * ``declared`` 为空：**一律不通过**（见下）。
+
+    2026-11-06 审计缺陷（fail-open）：``declared`` 为空时旧实现的 ``for`` 循环体
+    一次都不执行，``ok`` 保持初值 ``True`` ⇒ 判 PASS。实测：把 NR-121 的
+    ``declared`` 留空、喂进一份「吞吐 1 pkg/s、拦截 0/999999」的**相反**数据，
+    报告仍是 ``PASS``、``deltas={}``（零次比对）、退出码 0。同一形态在无任何
+    数据时也让 NR-180~183 四条判 PASS（其余 187 条全是 DATA_MISSING）。
+    「PASS 但一条数值都没断言」与「没检查」等价，而报告抬头把它计入 PASS 数，
+    于是 ``PASS=184`` 里有 7 条是空断言 —— 必须 fail-closed。
     """
+    declared = entry.get("declared")
+    if not isinstance(declared, dict) or not declared:
+        return False, {"__declared__": "declared 为空：该条目未声明任何可复算值"}
     tol = entry.get("tolerance", {})
     floor_mode = entry.get("evidence_kind") == "test_count"
     ok, deltas = True, {}
-    for key, dec in entry.get("declared", {}).items():
+    for key, dec in declared.items():
         if key not in computed:
             ok = False
             deltas[key] = "MISSING"
@@ -939,6 +1036,7 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         f"- 注册表：`{report['registry_ref']}`",
         f"- 数据源：`{report['data_root']}`（镜像：`{report['mirror_root']}`，commit `{report['commit']}`）",
         f"- 汇总：total={s['total']} PASS={s['pass']} FAIL={s['fail']} PENDING={s['pending']} INVALID={s['invalid']}"
+        + (f" UNVERIFIED={s['unverified']}" if s.get("unverified") else "")
         + (f" DATA_MISSING={s['data_missing']}" if s.get("data_missing") else ""),
         (f"- 双源一致：{'是' if report.get('mirror_consistent') else '**否**'}"
          + (f"（比较 {report['mirror']['files_compared']} 个文件，{len(report['mirror']['diffs'])} 处差异）"
@@ -1083,7 +1181,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     only = {x.strip() for x in args.only.split(",") if x.strip()}
     counts = {"total": 0, "pass": 0, "fail": 0, "pending": 0, "invalid": 0, "planned": 0,
-              "data_missing": 0}
+              "data_missing": 0, "unverified": 0}
     entries_out: List[Dict[str, Any]] = []
     has_fail = False
 
@@ -1096,8 +1194,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.code_check_only and entry.get("analysis") != "code_check":
             continue
         counts["total"] += 1
+        undetermined = ""
         declared_status = entry.get("status", "PENDING")
         analysis = entry.get("analysis", "none")
+        has_declared = bool(entry.get("declared"))
 
         computed: Dict[str, Any] = {}
         files = 0
@@ -1133,6 +1233,21 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if declared_status in ("INVALID", "PLANNED"):
             status = declared_status
+        elif not has_declared:
+            # 2026-11-06 审计缺陷：`declared` 为空 ⇒ 无可复算值 ⇒ `compare()` 旧实现
+            # 零比对返回 True ⇒ 判 PASS。PASS 数里因此混进 7 条空断言
+            # （NR-120/121/122/180/181/182/183）；无任何数据时 NR-180~183 也判 PASS，
+            # 而其余 187 条全是 DATA_MISSING —— 这是最直白的证据。
+            # 处置：登记为 PENDING 的（待补登）保持 PENDING（不阻断）；
+            # 声称 PASS 的 → UNVERIFIED（阻断，退出码 1），因为"我核过了"是假话。
+            if declared_status == "PENDING":
+                status = "PENDING"
+                undetermined = "declared 待补登：该条目尚无任何可复算值"
+            else:
+                status = "UNVERIFIED"
+                undetermined = (
+                    "declared 为空：该条目未声明任何可复算值"
+                    f"（登记 status={declared_status}），PASS 无断言支撑")
         elif missing:
             status = "DATA_MISSING"
         elif deferred:
@@ -1150,6 +1265,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if status == "FAIL":
             has_fail = True
             counts["fail"] += 1
+        elif status == "UNVERIFIED":
+            has_fail = True
+            counts["unverified"] += 1
         elif status == "PENDING":
             counts["pending"] += 1
         elif status == "PLANNED":
@@ -1161,7 +1279,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             counts["pass"] += 1
 
-        reason = missing or deferred or ("; ".join(errors) if errors else "")
+        reason = missing or deferred or undetermined or ("; ".join(errors) if errors else "")
         entries_out.append({
             "id": entry["id"],
             "status": status,
@@ -1206,12 +1324,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     report_json = _resolve(args.report, ac.REPORTS_DIR / "number_verification_report.json")
     _emit_report(report, report_json, overwrite=args.overwrite)
 
-    logger.info("汇总：total=%d PASS=%d FAIL=%d PENDING=%d INVALID=%d DATA_MISSING=%d",
-                counts["total"], counts["pass"], counts["fail"], counts["pending"],
-                counts["invalid"], counts["data_missing"])
+    logger.info("汇总：total=%d PASS=%d FAIL=%d UNVERIFIED=%d PENDING=%d INVALID=%d DATA_MISSING=%d",
+                counts["total"], counts["pass"], counts["fail"], counts["unverified"],
+                counts["pending"], counts["invalid"], counts["data_missing"])
 
     if has_fail:
-        logger.error("存在 FAIL —— 阻断（退出码 1）")
+        if counts["fail"]:
+            logger.error("存在 FAIL —— 阻断（退出码 1）")
+        if counts["unverified"]:
+            logger.error(
+                "存在 UNVERIFIED —— %d 条登记声称已核验但 declared 为空（零断言），"
+                "不得计入 PASS —— 阻断（退出码 1）", counts["unverified"])
         return ac.EXIT_FAIL
     if counts["data_missing"]:
         logger.warning("存在数据源缺失条目 —— 未复算，非数字错误（退出码 3）")

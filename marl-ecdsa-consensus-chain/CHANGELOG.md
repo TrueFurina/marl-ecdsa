@@ -15,6 +15,139 @@
 
 ---
 
+## 2026-11-06 — 数字门禁的「零断言 PASS」：7 条已核验条目其实一条数值都没比对
+
+> 本节只记代码与基础设施变更；文中出现的 0.9882 / 0.9879 / 0.995 / 0.825 / 0.175 等
+> 数值均来自登记表 **NR-180~183 原有 claim**，属已在册口径，不是本轮新增实验结论。
+
+`scripts/verify_numbers.py` 是「所有数字必须实测」的落地件：按 glob+field 从
+`results/` 复算，再与 `number_registry.json` 的 `declared` 逐值比对。但它的比对器
+`compare()` 是这样写的：
+
+```python
+ok, deltas = True, {}
+for key, dec in entry.get("declared", {}).items():   # declared 为空 → 一次都不进
+    ...
+```
+
+`declared` 为空时循环体不执行，`ok` 保持初值 `True` ⇒ **判 PASS**，`deltas={}`，
+退出码 0。「PASS」在这一刻等价于「没检查」，而报告抬头把它计入 `PASS=184`。
+
+### 一、两次独立实测（不是推断）
+
+**1）完全没有数据时，这 4 条照样 PASS。** 在只含 `results/legacy_json/` 的快照里
+跑全量 191 条：
+
+```
+汇总：total=191 PASS=5 FAIL=1 PENDING=1 INVALID=7 DATA_MISSING=177
+```
+
+5 条 PASS 里除 NR-18（代码常量核对，本就不依赖数据）之外，**NR-180/181/182/183
+是 `analysis=none` + `sources=[]` + `declared={}`** —— 数据缺失 177 条、FAIL 1 条、
+PENDING 1 条、INVALID 7 条，只有这 4 条「不需要数据就能过」。
+
+**2）数据与主张完全相反，照样 PASS。** 把 NR-121（主张「三类非法洪泛 20,000/20,000
+= 100% 拦截、吞吐 344,279 pkg/s」）的 source 指向一份
+`{"throughput_pkg_s": 1, "blocked": 0, "total_trials": 999999}`：
+
+```
+NR-121 PASS   computed={'throughput_pkg_s': 1, 'blocked': 0, ...}  deltas={}
+汇总：total=1 PASS=1 FAIL=0 ...   通过（退出码 0）
+```
+
+`deltas={}` 就是证据：**零次比对**。受影响的 7 条是 NR-120/121/122（`benchmark`
++ 空 `declared`）与 NR-180~183（`analysis=none` + 空 `declared`）。
+
+### 二、修法：空 `declared` 一律 fail-closed，并新增 UNVERIFIED 状态
+
+- `compare()` 对空/缺失的 `declared` 直接返回失败并给出 `__declared__` 原因键 ——
+  不再依赖「循环体碰巧不进」这种隐式行为；
+- `main()` 新增状态 **UNVERIFIED**：登记 `status=PASS` 但无可复算值 → UNVERIFIED，
+  **阻断（退出码 1）且不计入 PASS**；登记 `status=PENDING`（待补登）保持 PENDING，
+  不阻断常规运行，`--strict` 下阻断；
+- 报告抬头与汇总行输出 `UNVERIFIED=N`，`release_data_bundle.py` 生成的 README
+  退出码说明同步（`1` = 数字不符 **或** 零断言条目）。
+
+### 三、把 NR-180~183 接上真数据（从「零断言」变成「逐值比对」）
+
+`benchmark` 类此前只能取**顶层**数值字段，而这 4 条的数值藏在 `ml_defender.*` 与
+`runs.*[].coop_rate` 里，取不到 → 于是以空 `declared` 登记。新增 `_json_path_value()`
+支持点路径取数：
+
+```
+ml_defender.train_accuracy            # 嵌套字段
+runs.L1_omniscient[].coop_rate        # 列表逐项取字段，默认取均值
+runs.L1_omniscient[].coop_rate#min    # 指定聚合 mean/min/max/n/sum
+runs.L2_adaptive[seed=11].coop_rate   # 按字段等值定位唯一项
+```
+
+路径不存在、选择器命中数 ≠ 1、聚合对象为空都记 error（→ FAIL），**不静默当 0**。
+随后 4 条改成 `analysis=benchmark` + 显式 `paths`，`declared` 填**从源文件实测的
+值**（`scripts/security/ml_blindspot_result.json` / `adaptive_attacker_result.json`）：
+
+| 条目 | 复算键 | declared |
+|---|---|---|
+| NR-180 | `ml_defender.train_accuracy` / `train_samples` / `heldout_samples` | 0.9882 / 9600 / 2400 |
+| NR-181 | `ml_defender.heldout_accuracy` / `benign_diag.off_manifold_samples` / `total_samples` | 0.9879 / 0 / 12000 |
+| NR-182 | `runs.L1_omniscient[].coop_rate` 的 mean/min/max/n | 0.995 / 0.995 / 0.995 / 5 |
+| NR-183 | `runs.L2_adaptive[seed=11].coop_rate` | 0.825 |
+
+漂移实测：把 seed 11 的 `coop_rate` 改成 0.5 → `FAIL`，`deltas={'L2_seed11_coop':
+0.325}`（迁移前同一条是 PASS 且 `deltas={}`）。
+
+### 四、NR-120/121/122 降级为 PENDING（不猜数）
+
+E22/E23/E24 的结果文件（`results/security_replay_20261014/` 等）不在版本库内，本机
+测不出 `declared`。**不猜、也不把 claim 里的文字数字抄成 `declared`**（那是自证），
+改登记为 PENDING 并在 `notes` 写明审计结论：`declared` 补齐前不得标回 PASS。
+`--strict` 下这 3 条阻断，常规运行不阻断（与「未核实 ≠ 错误」的既有语义一致）。
+
+### 五、验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_verify_numbers_unverified_contract.py` **19 项**（比对器 fail-closed / UNVERIFIED 状态机 / 嵌套取数语法 / 漂移抓取 / 源缺失降级 / 登记表不变式 / 迁移幂等） |
+| 变异目标 | 28 → **33**，新增 5 条逐条承重（注入后 2/1/1/1/1 项变红，`rc=1`，原文逐字节恢复） |
+| 迁移后全量 | `PASS=5 FAIL=1 PENDING=4 INVALID=7 DATA_MISSING=174`（FAIL 为 NR-20 缺工作区基准文件，迁移前一致） |
+| `--code-check-only`（CI 原子） | 与基线一致（2 条：NR-15 PASS / NR-18 DATA_MISSING，退出码 3） |
+| 登记表改动 | 仅 7 条条目 + `_mirror_sha256`（`8e9b61c8…` → `00db05e0…`，镜像与自身内容指纹保持自洽）；191 条 id 集合未变 |
+
+**探针的一处既有局限（本轮实测，非本次改动引入）**：这 5 条目标是**逐条单跑**
+验证的（`--id <目标>`，基线绿 → 注入后 rc=1 → 原文逐字节恢复；另有一批 5 条连跑
+5/5 承重）。**单进程一次跑完全部目标时，第 25 个目标起会报「基线（未注入）退出码
+1」**，但该次子进程的 junit 明确写着 `failures=0 errors=0`、进度行全为点，工作树
+也是干净的 —— 即 pytest 判了「全过」却返回 1，属探针/环境层面的假红。在**未改动
+的 main 快照**（`_base4`，28 个目标）上复跑同样得到 **24/28**、同样从第 25 个目标
+开始假红，可确认与本次改动无关。故本轮不宣称「33/33 全量通过」，只宣称逐条承重
+5/5；这条假红已作为待查缺陷记录，未在本 PR 内修复（避免把未定位原因的问题一并
+改坏）。
+
+### 六、需要人工执行的一步（否则镜像与权威源不一致）
+
+`number_registry.json` 是只读镜像，权威在 `<工作区>/deliverables/number_registry.json`。
+本次迁移必须**两边都跑**，否则 `check_registry_mirror.py --check` 会（正确地）报不一致：
+
+```bash
+python -X utf8 scripts/wire_unverified_entries_20261106.py --apply \
+    --registry ../deliverables/number_registry.json
+python -X utf8 scripts/check_registry_mirror.py --check      # 应为 PASS
+```
+
+`tests/test_verify_numbers_unverified_contract.py::test_registry_has_no_pass_entry_without_declared`
+是这条迁移的持久守卫：若有人用**旧**权威源执行 `check_registry_mirror.py --sync`，
+镜像会被整份覆盖回旧内容，该测试立刻变红。
+
+### 诚实边界
+
+本轮修的是「PASS 的门槛」与「4 条条目的可复算性」，**没有**新增任何实验数据：
+NR-120/121/122 的数值仍未复算（故降级为 PENDING，不是「已修复」）；
+`paths` 语法只覆盖 `mean/min/max/n/sum`，中位数/分位数未支持；
+`_json_path_value` 不支持跨列表的嵌套（`a[].b[].c`），遇到会明确报错而非猜。
+`verify_numbers.py` 也仍然只管「声明值算得对不对」，不管「实验跑没跑完」
+（后者在 `check_evidence_closure.py`）。
+
+---
+
 ## 2026-11-05（续三）— κ 三元组的「单一真源」只喂了统计回显，算分处仍硬编码
 
 > 本节只记代码与基础设施变更，**不含任何实验口径数字**（口径见
