@@ -215,6 +215,10 @@ if HAS_TORCH:
                 self.algorithm = 'iql' if use_iql else 'qmix'
 
             self.use_iql = (self.algorithm == 'iql')
+            # 修复 Q2：记录 train_step 实际生效的算法。声明为 qmix/vdn 但因缺全局
+            # 状态而降级到 IQL 时，此处会被改写为 'iql_fallback'，使训练日志/实验
+            # 元数据能区分"真 QMIX"与"降级 IQL"，避免结果被误贴 algorithm 标签。
+            self.last_effective_algorithm = self.algorithm
 
             # 网络
             self.agents = nn.ModuleList([
@@ -316,6 +320,7 @@ if HAS_TORCH:
             """根据 algorithm 分发到对应的训练逻辑"""
             if len(self.replay_buffer) < batch_size:
                 return None
+            self.last_effective_algorithm = self.algorithm  # 默认生效=声明算法
             if self.algorithm == 'vdn':
                 return self._train_step_vdn(batch_size)
             elif self.algorithm == 'qmix':
@@ -495,7 +500,8 @@ if HAS_TORCH:
 
             if not batch:
                 # 过滤后无有效 transition：无全局状态可训，回退 IQL（语义同 Q2）
-                logger.warning("[QMIX] 无有效全局状态 transition，回退到 IQL 训练")
+                logger.warning("[QMIX] 无有效全局状态 transition，降级到 IQL 训练")
+                self.last_effective_algorithm = 'iql_fallback'  # Q2：如实上报降级
                 return self._train_step_iql(batch_size)
 
 
@@ -536,7 +542,8 @@ if HAS_TORCH:
 
             if not states or not next_states:
                 # 无全局状态时回退到 IQL 逻辑
-                logger.warning("[QMIX] 缺少全局状态，回退到 IQL 训练")
+                logger.warning("[QMIX] 缺少全局状态，降级到 IQL 训练")
+                self.last_effective_algorithm = 'iql_fallback'  # Q2：如实上报降级
                 return self._train_step_iql(batch_size)
 
             state_batch = torch.stack(states)           # [batch, state_dim]
