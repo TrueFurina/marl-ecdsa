@@ -174,10 +174,12 @@ class GossipDiscovery:
                 join_start = getattr(self, '_join_start', time.time())
                 self.discovery_latency_ms = (time.time() - join_start) * 1000
 
+                # N2：模拟层不测真实网络延迟，discovery_latency_ms 在纯模拟路径下恒≈0，
+                # 属虚假测量，不得对外输出误导。移除 join 日志里的 ms 字段。
                 logger.info(
                     f"[Gossip] {self.node_id}: Joined via {seed_id}, "
                     f"discovered {len(self.passive_view)} peers "
-                    f"({self.discovery_latency_ms:.1f}ms)"
+                    f"(模拟层，无真实延迟测量)"
                 )
                 break
 
@@ -378,7 +380,6 @@ class GossipDiscovery:
             "shuffle_count": self.shuffle_count,
             "join_count": self.join_count,
             "leave_count": self.leave_count,
-            "discovery_latency_ms": round(self.discovery_latency_ms, 2),
             "k_view": self.k_view,
             "max_peers": self.max_peers,
             "active_peer_ids": list(self.active_view.keys()),
@@ -406,7 +407,7 @@ async def demo_gossip_network():
         await node.start(seed_peers=[("127.0.0.1", 7001)])
         nodes.append(node)
         print(f"Node {i} joined: {node.get_stats()['active_peers']} active peers "
-              f"({node.get_stats()['discovery_latency_ms']}ms)")
+              f"(模拟层)")
 
     # Let gossip propagate
     print("\nRunning 3 shuffle cycles...")

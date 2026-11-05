@@ -278,9 +278,11 @@ class SecurityGuard:
         logger.warning(f"[SecurityGuard] 安全告警: {attack_type} | agent={agent_id} | {detail}")
 
         if self._fail_counts[agent_id] >= self.MAX_FAIL_COUNT:
+            # N3：达到阈值仅触发高危告警，本模块不执行任何实际封禁（无准入短路）。
+            # 不得在论文/文档中声称"达到阈值即封禁恶意节点"——当前语义是"告警"而非"封禁"。
             logger.error(
                 f"[SecurityGuard] ⚠️ 高危告警: agent={agent_id} 累计失败 "
-                f"{self._fail_counts[agent_id]} 次，建议封禁！"
+                f"{self._fail_counts[agent_id]} 次（仅告警，未自动封禁）"
             )
 
     # -------------------------------------------------------------------------
