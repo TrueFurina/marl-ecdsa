@@ -478,6 +478,51 @@
         "expect": "all_red"
       },
       "why": "『没有 pytest 汇总行』必须 fail-closed：一旦允许在无汇总行时继续判定，缺失的证据就又被当成了证据（audited 2026-11-06）"
+    },
+    {
+      "id": "caliber-strict-requires-truth",
+      "file": "scripts/pre-commit/caliber_check.py",
+      "locator": "        if args.strict:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_caliber_check_truth_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "口径门禁的『无真值 ≠ 无漂移』：真值缺失/损坏/残缺时若继续往下走，退出码会回到 0，末行仍是『✅ 通过』—— 一个判定不了的门禁不得自报通过（audited 2026-11-06）"
+    },
+    {
+      "id": "caliber-office-text-extracted",
+      "file": "scripts/pre-commit/caliber_check.py",
+      "locator": "    if suffix in OFFICE_EXT:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_caliber_check_truth_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "DOC_EXT 宣称覆盖 .docx/.pptx 就必须真抽出正文：退回『按 UTF-8 读二进制』时，同一份 docx 里的 n=999 一个数字都匹配不到（旧实现实测判 ✅）（audited 2026-11-06）"
+    },
+    {
+      "id": "caliber-unparsed-format-fail-closed",
+      "file": "scripts/pre-commit/caliber_check.py",
+      "locator": "    if unparsed and args.strict:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_caliber_check_truth_source.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "读不出文字的文件不得计入『已通过』：PDF 无解析器、docx 坏包、GBK 文本都是『没检查过』，不是『检查没问题』（audited 2026-11-06）"
     }
   ]
 }
