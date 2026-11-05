@@ -124,13 +124,19 @@ jobs:
       #   structure_guard --all ——根级平铺违规（存量 0）。
       - name: Pre-commit gates — repo-wide (fail-closed)
         run: |
-          python scripts/pre-commit/secrets_scan.py $(git -c core.quotePath=false ls-files)
-          # 自证先行：先证明诚实扫描器不是空转，再拿它判仓库。
-          # --strict 让「一个文件都没扫到」也失败 —— cwd 跑偏时正是这种假绿形态。
+          # 自证先行：先证明门禁不是空转，再拿它们判仓库。
+          python scripts/pre-commit/secrets_scan.py --self-test
+          python scripts/pre-commit/structure_guard.py --self-test
           python scripts/pre-commit/honesty_scan.py --self-test
+          # secrets_scan 自己调 `git ls-files -z` 取清单：此前写的是
+          #   secrets_scan.py $(git ls-files)
+          # shell 按空格切词，文件名含空格就变成两个不存在的路径，两个都被静默跳过。
+          # --strict 让「一个文件都没扫到」也失败 —— cwd 跑偏时正是这种假绿形态。
+          python scripts/pre-commit/secrets_scan.py --tracked --strict
           python scripts/pre-commit/honesty_scan.py --strict
           python scripts/pre-commit/caliber_check.py --strict
-          python scripts/pre-commit/structure_guard.py --all
+          # structure_guard 的退出码 2 = git 不可用 / 不在仓库里（旧版打印警告后 return 0）
+          python scripts/pre-commit/structure_guard.py --all --strict
 
       - name: Citation gate — synthetic references
         run: |

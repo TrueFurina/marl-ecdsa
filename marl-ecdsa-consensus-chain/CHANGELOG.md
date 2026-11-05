@@ -15,6 +15,66 @@
 
 ---
 
+## 2026-11-06 — 密钥扫描与结构守卫的六处「查了等于没查」：哈希字段整行豁免 / `.github` 被当 `.git` 跳过 / git 失败 return 0 / `git mv` 到根级看不见
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+前几节修的都是「门禁读不懂 ⇒ 判通过」。这一节是 pre-commit 的**第 1 步与第 4 步**：
+它们不是读不懂，是**压根没读**，而且每一条都能在本仓实测复现。
+
+| # | 门禁 | 形态 | 旧行为（实测） | 应有 |
+|---|---|---|---|---|
+| 1 | 密钥扫描 | 同一行出现任意哈希字段名 | `if HASH_FIELD_RE.search(line): continue` 是**整行**豁免。`{"merkle_root": "aa11", "deploy_token": "<40+ 位真 token>"}` 判 ✅ 通过 | 只豁免「该字段自己的值」 |
+| 2 | 密钥扫描 | UTF-16 文档 | `read_text(errors="ignore")` 把 UTF-16 整段丢成空串（记事本「Unicode」另存即此编码） | BOM 嗅探 + 多编码解码 |
+| 3 | 密钥扫描 | 路径含 `.git` / `build` / `dist` **子串** | `.github/workflows/ci.yml`、`.gitignore`、`scripts/build_*.py`、`static/v9-distributed.*` 等 **8 个已跟踪文件从未被扫**；把那 8 个路径**显式当参数**传进去，仍打印「✅ 通过」 | 只按**路径段**精确跳过 |
+| 4 | 密钥扫描 | 不存在 / 是目录 / 超过 1 MB | 三者都 `continue`，一个字都不打印；1.1 MB 文件里的 token 未检出 | 分别是「没被检查」「没被检查」「截断扫描」，都进汇总 |
+| 5 | 密钥扫描 | `$(git ls-files)` 空 / 文件名含空格 | 空清单打印「✅ 通过（无暂存文件）」；`报告 记录.md` 被 shell 按空格切成两个不存在的路径，两个都被静默跳过（同一文件加引号传就检出） | 脚本自己调 `git -z`；`--strict` 下零文件判失败 |
+| 6 | 结构守卫 | git 不可用 / 不在仓库里 | 打印「⚠️ 自身异常，跳过检查」后 `return 0`（注释自称 "fail-open for self"） | 退出码 2，并带出 git 的真实错误行 |
+| 7 | 结构守卫 | `git mv docs/x.md ./x.md` | 只取 `--diff-filter=A`，重命名是 `R100` ⇒ 文件列表为空 ⇒ 放行。而根级平铺最常由搬运既有文件产生 | 取 `ACMR` |
+| 8 | 结构守卫 | 零个文件 | 打印 ✅ 且不打计数，与「检查了全部」无法区分 | 打印检查范围与计数；`--strict` 下判失败 |
+
+### 实测证据（临时目录现造，不依赖仓库状态）
+
+1. 单行 JSON 与前端配置行各放一个 token：带 `merkle_root` / `block_hash` 的行判 ✅；
+   去掉哈希字段后同一行立刻命中。`block_hash = '<40 位 hex>'` 这种真哈希仍豁免。
+2. 同一句密钥存成 UTF-16：旧版 ✅；新版命中 2 处。UTF-8 BOM / GBK 同样命中。
+3. 把 token 追加进 `.github/workflows/ci.yml`：全仓扫描 ✅；**指名扫描该文件也 ✅**。
+   新版全仓清单里这 8 个文件都是 `text` 状态，逐条 0 命中。
+4. 1.1 MB 文件：旧版静默跳过；新版扫到其中 2 处。
+5. 不存在的路径 / 传目录：旧版 ✅ `rc=0`；新版 `❌ 没被检查 —— 路径不存在（文件名可能在 shell 展开时被空格切开）`、`rc=1`。
+6. 真·非 git 目录跑 `structure_guard.py --all`：旧版 `⚠️ 自身异常，跳过检查` + `rc=0`；
+   新版 `❌ 环境错误：git 退出码 128：fatal: not a git repository`，`rc=2`。
+7. `git mv data/tmp_report.md ./x_report.md` 后跑结构守卫：旧版 ✅ `rc=0`；新版
+   `❌ 根级平铺文件 'x_report.md' 不在白名单`、`rc=1`。
+
+### 改法
+
+- **密钥扫描**：`scan_document()` 返回**状态**而不是空列表（`text / binary / truncated /
+  unreadable / ignored`），`hash_field_exempts()` 要求「字段名 + 分隔符 + 可选引号」
+  **紧邻**该 token 才豁免；`decode_bytes()` 嗅探 BOM 后走 utf-8 → gbk；`is_skipped_path()`
+  按路径段判定，删掉 `main()` 里那层子串过滤（现在只有一处跳过规则）；新增
+  `--staged` / `--tracked`（脚本自己调 `git -z`，路径不过 shell）、`--stdin0`、
+  `--strict`、`--self-test`；收尾固定打印扫描计数。
+- **结构守卫**：`_git()` 返回 `(路径, 错误)` 而不是吞异常；`DIFF_FILTER = "ACMR"`；
+  输出按 `-z` 切；`normalize()` 去掉 `./` 前缀；`decide_exit()` 把「环境错误」判为 2、
+  「零文件 + `--strict`」判为 2；新增 `--strict` / `--self-test`，收尾打印检查范围与计数。
+- **调用点**：`scripts/pre-commit/pre-commit` 第 1 步改 `--staged`、第 4 步 `|| exit $?`、
+  第 7 步改 `--staged`（同样去掉 `$(git diff --cached --name-only)` 的 shell 切词）；
+  `check_submission_anonymity.iter_staged()` 改 `-z`；两份 `ci.yml` 都改为
+  自证先行 + `--tracked --strict` / `--all --strict`。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_secrets_scan_blind_spots.py` **30 项**、`tests/test_structure_guard_fail_open.py` **19 项**；原 `test_secrets_scan.py` 8 项、`test_gate_scripts.py` 13 项、`test_check_submission_anonymity.py` 43 项不回归 |
+| 自证 | `secrets_scan --self-test` **30/30**；`structure_guard --self-test` **16/16** |
+| 变异目标 | 54 → **63**；新增 9 条逐条承重（分别 3 / 2 / 4 / 2 / 2 / 1 / 4 / 2 / 3 个用例变红） |
+| 本仓实跑 | `secrets_scan --tracked --strict`：614 个文件（600 文本 + 14 二进制）**0 命中**；`structure_guard --all --strict`：614 个文件**0 违规** |
+| CI 实测 | 3.11 / 3.12 均 **2623 passed / 7 skipped**（上轮 2574，**差 49 = 新增用例数**）；回退档 **2581 passed / 21 skipped / 1 deselected**；两个 job 的日志里都打印「自证通过 30/30」与「自证通过 16/16」 |
+| 本机全量 | 2605 项 / **2582 passed** / 20 skipped / 3 failed：`test_deps_importable`（本机 python 3.13 未装 torch）、`test_next_nr` 两条（文件锁并发瞬时，单独复跑 8/8 通过）—— 均与本次改动无关 |
+| 其余门禁 | honesty / caliber `--strict` / closure `--strict` / registry mirror / anonymity `--tracked` 全过 |
+
 ## 2026-11-06 — 诚实扫描器的四种「扫了等于没扫」：空格文件名被切碎 / UTF-16 文档读成空白 / CI 文件自己从不被扫 / 零扫描报 ✅
 
 > 本节只记工具与测试变更，不含任何实验数字。

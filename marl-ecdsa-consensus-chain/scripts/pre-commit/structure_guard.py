@@ -1,16 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """目录结构守卫 — pre-commit 门禁
-用法：python scripts/pre-commit/structure_guard.py [--all]
-退出码：0=通过，1=命中违规（fail-closed）
+用法：python scripts/pre-commit/structure_guard.py [--all] [--strict] [--self-test]
+退出码：0=通过，1=命中违规 / 零文件（--strict），2=环境错误（git 不可用）
 
 规则来源：西湖论剑 CTF-Agent _structure_guard.py（通用化）
-默认只检查本次新增文件（--diff-filter=A），不误伤重命名/既有文件。
+
+默认只检查本次**变更**的文件（新增 / 复制 / 修改 / 重命名），不误伤未动的既有文件。
+
+2026-11-06 修的三处「查了等于没查」：
+  1. git 调用失败（不在仓库里 / git 不在 PATH）时打印一句警告就 ``return 0`` ——
+     自带注释写明是「fail-open for self」。可这类失败意味着**一个文件都没检查**，
+     不是「本次改动都合规」。改为退出码 2，并把 git 的真实错误行带出来。
+  2. 只取 ``--diff-filter=A``（新增）：把 ``docs/report.md`` 用 ``git mv`` 挪到根级
+     是 ``R``（重命名），git 认为「没有新增文件」，守卫于是放行 —— 而「根级平铺」
+     恰恰最常由搬运既有文件产生。改为 ``ACMR``（新增/复制/修改/重命名）。
+  3. 输出按行切分：文件名含换行（Linux 下合法）会把一条路径切成两条不存在的路径。
+     改用 ``-z`` 按 NUL 切。
 """
-import re
+import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 # 受管后缀（这些类型的散落文件必须归位）
 MANAGED_EXT = {"md", "txt", "html", "json", "csv", "pdf", "png", "jpg", "jpeg", "xlsx", "yml", "yaml"}
@@ -68,38 +80,58 @@ LEGACY_ROOT_FILES = {
     "V27_全模块系统审查与验收说明.md",
 }
 
-
-def git(*args):
-    """git 调用，关闭 quotePath 以免中文路径被转义导致漏判。"""
-    cmd = ["git", "-c", "core.quotePath=false"] + list(args)
-    return subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8", "ignore")
+#: 视为「变更」的 diff 类型：新增 / 复制 / 修改 / 重命名。
+#: 只取 A 会漏掉 `git mv docs/x.md ./x.md`（R）——而这正是根级平铺最常见的成因。
+DIFF_FILTER = "ACMR"
 
 
-def unquote_path(p: str) -> str:
-    p = p.strip()
-    if p.startswith('"') and p.endswith('"'):
-        p = p[1:-1]
-    if "\\" in p:
-        try:
-            p = p.encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
-        except Exception:
-            pass
+def split_z(raw: bytes) -> List[str]:
+    """解析 ``git ... -z`` 的 NUL 分隔输出。文件名可含空格、制表符甚至换行。"""
+    text = raw.decode("utf-8", "surrogateescape")
+    return [item for item in text.split("\0") if item]
+
+
+def _git(args: List[str], cwd: Optional[str] = None) -> Tuple[List[str], str]:
+    """跑 git 并返回 ``(路径列表, 错误说明)``。错误说明非空 ⇒ 调用方必须判失败。
+
+    此前用 ``subprocess.check_output(..., stderr=DEVNULL)`` 再把异常一口吞掉，
+    stderr 被扔掉后连「not a git repository」都看不到。
+    """
+    cmd = ["git", "-c", "core.quotePath=false"] + args
+    try:
+        proc = subprocess.run(cmd, capture_output=True, cwd=cwd)
+    except OSError as exc:
+        return [], f"无法执行 git：{exc}"
+    if proc.returncode != 0:
+        lines = [ln.strip() for ln in proc.stderr.decode("utf-8", "replace").splitlines()
+                 if ln.strip()]
+        # git 的用法提示会刷几十行，真正的原因在 "fatal:"/"error:" 那行
+        detail = next((ln for ln in lines if ln.startswith(("fatal:", "error:"))),
+                      lines[0] if lines else "无错误输出")
+        return [], f"git 退出码 {proc.returncode}：{detail}"
+    return split_z(proc.stdout), ""
+
+
+def staged_changed_files(cwd: Optional[str] = None) -> Tuple[List[str], str]:
+    """本次暂存的变更文件（新增/复制/修改/重命名），相对仓库根。"""
+    return _git(["diff", "--cached", "--name-only", "-z", f"--diff-filter={DIFF_FILTER}"], cwd=cwd)
+
+
+def all_tracked_files(cwd: Optional[str] = None) -> Tuple[List[str], str]:
+    return _git(["ls-files", "-z"], cwd=cwd)
+
+
+def normalize(path: str) -> str:
+    """统一分隔符并去掉 ``./`` 前缀 —— 否则 ``./stray.md`` 会被当成「在子目录里」。"""
+    p = path.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
     return p
 
 
-def staged_added_files() -> list:
-    out = git("diff", "--cached", "--name-only", "--diff-filter=A")
-    return [unquote_path(f) for f in out.splitlines() if f.strip()]
-
-
-def all_tracked_files() -> list:
-    out = git("ls-files")
-    return [unquote_path(f) for f in out.splitlines() if f.strip()]
-
-
-def violations_for(path: str) -> str | None:
+def violations_for(path: str) -> Optional[str]:
     """返回违规描述，None=合规。"""
-    p = path.replace("\\", "/")
+    p = normalize(path)
     if "/" not in p:
         # 根级平铺文件
         ext = p.rsplit(".", 1)[-1].lower() if "." in p else ""
@@ -108,17 +140,117 @@ def violations_for(path: str) -> str | None:
     return None
 
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--all", action="store_true", help="检查全部已跟踪文件（默认只查新增）")
-    args = parser.parse_args()
+def decide_exit(files: List[str], error: str, strict: bool) -> Tuple[int, str]:
+    """唯一的判定入口（纯函数，便于自证与变异测试）。"""
+    if error:
+        return 2, f"环境错误：{error} —— 一个文件都没检查，不等于结构合规"
+    if not files:
+        if strict:
+            return 2, "零个文件被检查 —— 什么都没查不等于通过（--strict）"
+        return 0, "零个变更文件（未启用 --strict，不判失败）"
+    return 0, ""
 
-    try:
-        files = all_tracked_files() if args.all else staged_added_files()
-    except Exception as exc:
-        # 自身 bug 不阻断提交（fail-open for self），但打印告警
-        print(f"⚠️ structure_guard 自身异常，跳过检查: {exc}")
+
+# --------------------------------------------------------------------------- #
+# 自证：临时目录现造样本，证明三处失明都被堵上
+# --------------------------------------------------------------------------- #
+def run_self_test(verbose: bool = True) -> int:
+    import tempfile
+
+    failures: List[str] = []
+    passed = 0
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        nonlocal passed
+        if ok:
+            passed += 1
+            if verbose:
+                print(f"[自证] {name:<28} → ok {detail}")
+        else:
+            failures.append(f"{name}: {detail or '断言失败'}")
+            print(f"[自证] {name:<28} → FAIL {detail}")
+
+    # ① 根级判定
+    check("root_flat_violation", violations_for("stray_notes.md") is not None)
+    check("dot_slash_still_flat", violations_for("./stray_notes.md") is not None)
+    check("allowlist_pass", violations_for("README.md") is None)
+    check("legacy_pass", violations_for("V19_验收结果与运行说明.md") is None)
+    check("subdir_pass", violations_for("docs/notes.md") is None)
+    check("unmanaged_ext_pass", violations_for("run.py") is None)
+
+    # ② NUL 切分：含换行的文件名不得被切成两条
+    got = split_z("a\nb.md\0c.md\0".encode("utf-8"))
+    check("z_split_keeps_newline", got == ["a\nb.md", "c.md"], str(got))
+
+    # ③ 真跑 git：重命名到根级必须被看见
+    with tempfile.TemporaryDirectory(prefix="structure_guard_selftest_") as tmp:
+        root = Path(tmp)
+        ok_env = True
+        for c in (["git", "init", "-q"],
+                  ["git", "config", "user.email", "selftest@example.invalid"],
+                  ["git", "config", "user.name", "selftest"]):
+            proc = subprocess.run(c, cwd=str(root), capture_output=True)
+            if proc.returncode != 0:
+                ok_env = False
+                break
+        check("git_available", ok_env, "" if ok_env else "git 不可用（本机/CI 缺 git）")
+
+        if ok_env:
+            (root / "data").mkdir()
+            (root / "data" / "report.md").write_text("# 报告\n", encoding="utf-8")
+            for c in (["git", "add", "-A"], ["git", "commit", "-qm", "add data/report.md"]):
+                subprocess.run(c, cwd=str(root), capture_output=True)
+            mv = subprocess.run(["git", "mv", "data/report.md", "report.md"],
+                                cwd=str(root), capture_output=True)
+            check("git_mv_ok", mv.returncode == 0,
+                  mv.stderr.decode("utf-8", "replace").strip()[:60])
+
+            staged, err = staged_changed_files(cwd=str(root))
+            check("rename_into_root_seen",
+                  not err and staged == ["report.md"], str(staged))
+            check("rename_into_root_is_violation",
+                  any(violations_for(f) for f in staged), str(staged))
+
+            # 「只取 A」的旧规则看到的文件数（回归对照：0 个）
+            only_a, _ = _git(["diff", "--cached", "--name-only", "-z", "--diff-filter=A"],
+                             cwd=str(root))
+            check("a_only_would_miss", only_a == [], str(only_a))
+
+    # ④ 环境错误必须判失败（退出码 2，不再是 0）
+    check("git_error_blocks", decide_exit([], "fatal: not a git repository", False)[0] == 2)
+    check("strict_zero_blocks", decide_exit([], "", True)[0] == 2)
+    check("zero_nonstrict_passes", decide_exit([], "", False)[0] == 0)
+    check("clean_passes", decide_exit(["docs/a.md"], "", True)[0] == 0)
+
+    total = passed + len(failures)
+    if failures:
+        for item in failures:
+            print(f"❌ [自证失败] {item}")
+        print(f"❌ 自证失败 {len(failures)}/{total} 项")
+        return 1
+    print(f"✅ 自证通过 {passed}/{total}")
+    return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="目录结构守卫（fail-closed）")
+    parser.add_argument("--all", action="store_true", help="检查全部已跟踪文件（默认只查本次变更）")
+    parser.add_argument("--strict", action="store_true", help="零个文件被检查时判失败")
+    parser.add_argument("--self-test", action="store_true", help="内置夹具自证")
+    args = parser.parse_args(argv)
+
+    if args.self_test:
+        return run_self_test()
+
+    files, error = all_tracked_files() if args.all else staged_changed_files()
+    files = [normalize(f) for f in files]
+
+    code, msg = decide_exit(files, error, args.strict)
+    if code:
+        print(f"❌ 结构守卫：{msg}")
+        return code
+    if not files:
+        print(f"✅ 结构守卫通过（{msg}）")
         return 0
 
     bad = []
@@ -127,20 +259,22 @@ def main():
         if v:
             bad.append(v)
 
+    legacy = sorted(f for f in files if f in LEGACY_ROOT_FILES)
+    scope = "全部已跟踪文件" if args.all else "本次变更文件"
+
     if bad:
-        print("❌ 目录结构守卫：以下文件违规平铺")
+        print(f"❌ 目录结构守卫：以下文件违规平铺（检查范围：{scope} {len(files)} 个）")
         for v in bad:
             print(f"  {v}")
         return 1
 
     # 存量不静默：每次都报出来，避免"登记完就忘"
-    legacy = sorted(f for f in files if f.replace("\\", "/") in LEGACY_ROOT_FILES)
     if legacy:
         print(f"⚠️ 根级存量文档 {len(legacy)} 个（已冻结豁免，待归位 docs/）：")
         for f in legacy:
             print(f"  {f}")
 
-    print("✅ 结构守卫通过")
+    print(f"✅ 结构守卫通过（检查范围：{scope} {len(files)} 个）")
     return 0
 
 
