@@ -598,6 +598,81 @@
         "expect": "all_red"
       },
       "why": "--compare 的 glob 零匹配、或匹配到的文件全无种子/口径时，输出空表却 exit 0，等于把『什么都没比』报成『比较完成』（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-crash-isolation",
+      "file": "scripts/verify_numbers.py",
+      "locator": "            except Exception as exc:  # noqa: BLE001 —— 单条失败隔离，见 _crash_reason",
+      "mutation": "            except LookupError as exc:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_failure_isolation.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "复算只兜 OSError 时，一条 null/半截 JSON/字段改名就让 main() 穿透退出，而报告在循环之后才写 ⇒ 191 条体检表退化成一段 traceback（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-sources-present-globs",
+      "file": "scripts/verify_numbers.py",
+      "locator": "    for src in srcs:\n        if not isinstance(src, dict):\n            continue\n        for pat in _source_patterns(src):",
+      "mutation": "    for src in srcs:\n        if not isinstance(src, dict):\n            continue\n        for pat in [src.get(\"glob\")]:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_failure_isolation.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "只看 src['glob'] 时，用 globs 登记的 135 处条目永远被判「没有数据」：登记缺 role=b 这类缺陷被报成「本数据包不含该结果文件」并以退出码 3 不阻断（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-mirror-zero-not-consistent",
+      "file": "scripts/verify_numbers.py",
+      "locator": "    elif compared == 0:",
+      "mutation": "    elif False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_failure_isolation.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "零比较判「一致」：镜像根不存在 / 字段不可机读时 diffs==0 ⇒ consistent=True，抬头写「双源一致：是（比较 0 个文件）」——与 declared 为空的 fail-open 同源（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-mirror-all-patterns",
+      "file": "scripts/verify_numbers.py",
+      "locator": "            pats = _source_patterns(src)",
+      "mutation": "            pats = [src.get(\"glob\")] if src.get(\"glob\") else []  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_failure_isolation.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--check-mirror 只认单个 glob 时，globs/file/字符串三类 source 要么 KeyError/TypeError 崩掉、要么被静默跳过，多批次并集只比前半截（audited 2026-11-06）"
+    },
+    {
+      "id": "verify-crashed-entry-is-fail",
+      "file": "scripts/verify_numbers.py",
+      "locator": "        elif crashed:",
+      "mutation": "        elif False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_verify_numbers_failure_isolation.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "崩溃条目若不单独判 FAIL，理由会退化成「declared 键 MISSING」——读者把它读成「数字算错了」，而真相是该条根本没算出来（audited 2026-11-06）"
     }
   ]
 }

@@ -15,6 +15,96 @@
 
 ---
 
+## 2026-11-06 — 数字复算器的三处「报告说了假话」：一条坏数据让 191 条失去校验 / 登记缺陷报成缺数据 / `--check-mirror` 从未跑通
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+`scripts/verify_numbers.py` 是「所有数字必须实测」的落地件：读注册表、按
+glob+field 从 `results/` 复算、逐条比对 `declared`。三道自检（`--strict`、
+`doctor.py --full`、`plot` 前置）都依赖它的报告。这一轮查出它自己在三种情况下
+**说了不真实的话**，或干脆不说话。
+
+| # | 形态 | 旧行为（实测） | 应有 |
+|---|---|---|---|
+| 1 | 某份结果文件的指标写成 `null`（跑挂了常见形态） | 整跑 `TypeError` 退出，`--report` 指定的文件**根本没生成** | 该条 FAIL，其余 190 条照查 |
+| 2 | 登记缺 `role=b`（登记缺陷，数据都在盘上） | `DATA_MISSING` + 退出码 3（不阻断），理由写「本数据包不含该结果文件」 | FAIL + 退出码 1 |
+| 3 | `--check-mirror`（repo↔backup 双源一致） | 对真实注册表第一条 NR-1 就 `KeyError: 'glob'`；报告一份都没写出 | 三态结论：一致 / 有差异 / **未判定** |
+
+### 根因
+
+1. 主循环只接
+   `except (FileNotFoundError, NotADirectoryError, PermissionError, OSError)`。
+   可复算家族还会抛 `extract_field` 的 `KeyError`、`float(None)` 的 `TypeError`、
+   `load_json` 的 `JSONDecodeError`、`_recompute_attack` 的 `doc["summary"][...]`。
+   异常穿透 `main()`，而报告是在**循环之后**才写的 ⇒ 一条坏数据把「191 条体检表」
+   变成一段 traceback。门禁从「有一条红」退化成「没有门禁」。
+2. `_sources_present()` 只读 `src.get("glob")`。注册表 537 个数据源里 `globs`
+   有 135 处、`file` 有 31 处；用它们登记的条目在复算提前返回（`files == 0`）时
+   **永远被判成「没有数据」**。于是「登记写漏了一个 role」被伪装成「数据缺失」
+   ——正是本模块一直警告的那种误诊，只不过这次伪装的是**登记错误**。
+3. `check_mirror()` 里 `g = src["glob"]` 直接取键：
+   `globs` / `file` 条目 → `KeyError: 'glob'`；NR-19 的字符串 sources
+   （junit `path#attr` 引用）→ `TypeError: string indices must be integers`。
+   它只认单个 `glob`，多批次并集（如 NR-1 的 60 种子跨两批落盘）只比了前半截；
+   而零比较（镜像根不存在）时 `diffs == 0` ⇒ `consistent = True`，抬头写
+   「双源一致：是（比较 0 个文件）」——与 `declared` 为空的 fail-open 同一个病。
+
+### 改法
+
+1. 新增 `SourceReadError`：`_collect_source` 的每次取值失败都包上**文件名 + 字段名**
+   （`<file>: 字段 'x.y' 取不到（KeyError）` / `值不是数值（NoneType: None）`）。
+   主循环拆三段：`FileNotFoundError / NotADirectoryError` → 缺失通道（与旧行为一致，
+   本机 174/191 条属于此列）；其余 `OSError`（权限 / 被占用 / 目录当文件）→ FAIL
+   （「文件在，但读不出」不是缺数据）；`except Exception` → 单条 FAIL。
+   FAIL 理由带异常类型与**根因帧**位置
+   （沿 `__cause__` 链走到最初的出错行，而不是那行 `raise`）。
+   新增 `crashed` 标记 + `CRASHED=` 汇总计数，读者能区分「算错」与「没算出来」。
+   崩溃**优先于**「declared 待补登」判定：复算出不来是硬失败，不许因为登记还没
+   补完就降级成 PENDING（PENDING 不阻断）。
+2. `_sources_present()` 与 `_collect_source()` 用同一套模式解析（`_source_patterns`
+   + `file`）；「有没有数据」和「怎么取数」不再各说各话。
+3. `check_mirror()` 重写：
+   * 逐 source 形态处理（`globs` / `glob` / `file` / 字符串静态引用），字符串引用
+     与不可机读的字段进 `skipped` 并写明原因，**不崩、也不静默消失**；
+   * 先把「两边各是哪份文件」配好再比数值：`file` 源按 data-root 范围判定
+     （`deliverables/` 类派生物不在镜像范围 → `outside_data_root`，既不报差异
+     也不当一致），镜像侧路径用两种基准解析（`mirror/rel` 与 `mirror/rel[1:]`），
+     解析不到就记 `file_not_found`，**绝不回落到 repo 路径**（同一份文件比两次
+     永远「一致」）；
+   * 结论三态：`True` 真比过且全同 / `False` 有差异 / `None` 未判定，人读报告
+     四种状态（未检查 / 未判定 / 是 / 否）一眼可分；
+   * `--only` 同时作用于双源校验（否则「只校验 NR-1」仍会比 191 条）。
+4. 新增 `--self-test`（8 条夹具，全部在临时目录里现造注册表/数据/镜像，不读仓库
+   数据）：崩溃隔离、登记缺陷不误诊、双源三种 source 形态、数值漂移、零比较未判定、
+   错值必 FAIL、真缺数据仍 DATA_MISSING、`--check-mirror` 端到端。
+   **CI 加一步**跑它——`--check-mirror` 崩了这么久没人知道，正因为这套流程
+   从来不在 CI 里。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_verify_numbers_failure_isolation.py` **27 项**；原有 `test_verify_numbers_unverified_contract.py` 19 项不回归 |
+| 自证 | `--self-test` 8/8 |
+| 变异目标 | 43 → **48**；新增 5 条逐条承重（分别 7 / 4 / 5 / 6 / 1 个用例变红） |
+| 缺陷 1 复现 | 修前：`TypeError: float() argument must be a string or a real number, not 'NoneType'`，报告文件不存在；修后：`NR-1 FAIL [复算抛异常：SourceReadError: bc_marl_seed0.json: 字段 'summary.avg_env_reward_last_50' 的值不是数值（NoneType: None）；位置 verify_numbers.py:112 vals.append(float(v)) —— 只判该条 FAIL，其余条目继续校验]`，报告照写，退出码 1 |
+| 缺陷 2 复现 | 修前：`NR-1 DATA_MISSING [数据源缺失：本数据包不含该条目所需的任何结果文件]`、退出码 3；修后：`NR-1 FAIL [sources 缺 role=b（现有 role: ['a']），条目登记不完整，无法复算]`、退出码 1 |
+| 缺陷 3 复现 | 修前：`KeyError: 'glob'`（第一条 NR-1 就崩）；修后：191 条 / 537 个 source 全过一遍，`consistent=未判定`（镜像根不存在）或按差异数判否，报告与 `.md` 俱在 |
+| 仓库自身（总结论不变） | 本机 191 条：修前 `PASS=5 FAIL=1 PENDING=4 INVALID=7 DATA_MISSING=174`，修后**逐项相同**——修的是失败形态的归类，不是把红改绿 |
+| 本机全量 pytest | 2514 收集 / **2492 passed** / 20 skipped / 2 failed：`test_deps_importable`（本机 python 3.13 未装 torch，`ModuleNotFoundError: No module named 'torch'`，与本次改动无关）、`test_next_nr.py` 线程并发瞬时（单独复跑 8/8 通过，未触碰相关代码） |
+| CI 位置 | 新增一步 `Number-verification self-test`（`--self-test`，只吃临时目录数据）；全量复算仍不进 CI——权威登记表在仓库外、`results/` 3.2 GB 不入库，干净 checkout 上只能得到 DATA_MISSING |
+
+边界（不粉饰）：
+
+* 双源校验只比**纯点路径**形态的 `field`；注册表里大量描述性 `field`
+  （如 `"DILITHIUM_AVAILABLE / 签名长度常量"`）仍是人读口径说明，进 `skipped`
+  而不是被猜成路径——所以「一致」只覆盖可机读的那部分，`files_compared` 一并写出。
+* `CRASHED` 是 `FAIL` 的子集（同时计入 FAIL 数），不是新状态：崩溃条目依然阻断。
+* `--check-mirror` 修好之后，本机跑出来的结论是「未判定 / 否」——镜像目录本来
+  就只存在于维护机上；这不是新问题，只是以前它连报告都不给。
+
+---
+
 ## 2026-11-06 — 证据闭合门禁的「读不懂 = 没有」：截断、坏列、非对象 JSON 五处静默放行
 
 > 本节只记工具与测试变更，不含任何实验数字。

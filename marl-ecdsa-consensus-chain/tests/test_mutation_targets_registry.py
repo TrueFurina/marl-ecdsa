@@ -86,6 +86,14 @@ AUDIT_INVARIANT_IDS = {
     "closure-malformed-column-blocks",
     "closure-non-object-json-recorded",
     "closure-compare-requires-samples",
+    # 2026-11-06：数字复算器的「失败不可隔离 / 误诊 / 双源校验从未跑通」——
+    # 一条坏数据让整份报告消失、登记缺陷被报成数据缺失、--check-mirror 第一条
+    # 就 KeyError 且零比较判「一致」。
+    "verify-crash-isolation",
+    "verify-sources-present-globs",
+    "verify-mirror-zero-not-consistent",
+    "verify-mirror-all-patterns",
+    "verify-crashed-entry-is-fail",
 }
 
 

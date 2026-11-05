@@ -176,6 +176,16 @@ jobs:
           python -X utf8 scripts/check_evidence_closure.py --self-test
           python -X utf8 scripts/check_evidence_closure.py --strict
 
+      # 数字复算器（verify_numbers.py）此前**完全不在 CI 里**：权威登记表在仓库
+      # 外、results/ 不入库，全量复算在干净 checkout 上只会全是 DATA_MISSING。
+      # 于是 --check-mirror 自加入起第一次对真实注册表运行就 KeyError（第一条
+      # NR-1），而没有任何人会被告知。
+      # 自证只吃临时目录里现造的注册表/数据/镜像，不依赖仓库数据，因此可以放心
+      # 进 CI：它证明「一条坏数据只判该条 FAIL / 登记缺陷不伪装成缺数据 /
+      # 双源校验三态（含未判定）」这三条契约真的成立；被回退时立刻变红。
+      - name: Number-verification self-test (fail-closed)
+        run: python -X utf8 scripts/verify_numbers.py --self-test
+
   # ---------------------------------------------------------------------------
   # 第三道：无 torch 回退档 —— 全量套件跑在 NumPy 实现上
   # ---------------------------------------------------------------------------
