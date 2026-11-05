@@ -19,11 +19,37 @@ RL-λ 元学习调度器（增量创新 #5，启发自 EquiChain A2C-PBFT）
     lam = scheduler.compute_adaptive_lambda(bridge_stats, episode_reward=...)
 """
 import logging
+import math
 from typing import Dict, List, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def _finite_or_none(value) -> Optional[float]:
+    """有限 float 或 None（NaN/±inf/不可转换 → None）。
+
+    2026-11-05 修复记录（同批修复，两处独立的 NaN 通道）：
+    1. 指标侧：``_composite_metric`` 把 NaN 原样返回，``select_lambda_by_metric``
+       里的 ``np.clip`` **不拦 NaN**（clip 只做 min/max 比较，NaN 比较恒 False
+       会原样穿透），于是 λ 直接返回 NaN。
+    2. 回报侧（更严重）：``episode_reward=NaN`` 经 EMA 写进 ``_bucket_rewards``
+       后，``np.argmax`` 在含 NaN 的数组上会**返回 NaN 的下标**，该桶的估值
+       又永远是 NaN。实测：单次 NaN 回报之后，ε=0 的 20 个回合 100% 选同一个
+       桶、其余桶估值停在 0 —— 元学习器被一次 NaN 永久锁死，探索能力归零。
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _clamp_unit(value: float) -> float:
+    """把比率裁剪到 [0, 1]（文档声明的值域）。"""
+    return 0.0 if value < 0.0 else (1.0 if value > 1.0 else value)
+
 
 # 综合指标中的 Shapley 风格权重（与 cw_pbft / AdaptiveLambdaController 的 κ_c/κ_k/κ_s 口径一致）
 # 共识成功率 / 合作率 / 安全通过率 的加权系数，三者之和 = 1
@@ -108,8 +134,17 @@ class RLLambdaScheduler:
         :return: 采样后的 λ 值
         """
         # 1. 用回报信号更新上一轮选中桶的回报估计（元学习）
-        if episode_reward is not None and self._last_reward is not None and self._total_updates > 0:
-            delta = episode_reward - self._last_reward
+        # 非有限回报（NaN/±inf）不参与元学习：既不做 Δreward 更新、也不更新
+        # 基线。否则一次 NaN 会经 EMA 写进桶估值，并被 np.argmax 永久选中
+        # （实测：此后 ε=0 的 20 回合 100% 锁在同一桶）。
+        reward = None if episode_reward is None else _finite_or_none(episode_reward)
+        if episode_reward is not None and reward is None:
+            logger.warning(
+                "[RLLambda] 回合回报非有限值 %r，本回合跳过元学习更新与基线刷新",
+                episode_reward,
+            )
+        if reward is not None and self._last_reward is not None and self._total_updates > 0:
+            delta = reward - self._last_reward
             self._update_bucket_reward(delta)
 
         # 2. ε-greedy 选择 λ 桶（探索：随机；利用：最高回报估计）
@@ -130,12 +165,14 @@ class RLLambdaScheduler:
             'lambda': self._current_lambda,
             'bucket_index': idx,
             'bucket_reward_estimate': float(self._bucket_rewards[idx]),
-            'episode_reward': episode_reward,
+            # 记净化后的值：NaN 会被 json.dumps 写成非标准 JSON 的 `NaN` 字面量，
+            # Dashboard 侧 JSON.parse 直接抛错（历史记录是要导出的）。
+            'episode_reward': reward,
         })
 
         # 4. 更新上一回合回报基线
-        if episode_reward is not None:
-            self._last_reward = float(episode_reward)
+        if reward is not None:
+            self._last_reward = reward
 
         return self._current_lambda
 
@@ -168,6 +205,14 @@ class RLLambdaScheduler:
         λ 随综合指标（共识/合作/安全）单调上升，与 AdaptiveLambdaController 一致。
         """
         composite = self._composite_metric(bridge_stats)
+        if not math.isfinite(composite):
+            # 兜底：`np.clip` 不拦 NaN（只做 min/max 比较），NaN 会原样穿透成 λ。
+            # 非有限综合值一律保持当前 λ，不输出 NaN。
+            logger.warning(
+                "[RLLambda] 综合指标非有限（%r），保持当前 λ=%r 不变",
+                composite, self._current_lambda,
+            )
+            return self._current_lambda
         # 简单线性映射到 [lambda_min, lambda_max]
         t = np.clip(
             (composite - COMPOSITE_NORM_MIN) / COMPOSITE_NORM_SPAN, 0.0, 1.0
@@ -175,18 +220,60 @@ class RLLambdaScheduler:
         return float(self.lambda_min + t * (self.lambda_max - self.lambda_min))
 
     def _composite_metric(self, bridge_stats: Dict) -> float:
-        """提取三大指标综合值（与 AdaptiveLambdaController 口径一致）"""
+        """提取三大指标综合值（与 AdaptiveLambdaController 口径一致）
+
+        F01 键契约修复（2026-11-05，补齐 2026-11-02 在 AdaptiveLambdaController
+        上做过、此处漏掉的那一半）：``cw_pbft.get_consensus_stats()`` 只提供
+        ``consensus_success_rate``，既没有 ``success_rate`` 也没有
+        ``success_count``/``total_rounds``。旧实现读的全是不存在的键，于是
+        `success_rate` 恒为默认 0.5 —— 实测「共识 0 成功 / 10 轮全失败」时
+        本函数仍返回 0.5，与「没有数据」完全无法区分。合作率同理：旧实现读
+        ``detector_stats``，而 ``bridge.get_stats()`` 从不产出该键（真实合作率
+        由 ``on_episode_end`` 以顶层 ``cooperation_rate`` 注入），故也是恒 0.5。
+        两个指标都钉死在 0.5 后，composite 与链上状态无关，λ 变成常数。
+        """
         consensus_stats = bridge_stats.get('consensus_stats') or {}
-        success_rate = consensus_stats.get('success_rate')
+        success_rate = None
+        for key in ('consensus_success_rate', 'success_rate'):
+            if key in consensus_stats:
+                v = _finite_or_none(consensus_stats.get(key))
+                if v is not None:
+                    success_rate = _clamp_unit(v)
+                    break
         if success_rate is None:
-            sc, tc = consensus_stats.get('success_count', 0), consensus_stats.get('total_rounds', 0)
-            success_rate = sc / tc if tc > 0 else 0.5
-        coop_stats = bridge_stats.get('detector_stats') or {}
-        coop_rate = coop_stats.get('cooperation_rate', 0.5)
+            sc = _finite_or_none(consensus_stats.get('success_count', 0))
+            tc = _finite_or_none(consensus_stats.get('total_rounds', 0))
+            if sc is not None and tc is not None and tc > 0:
+                success_rate = _clamp_unit(sc / tc)
+            else:
+                success_rate = 0.5
+
+        # 合作率：顶层 injection（权威，见 bc_integration.on_episode_end）
+        # 优先，detector_stats 仅作兼容兜底
+        coop_rate = None
+        for key, table in (('cooperation_rate', bridge_stats),
+                           ('cooperation_rate', bridge_stats.get('detector_stats') or {})):
+            if table and key in table:
+                v = _finite_or_none(table.get(key))
+                if v is not None:
+                    coop_rate = _clamp_unit(v)
+                    break
+        if coop_rate is None:
+            coop_rate = 0.5
+
         sec_stats = bridge_stats.get('security_stats') or {}
-        sec_pass, sec_fail = sec_stats.get('pass_count', 0), sec_stats.get('fail_count', 0)
-        total = sec_pass + sec_fail
-        security_rate = sec_pass / total if total > 0 else 0.5
+        sec_pass = _finite_or_none(sec_stats.get('pass_count', 0))
+        sec_fail = _finite_or_none(sec_stats.get('fail_count', 0))
+        if sec_pass is not None and sec_fail is not None and (sec_pass + sec_fail) > 0:
+            security_rate = _clamp_unit(sec_pass / (sec_pass + sec_fail))
+        else:
+            sp = _finite_or_none(bridge_stats.get('security_pass_count', 0))
+            sf = _finite_or_none(bridge_stats.get('security_fail_count', 0))
+            if sp is not None and sf is not None and (sp + sf) > 0:
+                security_rate = _clamp_unit(sp / (sp + sf))
+            else:
+                security_rate = 0.5
+
         return float(
             COMPOSITE_W_CONSENSUS * success_rate
             + COMPOSITE_W_COOP * coop_rate

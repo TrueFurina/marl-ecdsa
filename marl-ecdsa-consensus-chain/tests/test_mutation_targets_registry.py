@@ -32,7 +32,8 @@ from scripts.mutation_probe import (  # noqa: E402
 )
 
 # 审计简报 §1/§2/§3/§4/§5/§6/§7/§8/§9 与 2026-11-04 flush_pending 缺陷、
-# 2026-11-05 匿名门禁两处 fail-open 对应的目标 id。
+# 2026-11-05 匿名门禁两处 fail-open、2026-11-05 BC→MARL 反馈层（λ 调度 +
+# 奖励塑形）七处非有限值/口径缺陷对应的目标 id。
 # 删掉一个就等于放弃一处承重证据，必须显式改这个集合并在评审里说明。
 AUDIT_INVARIANT_IDS = {
     "security-guard-r-type-normalization",
@@ -49,6 +50,13 @@ AUDIT_INVARIANT_IDS = {
     "action-recorder-flush-clear",
     "anon-placeholder-per-match",
     "anon-self-exempt-name-only",
+    "adaptive-lambda-nan-metric-guard",
+    "adaptive-lambda-rate-domain-clamp",
+    "rl-lambda-consensus-key-contract",
+    "rl-lambda-nan-reward-guard",
+    "shaper-weight-finite-guard",
+    "shaper-stats-eta-accounting",
+    "shaper-outlet-finite-guard",
 }
 
 

@@ -193,6 +193,111 @@
         "expect": "all_red"
       },
       "why": "2026-11-05 缺陷：豁免表按文件名比对，任何同名文件（如把自写的 secrets_scan.py 打进包）连座隐身，与「只有内容就是规则定义才可豁免」的准入判据矛盾；变异退回 name-only 后同名无标记文件不再被扫（audited 2026-11-05）"
+    },
+    {
+      "id": "adaptive-lambda-nan-metric-guard",
+      "file": "marl/integration/adaptive_lambda.py",
+      "locator": "    if not math.isfinite(v):\n        logger.warning(",
+      "mutation": "    if False:\n        logger.warning(",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_feedback_layer_nonfinite_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：三项指标任一为 NaN 时 λ 直接跳到 1.5*λ_base（上限）且绕过 EMA——收尾裁剪 max(lo, min(hi, x)) 把 NaN 洗成上界；变异关掉有限性检查即复原该行为（audited 2026-11-05）"
+    },
+    {
+      "id": "adaptive-lambda-rate-domain-clamp",
+      "file": "marl/integration/adaptive_lambda.py",
+      "locator": "    if value < 0.0 or value > 1.0:",
+      "mutation": "    if False:",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_feedback_layer_nonfinite_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05：文档声明比率值域 [0,1]，但越界值（如百分数 150 误传）原样进入 composite，sigmoid 直接饱和；变异去掉裁剪即复原（audited 2026-11-05）"
+    },
+    {
+      "id": "rl-lambda-consensus-key-contract",
+      "file": "marl/integration/rl_lambda.py",
+      "locator": "        for key in ('consensus_success_rate', 'success_rate'):",
+      "mutation": "        for key in ('success_rate',):",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_feedback_layer_nonfinite_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷（F01 的漏网一半）：cw_pbft.get_consensus_stats() 只给 consensus_success_rate，旧键全落空 → 共识项恒 0.5，实测 0/10 全失败与没有数据无法区分；变异退回旧键序即复原（audited 2026-11-05）"
+    },
+    {
+      "id": "rl-lambda-nan-reward-guard",
+      "file": "marl/integration/rl_lambda.py",
+      "locator": "        reward = None if episode_reward is None else _finite_or_none(episode_reward)",
+      "mutation": "        reward = episode_reward",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_feedback_layer_nonfinite_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：episode_reward=NaN 经 EMA 写进桶估值，np.argmax 在含 NaN 数组上返回 NaN 下标 → 实测此后 ε=0 的 20 回合 100% 锁在同一桶，元学习器永久失去探索；变异去掉净化即复原（audited 2026-11-05）"
+    },
+    {
+      "id": "shaper-weight-finite-guard",
+      "file": "marl/integration/consensus_shaper.py",
+      "locator": "                    weight = _finite_or_none(consensus_weights.get(aid, neutral))",
+      "mutation": "                    weight = consensus_weights.get(aid, neutral)",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_feedback_layer_nonfinite_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：NaN 共识权重让**塑形奖励本身**变 NaN（inf 同理）直接加进训练奖励；inf 还会让 total_consensus_bonus 永久变 inf；变异去掉值域检查即复原（audited 2026-11-05）"
+    },
+    {
+      "id": "shaper-stats-eta-accounting",
+      "file": "marl/integration/consensus_shaper.py",
+      "locator": "                    self._total_verification_bonus += self.eta * self.verification_bonus",
+      "mutation": "                    self._total_verification_bonus += self.verification_bonus",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_feedback_layer_nonfinite_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05 缺陷：累计的是 η 之前的原始分量、且势能项完全没累计，而字段名是 avg_shaping_per_step——实测 η=0.05 时高报 20 倍（0.18 vs 0.009）；变异退回 η 之前累加即复原（audited 2026-11-05）"
+    },
+    {
+      "id": "shaper-outlet-finite-guard",
+      "file": "marl/integration/consensus_shaper.py",
+      "locator": "        for i, v in enumerate(shaping):\n            if not math.isfinite(v):",
+      "mutation": "        for i, v in enumerate(shaping):\n            if False:",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_feedback_layer_nonfinite_contract.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "2026-11-05：观测含 NaN 时 np.linalg.norm 把 NaN 带进空间势能，这条路径无法在入境处覆盖，只能出口兜底；变异去掉兜底即复原 NaN 进奖励（audited 2026-11-05）"
     }
   ]
 }

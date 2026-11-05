@@ -23,10 +23,45 @@
     - 适应历史记录供 Dashboard 可视化
 """
 import logging
+import math
 import numpy as np
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _finite_float(value, field: str) -> Optional[float]:
+    """把统计值归一为有限 float；非有限（NaN/±inf）或不可转换时返回 None。
+
+    2026-11-05 修复：NaN 指标此前一路流到 λ 的**上限**。原因是收尾裁剪写成
+    ``max(lo, min(hi, x))`` —— 对 NaN 而言 ``min(hi, nan)`` 返回 hi（比较恒 False），
+    于是 ``min`` 把 NaN 洗成了上界。实测：三项指标任一为 NaN 时 λ 直接从 0.1
+    跳到 0.15（= 1.5*λ_base，链上激励权重最大值），且**绕过 EMA 平滑**。
+    这与 §9「算崩了反而拿满分」同类：指标坏掉不该被当成"链上表现极好"。
+
+    因此非有限值一律按"该指标缺失"处理（调用方回退中性默认 0.5），
+    并留 warning 供排查；不做静默替换。
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v):
+        logger.warning(
+            "[AdaptiveLambda] %s 非有限值 %r，按该指标缺失处理（中性 0.5）", field, value
+        )
+        return None
+    return v
+
+
+def _clamp_unit(value: float, field: str) -> float:
+    """把比率裁剪到文档声明的 [0, 1] 值域，越界时告警（不静默）。"""
+    if value < 0.0 or value > 1.0:
+        logger.warning(
+            "[AdaptiveLambda] %s=%r 越出 [0,1]（文档声明值域），已裁剪", field, value
+        )
+        return 0.0 if value < 0.0 else 1.0
+    return value
 
 
 class AdaptiveLambdaController:
@@ -121,7 +156,17 @@ class AdaptiveLambdaController:
         # ── 5. 范围裁剪 ──
         lambda_min = 0.5 * self.lambda_base
         lambda_max = 1.5 * self.lambda_base
-        smoothed_lambda = max(lambda_min, min(lambda_max, smoothed_lambda))
+        if not math.isfinite(smoothed_lambda):
+            # 兜底（上一步的 _finite_float 已挡住主要入口，这里防的是指标之外
+            # 的算术溢出）：非有限 λ 一律**保持上一回合的值**，不写进状态、
+            # 不记入极值。绝不交给 max/min 裁剪——那会把 NaN 洗成上界或下界。
+            logger.warning(
+                "[AdaptiveLambda] 平滑后 λ=%r 非有限，保持上一回合 λ=%r 不变",
+                smoothed_lambda, self._current_lambda,
+            )
+            smoothed_lambda = self._current_lambda
+        else:
+            smoothed_lambda = max(lambda_min, min(lambda_max, smoothed_lambda))
 
         # ── 6. 记录驱动原因 ──
         reason = self._determine_reason(consensus_rate, coop_rate, security_rate, composite)
@@ -225,28 +270,19 @@ class AdaptiveLambdaController:
             # F01 键契约修复（2026-11-02 赛后）：cw_pbft.get_consensus_stats() 实际
             # 提供的键名是 consensus_success_rate —— 旧代码读 success_rate /
             # success_count 永远落空，共识反馈恒为默认 0.5。旧键保留兜底。
-            rate = consensus_stats.get('consensus_success_rate')
-            if rate is not None:
-                try:
-                    return float(rate)
-                except (TypeError, ValueError):
-                    pass
-            # CW-PBFT 统计格式：{'success_rate': float, ...}（旧兼容）
-            success_rate = consensus_stats.get('success_rate')
-            if success_rate is not None:
-                try:
-                    return float(success_rate)
-                except (TypeError, ValueError):
-                    pass
+            for key in ('consensus_success_rate', 'success_rate'):
+                if key in consensus_stats:
+                    rate = _finite_float(consensus_stats.get(key), key)
+                    if rate is not None:
+                        return _clamp_unit(rate, key)
 
             # fallback: 从 success_count / total_rounds 推导
-            success_count = consensus_stats.get('success_count', 0)
-            total_rounds = consensus_stats.get('total_rounds', 0)
-            if total_rounds > 0:
-                try:
-                    return float(success_count) / float(total_rounds)
-                except (TypeError, ValueError):
-                    pass
+            success_count = _finite_float(
+                consensus_stats.get('success_count', 0), 'success_count')
+            total_rounds = _finite_float(
+                consensus_stats.get('total_rounds', 0), 'total_rounds')
+            if success_count is not None and total_rounds is not None and total_rounds > 0:
+                return _clamp_unit(success_count / total_rounds, 'consensus_rate(推导)')
 
         # 无共识数据时：返回 0.5（中性默认，既不提升也不降低 λ）
         logger.debug("[AdaptiveLambda] 无共识统计数据，consensus_rate 默认 0.5")
@@ -264,26 +300,24 @@ class AdaptiveLambdaController:
         # 取代下方"正积分占比"近似——正积分比例并非真实合作率。
         explicit = bridge_stats.get('cooperation_rate')
         if explicit is not None:
-            try:
-                return float(explicit)
-            except (TypeError, ValueError):
-                pass
+            rate = _finite_float(explicit, 'cooperation_rate')
+            if rate is not None:
+                return _clamp_unit(rate, 'cooperation_rate')
 
         # 旧近似兜底：通过 bc_scores 中的正值比例推导
-        bc_scores = bridge_stats.get('bc_scores', {})
-        if bc_scores:
-            positive_count = sum(1 for v in bc_scores.values() if v > 0)
-            total_agents = len(bc_scores)
-            if total_agents > 0:
-                return float(positive_count) / float(total_agents)
-
-        # fallback: 从 bc_rewards 正值比例推导（本回合）
-        bc_rewards = bridge_stats.get('bc_rewards', {})
-        if bc_rewards:
-            positive_count = sum(1 for v in bc_rewards.values() if v > 0)
-            total_agents = len(bc_rewards)
-            if total_agents > 0:
-                return float(positive_count) / float(total_agents)
+        # 非有限条目**不计入分母**：一个算崩的 agent 不该被当成"不合作"而拉低
+        # 全局合作率（NaN > 0 恒为 False，旧实现正是这么把它算成反面的）。
+        for key in ('bc_scores', 'bc_rewards'):
+            table = bridge_stats.get(key, {})
+            if not table:
+                continue
+            judged = [
+                v for v in (_finite_float(x, key) for x in table.values())
+                if v is not None
+            ]
+            if judged:
+                return _clamp_unit(
+                    sum(1 for v in judged if v > 0) / len(judged), f'coop_rate(由 {key} 推导)')
 
         logger.debug("[AdaptiveLambda] 无合作统计数据，coop_rate 默认 0.5")
         return 0.5
@@ -295,27 +329,23 @@ class AdaptiveLambdaController:
         :param bridge_stats: BlockchainMARLBridge.get_stats() 的返回值
         :return: 安全通过率，范围 [0, 1]。无数据时返回默认 0.5
         """
-        pass_count = bridge_stats.get('security_pass_count', 0)
-        fail_count = bridge_stats.get('security_fail_count', 0)
-        total = pass_count + fail_count
+        pass_count = _finite_float(
+            bridge_stats.get('security_pass_count', 0), 'security_pass_count')
+        fail_count = _finite_float(
+            bridge_stats.get('security_fail_count', 0), 'security_fail_count')
 
-        if total > 0:
-            try:
-                return float(pass_count) / float(total)
-            except (TypeError, ValueError):
-                pass
+        if pass_count is not None and fail_count is not None:
+            total = pass_count + fail_count
+            if total > 0:
+                return _clamp_unit(pass_count / total, 'security_rate')
 
         # fallback: 从 security_stats 推导
         security_stats = bridge_stats.get('security_stats')
         if security_stats is not None:
-            sp = security_stats.get('pass_count', 0)
-            sf = security_stats.get('fail_count', 0)
-            st = sp + sf
-            if st > 0:
-                try:
-                    return float(sp) / float(st)
-                except (TypeError, ValueError):
-                    pass
+            sp = _finite_float(security_stats.get('pass_count', 0), 'security_stats.pass_count')
+            sf = _finite_float(security_stats.get('fail_count', 0), 'security_stats.fail_count')
+            if sp is not None and sf is not None and (sp + sf) > 0:
+                return _clamp_unit(sp / (sp + sf), 'security_rate(fallback)')
 
         logger.debug("[AdaptiveLambda] 无安全统计数据，security_rate 默认 0.5")
         return 0.5
