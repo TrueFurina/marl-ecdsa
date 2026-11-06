@@ -58,7 +58,18 @@ def clamp_finite(
 
 
 class ContributionScore:
-    """单轮贡献度评分"""
+    """单轮贡献度评分
+
+    注意（backlog #4 澄清）：``weighted_score`` 是 task/coop/compliance 三维的
+    **启发式加权组合**，**并非**博弈论意义上的 Shapley 值。CW-PBFT 的维度权重
+    κ_task/κ_coop/κ_compliance 是 *Shapley 风格*（按边际贡献高低分配权重），
+    但本处的 agent 级加权分只是凸组合，不构成对联盟博弈的 Shapley 赋值。
+    对外表述须据此对齐，避免把"启发式加权分"说成"Shapley 值"。
+    """
+
+    # 评分方法标识：明确为启发式加权，便于代码/测试自检与口径对齐。
+    METHOD = "heuristic_weighted"
+
     def __init__(
         self,
         agent_id: str,
@@ -73,12 +84,18 @@ class ContributionScore:
 
     @property
     def weighted_score(self) -> float:
-        """加权综合贡献度（Shapley值风格推导）
+        """加权综合贡献度（κ 为 Shapley 风格维度权重，但分本身是启发式）
 
-        权重推导：
+        权重推导（κ 是 Shapley *风格* 的维度权重，按边际贡献高低分配权重）：
         - κ_task=0.40: 任务贡献边际值高（Shapley: 高方差维度→高权重）
         - κ_coop=0.35: 协作正外部性补偿（合作收益溢出到其他智能体）
         - κ_compliance=0.25: 合规基础份额（对称性剩余分配）
+
+        ⚠️ 口径澄清（backlog #4）：本属性返回的是三维子分的**凸组合**
+        ``κ_task·task + κ_coop·coop + κ_compliance·compliance``，
+        是**启发式加权分**，不是对智能体联盟博弈的**Shapley 值**。
+        κ 权重的"Shapley 风格"仅指维度权重本身的推导思路，不等同于
+        该 agent 级评分是 Shapley 值。对外表述须区分两者。
 
         约束：κ_task + κ_coop + κ_compliance = 1
         实验校准：σ(task_variance)≈0.1, φ(coop_externality)≈0.05
