@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import time
+import functools
 from collections import OrderedDict
 from typing import Tuple, Optional, Dict, Any, List
 
@@ -79,6 +80,20 @@ def resolve_key_passphrase() -> bytes:
         f"{REQUIRE_PASSPHRASE_ENV}=1 改为提供缺失即报错。"
     )
     return DEFAULT_KEY_PASSPHRASE
+
+
+# 公钥反序列化结果 LRU 缓存（自进化优化 v2，2026-11-06；纯记忆化，零正确性风险）
+# 审计 #3 指出 signing_service / network_consensus 反复反序列化同一公钥；解析 P-256
+# 点有固定开销，记忆化可避免重复解析。functools.lru_cache 自动淘汰，上限 2048。
+@functools.lru_cache(maxsize=2048)
+def _cached_public_key_from_bytes(pem_bytes: bytes) -> "ec.EllipticCurvePublicKey":
+    return serialization.load_pem_public_key(pem_bytes)
+
+
+@functools.lru_cache(maxsize=2048)
+def _cached_public_key_from_encoded_point(raw_point: bytes) -> "ec.EllipticCurvePublicKey":
+    # 原始 X962 非压缩点（public_key_to_hex 的产物），需走 from_encoded_point 而非 PEM 解析
+    return ec.EllipticCurvePublicKey.from_encoded_point(ECDSAUtils.CURVE, raw_point)
 
 
 class ECDSAUtils:
@@ -174,14 +189,14 @@ class ECDSAUtils:
 
     @staticmethod
     def public_key_from_bytes(pem_bytes: bytes) -> ec.EllipticCurvePublicKey:
-        """从 PEM 字节反序列化公钥"""
-        return serialization.load_pem_public_key(pem_bytes)
+        """从 PEM 字节反序列化公钥（结果走 LRU 缓存，避免重复解析 P-256 点）"""
+        return _cached_public_key_from_bytes(pem_bytes)
 
     @staticmethod
     def public_key_from_hex(hex_str: str) -> ec.EllipticCurvePublicKey:
-        """从十六进制字符串反序列化公钥"""
+        """从十六进制字符串反序列化公钥（走原始点 LRU 缓存）"""
         raw = bytes.fromhex(hex_str)
-        return ec.EllipticCurvePublicKey.from_encoded_point(ECDSAUtils.CURVE, raw)
+        return _cached_public_key_from_encoded_point(raw)
 
     # -------------------------------------------------------------------------
     # 消息构造与哈希

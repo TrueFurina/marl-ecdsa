@@ -97,3 +97,53 @@ def test_verify_batch_cache_shortcut_consistency(key_pair):
     with_cache = ECDSAUtils.verify_batch(entries, use_cache=True)
     without = ECDSAUtils.verify_batch(entries, use_cache=False)
     assert with_cache == without == [True] * len(entries)
+
+
+# ---------------------------------------------------------------------------
+# 公钥反序列化 LRU 缓存（v2）
+# ---------------------------------------------------------------------------
+
+def test_public_key_from_bytes_cache_correctness(key_pair):
+    _, pub = key_pair
+    pem = ECDSAUtils.public_key_to_bytes(pub)
+    p1 = ECDSAUtils.public_key_from_bytes(pem)
+    p2 = ECDSAUtils.public_key_from_bytes(pem)
+    # 同一输入必须解析为同一对象（缓存命中）
+    assert p1 is p2
+    # 且能正常用于验签
+    msg = b"pubkey cache check"
+    sig = ECDSAUtils.sign(key_pair[0], msg)
+    assert ECDSAUtils.verify(p1, msg, sig) is True
+
+
+def test_public_key_from_hex_reuses_cache(key_pair):
+    _, pub = key_pair
+    hex_str = ECDSAUtils.public_key_to_hex(pub)
+    pem = ECDSAUtils.public_key_to_bytes(pub)
+    # 同路径重复解析命中同一缓存对象
+    assert ECDSAUtils.public_key_from_hex(hex_str) is ECDSAUtils.public_key_from_hex(hex_str)
+    assert ECDSAUtils.public_key_from_bytes(pem) is ECDSAUtils.public_key_from_bytes(pem)
+    # 两条路径（原始点 vs PEM）解析为等价公钥
+    assert (ECDSAUtils.public_key_from_hex(hex_str).public_numbers()
+            == ECDSAUtils.public_key_from_bytes(pem).public_numbers())
+
+
+def test_public_key_cache_speedup(key_pair):
+    _, pub = key_pair
+    pem = ECDSAUtils.public_key_to_bytes(pub)
+    N = 5000
+    t0 = time.perf_counter()
+    for _ in range(N):
+        ECDSAUtils.public_key_from_bytes(pem)
+    t_cached = time.perf_counter() - t0
+
+    # 旁路：不走缓存，每次真实解析
+    import cryptography.hazmat.primitives.serialization as _ser
+    t1 = time.perf_counter()
+    for _ in range(N):
+        _ser.load_pem_public_key(pem)
+    t_uncached = time.perf_counter() - t1
+
+    assert t_cached < t_uncached * 0.7, (
+        f"公钥缓存未带来提速: cached={t_cached:.4f}s uncached={t_uncached:.4f}s"
+    )
