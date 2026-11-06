@@ -47,8 +47,10 @@ class TestLmStartConfig:
 
 class TestObsDimAssertion:
     def test_obs_dim_sufficient_ok(self):
-        """obs_dim 恰好等于需要量时构造不报错"""
-        ConsensusRewardShaper(n_agents=3, n_landmarks=3, obs_dim=10)  # 4 + 2*3 = 10
+        """obs_dim 恰好等于需要量时构造不报错，且属性正确落位"""
+        s = ConsensusRewardShaper(n_agents=3, n_landmarks=3, obs_dim=10)  # 4 + 2*3 = 10
+        assert s.n_landmarks == 3
+        assert s.lm_start == 4  # 默认布局起点
 
     def test_obs_dim_insufficient_raises(self):
         """obs_dim 不足时构造期直接抛 ValueError（形状断言 fail-fast）"""
