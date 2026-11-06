@@ -46,6 +46,7 @@ class TestExtractFeatures:
 
 class TestTrainClassifier:
     def test_train_success(self):
+        pytest.importorskip("sklearn")  # ML 路径依赖 sklearn；缺失时降级规则基，跳过本例
         cd = CooperationDetector(n_agents=3, n_landmarks=3)
         obs = _make_obs(40)
         labels = _make_labels(40)
@@ -76,6 +77,7 @@ class TestPredictML:
         assert cd.predict_ml(_make_obs(5), ["a0"] * 5) == {}
 
     def test_predict_after_train_returns_mapping(self):
+        pytest.importorskip("sklearn")  # ML 路径依赖 sklearn；缺失时降级规则基，跳过本例
         cd = CooperationDetector(n_agents=3, n_landmarks=3)
         obs = _make_obs(40)
         labels = _make_labels(40)
@@ -92,6 +94,7 @@ class TestGetMLAccuracy:
         assert cd.get_ml_accuracy(_make_obs(5), ["a0"] * 5, [1] * 5) is None
 
     def test_accuracy_after_train_in_range(self):
+        pytest.importorskip("sklearn")  # ML 路径依赖 sklearn；缺失时降级规则基，跳过本例
         cd = CooperationDetector(n_agents=3, n_landmarks=3)
         obs = _make_obs(40)
         labels = _make_labels(40)
