@@ -8,7 +8,8 @@ import json
 import logging
 import os
 import time
-from typing import Tuple, Optional, Dict, Any
+from collections import OrderedDict
+from typing import Tuple, Optional, Dict, Any, List
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import (
@@ -91,6 +92,14 @@ class ECDSAUtils:
     """
 
     CURVE = ec.SECP256R1()
+
+    # 验签结果 LRU 记忆化缓存（自进化优化 v1，2026-11-06；纯加法，不改 verify 语义）
+    # 同一 (公钥, 消息摘要, 签名) 三元组的验签是确定性纯函数；共识重放 / 仪表盘复检 /
+    # 回归测试会反复验证相同签名，记忆化可跳过重复的椭圆曲线标量乘。
+    # 默认 verify() 不走缓存（避免对「每条签名唯一」的共识热路径引入开销），
+    # 仅在显式调用 verify_cached() / verify_batch(use_cache=True) 时启用。
+    _VERIFY_CACHE_MAX = 4096
+    _VERIFY_CACHE: "OrderedDict[bytes, bool]" = OrderedDict()
 
     # -------------------------------------------------------------------------
     # 密钥管理
@@ -272,6 +281,67 @@ class ECDSAUtils:
         except Exception as e:
             logger.debug(f"ECDSA验签异常: {e}")
             return False
+
+    @staticmethod
+    def verify_cached(
+        public_key: ec.EllipticCurvePublicKey,
+        message: bytes,
+        signature: bytes
+    ) -> bool:
+        """
+        带 LRU 记忆化缓存的验签（opt-in，不改 verify 语义）。
+        仅当**同一 (公钥, 消息, 签名) 三元组会被反复验证**时才有收益
+        （如认证令牌复检、共识重放、回归测试）。共识热路径每条签名唯一，
+        走本方法反而因缓存键开销而变慢——故默认 verify() 不走缓存。
+        :return: True=验签通过，False=验签失败。
+        """
+        try:
+            pub_bytes = public_key.public_bytes(
+                serialization.Encoding.X962,
+                serialization.PublicFormat.UncompressedPoint,
+            )
+        except Exception:
+            pub_bytes = b""
+        cache_key = (
+            hashlib.sha256(pub_bytes).digest()
+            + hashlib.sha256(message).digest()
+            + (signature if isinstance(signature, (bytes, bytearray)) else b"")
+        )
+        cached = ECDSAUtils._VERIFY_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        result = ECDSAUtils.verify(public_key, message, signature)
+        ECDSAUtils._VERIFY_CACHE[cache_key] = result
+        while len(ECDSAUtils._VERIFY_CACHE) > ECDSAUtils._VERIFY_CACHE_MAX:
+            ECDSAUtils._VERIFY_CACHE.popitem(last=False)
+        return result
+
+    @staticmethod
+    def verify_batch(
+        entries: List[Tuple[Any, bytes, bytes]],
+        *,
+        use_cache: bool = True,
+    ) -> List[bool]:
+        """
+        批量验签（与逐条 verify 语义一致）。
+        :param entries: [(public_key, message, signature), ...]
+        :param use_cache: True（默认）时复用 LRU 缓存去重重复验签。
+        :return: 逐条布尔列表。
+        """
+        results: List[bool] = []
+        for pub, msg, sig in entries:
+            if use_cache:
+                results.append(ECDSAUtils.verify_cached(pub, msg, sig))
+            else:
+                results.append(ECDSAUtils.verify(pub, msg, sig))
+        return results
+
+    @staticmethod
+    def clear_verify_cache() -> int:
+        """清空验签缓存，返回被清除的条目数（测试 / 基准对比用）。"""
+        n = len(ECDSAUtils._VERIFY_CACHE)
+        ECDSAUtils._VERIFY_CACHE.clear()
+        return n
     # -------------------------------------------------------------------------
 
     @staticmethod
