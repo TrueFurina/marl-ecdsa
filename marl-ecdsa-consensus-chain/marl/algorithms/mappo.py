@@ -143,8 +143,15 @@ if HAS_TORCH:
             clip_eps: float = 0.2, gae_lambda: float = 0.95,
             entropy_coef: float = 0.01, value_coef: float = 0.5,
             ppo_epochs: int = 4, batch_episodes: int = 4,
+            max_grad_norm: Optional[float] = None,
             **kwargs,
         ):
+            """
+            max_grad_norm: 全局梯度范数裁剪阈值（opt-in，默认 None 关闭）。
+            仅作为**稳定性护栏**存在：默认关闭时，train_step 的行为与历史版本
+            逐字一致（不影响已结算的主结局指标）。开启后，在 actor/critic 各自
+            optimizer.step() 之前对参数梯度做全局范数裁剪，抑制训练初期梯度爆炸。
+            """
             self.n_agents = n_agents
             self.obs_dim = obs_dim
             self.state_dim = state_dim
@@ -156,6 +163,7 @@ if HAS_TORCH:
             self.value_coef = value_coef
             self.ppo_epochs = ppo_epochs
             self.batch_episodes = batch_episodes
+            self.max_grad_norm = max_grad_norm
             self.algorithm = 'mappo'
             self.use_iql = False
 
@@ -319,9 +327,15 @@ if HAS_TORCH:
 
                     self.actor_opt.zero_grad()
                     actor_loss.backward()
+                    if self.max_grad_norm is not None:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.agents.parameters(), self.max_grad_norm)
                     self.actor_opt.step()
                     self.critic_opt.zero_grad()
                     critic_loss.backward()
+                    if self.max_grad_norm is not None:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.critic.parameters(), self.max_grad_norm)
                     self.critic_opt.step()
 
                     actor_loss_sum += float(actor_loss.item())
