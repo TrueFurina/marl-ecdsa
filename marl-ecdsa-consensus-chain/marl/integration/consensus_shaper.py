@@ -73,6 +73,8 @@ class ConsensusRewardShaper:
         cooperation_bonus: float = 0.08,
         consensus_weight_scale: float = 0.05,
         n_landmarks: int = 3,
+        lm_start: int = 4,
+        obs_dim: Optional[int] = None,
     ):
         """
         :param n_agents: 智能体数量
@@ -82,6 +84,12 @@ class ConsensusRewardShaper:
         :param cooperation_bonus: 合作对齐的单步奖励
         :param consensus_weight_scale: 共识权重奖励的缩放因子
         :param n_landmarks: 路标数量（用于合作检测）
+        :param lm_start: 观测中"路标相对位置块"的起始下标（默认 4，与历史布局一致）。
+            原本硬编码在势能/合作检测内部；此处配置化以便环境布局变化时显式声明，
+            避免维度不符被静默当成 0 势能。
+        :param obs_dim: 观测维度（可选）。若提供，则在构造期做**形状断言**：
+            要求 obs_dim >= lm_start + 2*n_landmarks，否则视为布局配置错误直接报错（fail-fast）。
+            不提供则跳过该断言（保持历史行为）。
         """
         self.n_agents = n_agents
         self.eta = eta
@@ -90,6 +98,20 @@ class ConsensusRewardShaper:
         self.cooperation_bonus = cooperation_bonus
         self.consensus_weight_scale = consensus_weight_scale
         self.n_landmarks = n_landmarks
+        self.lm_start = lm_start
+
+        # 形状断言：观测布局必须满足"lm_start + 2*n_landmarks"路标块，
+        # 否则空间势能会被静默置 0（backlog #5）。提供 obs_dim 时强制校验，
+        # 把"维度不符静默返回 0"变成构造期明确错误，便于早期暴露配置漂移。
+        if obs_dim is not None:
+            need = self.lm_start + 2 * self.n_landmarks
+            if obs_dim < need:
+                raise ValueError(
+                    f"[Shaper] obs_dim={obs_dim} 不足以容纳路标块："
+                    f"需要 >= lm_start({self.lm_start}) + 2*n_landmarks({self.n_landmarks}) = {need}"
+                )
+        # 运行期观测过短时的告警去重开关（避免热路径刷屏；仍保持"置 0"的兼容行为）
+        self._layout_warned = False
 
         # Potential function: 基于智能体贡献分数的状态势能
         # Phi(s) = avg_contribution_score / max_possible_score
@@ -133,14 +155,23 @@ class ConsensusRewardShaper:
             spatial_potential = 0.0
             try:
                 obs = np.array(observations[i], dtype=float)
-                # 路标相对位置在 obs[4:4+2*n_landmarks]
-                lm_start = 4
+                # 路标相对位置在 obs[lm_start:lm_start+2*n_landmarks]
+                lm_start = self.lm_start
                 lm_end = lm_start + 2 * self.n_landmarks
                 if lm_end <= len(obs):
                     lm_rel = obs[lm_start:lm_end].reshape(-1, 2)
                     own_idx = i % self.n_landmarks
                     dist_to_own = float(np.linalg.norm(lm_rel[own_idx]))
                     spatial_potential = -dist_to_own  # 越近越大，与环境奖励一致
+                elif not self._layout_warned:
+                    # backlog #5：维度不符原本静默返回 0；改为显式告警一次，
+                    # 让观测布局漂移（obs_dim 变化 / 路标数不对）在早期可见。
+                    logger.warning(
+                        "[Shaper] 观测长度 %d < 期望 %d（lm_start=%d + 2*n_landmarks=%d），"
+                        "空间势能按 0 处理（布局不匹配）",
+                        len(obs), lm_end, self.lm_start, self.n_landmarks,
+                    )
+                    self._layout_warned = True
             except (ValueError, IndexError, TypeError):
                 pass
 
@@ -178,12 +209,19 @@ class ConsensusRewardShaper:
             is_coop = False
             try:
                 obs = np.array(observations[i], dtype=float)
-                lm_start = 4
+                lm_start = self.lm_start
                 lm_end = lm_start + 2 * self.n_landmarks
                 if lm_end <= len(obs):
                     lm_rel = obs[lm_start:lm_end].reshape(-1, 2)
                     min_dist = min(float(np.linalg.norm(lm_rel[j])) for j in range(len(lm_rel)))
                     is_coop = min_dist < cooperation_threshold
+                elif not self._layout_warned:
+                    logger.warning(
+                        "[Shaper] 观测长度 %d < 期望 %d（lm_start=%d + 2*n_landmarks=%d），"
+                        "合作检测按 False 处理（布局不匹配）",
+                        len(obs), lm_end, self.lm_start, self.n_landmarks,
+                    )
+                    self._layout_warned = True
             except (ValueError, IndexError, TypeError):
                 pass
             coop_flags.append(is_coop)
