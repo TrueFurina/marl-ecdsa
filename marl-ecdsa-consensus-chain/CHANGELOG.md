@@ -15,6 +15,61 @@
 
 ---
 
+## 2026-11-08 — 引用黑名单门禁的四处「查了等于没查」：UTF-16 读出乱码 / 零文件判通过 / 相对路径落空 / 降级无证据
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+`scripts/scan_citation_blacklist.py` 是 CI 的 `Citation gate — synthetic references`，
+与上一节 `scan_void_tokens.py` 同族，但一直没被同样方式审过。修前实测（同一行
+「参考文献见〈伪文献域〉请核对」放在名字含 README 的对外文档里）：
+
+| # | 形态 | 旧行为（实测） | 应有 |
+|---|---|---|---|
+| 1 | UTF-16 文档 | `ac.scan_text_lines()` 用 `errors="replace"` 解码，域名字节被 NUL 拆开，正则永不命中：**0 命中却 `files_scanned=1`、`rc=0`**；同一句存 UTF-8 是 `blocking=1 / rc=1`，存 GBK 同样是 `blocking=1`（ASCII 部分不受影响） | BOM 嗅探 + utf-8/gbk 回退，读得出就扫 |
+| 2 | 读不出的文件 | `files_scanned += 1` 发生在读取**之前**：二进制/损坏文档照样计入「已扫」 | 记 `unreadable`，不计入已扫并判退出码 2 |
+| 3 | 空目录 / 目录内只有 `.pdf` | `files_scanned=0、0 命中、rc=0`，不打计数、无 strict | 打印扫描计数；`--strict` 下零文件判 2 |
+| 4 | `--root` 相对路径 | 只按 `WORKSPACE_ROOT`（项目父目录）拼，项目内相对路径全部落空 | 先按 cwd 找，再按工作区根找 |
+| 5 | 声明性上下文降级 | `any(mk in line for mk in mention)` 整行降级，hit 只写 `context="mention"`，无从核对是哪一条 marker 生效 | 判定不变，补 `downgrade_reason` 证据字段 |
+
+### 一处**没有**改动的既定排除（如实记录，不假装修了）
+
+`text_ext` 明确把 `.pdf` / `.pptx` 排除在本扫描器之外（容器类由别的门禁处理）。
+所以「一个目录里只有含伪引用的 PDF」修前是 `0 个文件 / 0 命中 / rc=0`。本轮
+**不引入 PDF 解析**（本机与 CI 都没有 `pypdf`，上一节已确立「解析失败 ⇒ fail-closed
+而不是假装扫过」的口径），而是让 `--strict` 把「零文件」判失败：不谎报扫过 PDF，
+但也不再把「一个都没扫」当作通过。把 PDF 正文纳入伪引用扫描仍属未做项。
+
+### 实测证据（临时目录现造，不依赖仓库状态）
+
+1. 同一行伪引用：UTF-8 `rc=1 / blocking=1`、UTF-16 `rc=0 / hits=0 / files_scanned=1`、
+   GBK `rc=1 / blocking=1`。修后三者均为 `rc=1 / blocking=1 / files_scanned=1`。
+2. 含 NUL 的伪文档：修后 `rc=2 / files_scanned=0 / unreadable=1`，报告留 `unreadable` 明细。
+3. 空目录：非 strict `rc=0`（打印「扫过 0 个文件」），`--strict` 下 `rc=2`。
+4. 目录内只有假 PDF：非 strict 0 文件通过，`--strict` 下 `rc=2`。
+5. `--root` 传项目内相对目录：旧版解析到工作区父目录的同名路径（不存在）→ 判通过；
+   新版按 cwd 命中并正常扫描。
+
+### 改法
+
+- 新增 `decode_bytes_text()` / `read_lines()`（BOM 嗅探、utf-8 → gbk、含 NUL 无 BOM
+  判 `unreadable`、HTML 保留 `strip_html_markup()` 保行号）；`scan()` 只有 `text`
+  才计入 `files_scanned`，报告加 `unreadable` 计数与 `unreadable_files` 明细。
+- `mention_marker()` 返回触发降级的那个词，hit 增加 `downgrade_reason`
+  （**不改判定语义**，与上一节的策略一致）。
+- `resolve_root()` 先按 cwd 再按 `WORKSPACE_ROOT`；新增 `decide_exit()` 纯函数、
+  `--strict`、`--self-test`（12 夹具）；收尾固定打印「扫过 N 个文件 / 读不出 M」。
+- 两份 `ci.yml` 的 `Citation gate` 改为「自证先行 + `--strict`」。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_citation_silent_skip.py` **20 项** |
+| 自证 | `--self-test` **12/12** |
+| 变异目标 | 79 → **85**；新增 6 条逐条承重（3 / 2 / 3 / 4 / 2 / 3 个用例变红） |
+| 本仓实跑 | `--root <项目> --strict`：**40 个文本 / 0 blocking / 0 读不出**，`rc=0` |
+| 其余门禁 | honesty / caliber `--strict` / closure `--strict` / registry mirror / secrets `--tracked --strict` / structure `--all --strict` / void `--strict` / 两个终检自证 全过 |
+
 ## 2026-11-07 — 提交前终检把「上一次的旧报告」当成新证据 / pre-commit 第 5 步守卫的两处静默放行
 
 > 本节只记工具与测试变更，不含任何实验数字。

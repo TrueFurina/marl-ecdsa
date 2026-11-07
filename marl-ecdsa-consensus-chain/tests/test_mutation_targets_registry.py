@@ -134,6 +134,14 @@ AUDIT_INVARIANT_IDS = {
     "guard-git-error-blocks",
     "guard-bad-stdin-blocks",
     "guard-z-split",
+    # 2026-11-08：引用黑名单门禁与 PR #20 同族的四处假绿——UTF-16 读出乱码仍计已扫、
+    # 读不出不阻断、零文件通过、--root 相对路径基准；外加降级证据。
+    "citation-utf16-not-decoded",
+    "citation-unreadable-not-counted",
+    "citation-unreadable-blocks",
+    "citation-strict-zero-scan",
+    "citation-cwd-relative-root",
+    "citation-downgrade-reason",
 }
 
 
