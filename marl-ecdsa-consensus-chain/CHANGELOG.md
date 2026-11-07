@@ -68,6 +68,18 @@
 - 调用点：hook 第 3 步 `|| exit $?`、第 6 步存在性判断 + 严格兜底；两份 `ci.yml`
   的 `Caliber gate` 改为「自证先行 + `--strict`」。
 
+### 顺带修复：CI 回退档在 main 上已红（非本轮改动引入）
+
+本轮 PR 的 CI 首次暴露：`pytest（无 torch · 回退档）` job 在**收集期**
+`ERROR tests/test_mappo_grad_clip.py` → `ModuleNotFoundError: No module named 'torch'`，
+整个套件 `exit 2`。该文件虽有 `pytestmark = skipif(not HAS_TORCH)`，但顶层
+`import torch` 在 skipif 生效之前就执行了。回查 main `a2afc3329af4` 的最近一次 CI
+（run 42157761074）同为 failure —— 这是另一条工作线 2026-11-06 新增测试带来的
+**既有问题**。按 `tests/test_cooperation_detector_ml.py` 的既有约定改为
+`torch = pytest.importorskip("torch", reason=...)`；本机无 torch 环境下单跑该文件
+从 `ERROR / exit 2` 变为 `1 skipped`。3.11 / 3.12 两个装了 torch 的 job 本轮均
+success，说明本轮门禁改动本身无回归。
+
 ### 验证
 
 | 项 | 结果 |
@@ -76,6 +88,7 @@
 | 自证 | `--self-test` **16/16** |
 | 变异目标 | 63 → **71**；新增 8 条逐条承重（3 / 2 / 3 / 3 / 4 / 2 / 2 / 3 个用例变红） |
 | 本仓实跑 | `--root <项目> --strict`：**529 个文件 / 0 blocking / 0 读不出 / 0 路径缺失**，`rc=0` |
+| 本机全量 | **2631 passed / 20 skipped / 1 failed**：`test_deps_importable`（本机裸 Python 3.13 未装 torch）；全量另需 `--ignore=tests/test_mappo_grad_clip.py` 才能在收集期通过，该文件已由本 PR 顺带修复 |
 | 其余门禁 | honesty / caliber `--strict` / closure `--strict` / registry mirror / secrets `--tracked --strict` / structure `--all --strict` / anonymity `--tracked` 全过 |
 
 ## 2026-11-06 — 密钥扫描与结构守卫的六处「查了等于没查」：哈希字段整行豁免 / `.github` 被当 `.git` 跳过 / git 失败 return 0 / `git mv` 到根级看不见
