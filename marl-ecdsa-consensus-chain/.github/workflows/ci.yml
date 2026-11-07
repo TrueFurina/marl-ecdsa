@@ -157,7 +157,10 @@ jobs:
             --strict \
             --overwrite
 
-      # 权威登记表在仓库外（不入库），CI 里必然缺失 → 本步打印 SKIP 并对
-      # 入库镜像做结构校验。它不是空转：能抓住「提交了半截 JSON / 条目丢字段」。
+      # 权威登记表在仓库外（不入库），CI 里必然缺失 → 本步打印 SKIP，但
+      # 镜像自身完整性仍可核：结构 + entries 非空 + 实体指纹与 _mirror_sha256 自洽。
+      # 2026-11-08 实测：旧版只查键，改数字 / 删条目 / 清空 entries 都判通过。
       - name: Registry mirror integrity
-        run: python scripts/check_registry_mirror.py
+        run: |
+          python scripts/check_registry_mirror.py --self-test
+          python scripts/check_registry_mirror.py

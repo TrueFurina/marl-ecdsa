@@ -188,7 +188,11 @@ jobs:
             --overwrite
 
       - name: Registry mirror integrity
-        run: python scripts/check_registry_mirror.py
+        run: |
+          # 权威登记表不入库，CI 里必然走 SKIP；但镜像自身完整性仍可核：
+          # 结构 + entries 非空 + 实体指纹与 _mirror_sha256 自洽。
+          python scripts/check_registry_mirror.py --self-test
+          python scripts/check_registry_mirror.py
 
       # 闭合门禁此前只由 doctor.py 手动调用，于是"读不懂 = 没有"的四处静默
       # 一直没人发现。自证 + 严格扫描一起进 CI：先证明门禁不空，再拿它判仓库。
