@@ -15,6 +15,53 @@
 
 ---
 
+## 2026-11-07 — 提交前终检把「上一次的旧报告」当成新证据 / pre-commit 第 5 步守卫的两处静默放行
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+PR #20 给 `scan_void_tokens.py` 加了「读不出 / 路径缺失 ⇒ 退出码 2」。这一节修的是
+**再往上一层**：`scripts/pre_submission_gate.py` 与 `scripts/pre-commit/test_file_guard.py`
+都没把这个信号接进判定，于是 fail-closed 在终检层又被抹平。
+
+| # | 位置 | 形态 | 旧行为（实测） |
+|---|---|---|---|
+| 1 | 终检 `check_void()` / `check_citation()` | 磁盘上残留上一次成功的旧报告 | 只判 `report.exists()` 与 `blocking == 0`，**不看工具这次有没有重写报告、也不看子进程退出码**。把 `run()` 换成「返回 `rc=2`、不写报告」，两项仍判 PASS；`check_void` 的 detail 里甚至印着 `rc=2` |
+| 2 | 终检 `check_claim_code_consistency()` / `check_tests()` | 同上 | code_check 报告 / junit XML 也是「存在就算数」，工具报错或 pytest 被环境守卫打断时旧文件照旧判 PASS |
+| 3 | 第 5 步 `--pretooluse` | stdin 不是合法 JSON | `except: return 0`，静默放行（`rc=0`） |
+| 4 | 第 5 步 `--pretooluse` | 是 `git commit` 但不在仓库里 | `check(staged_files())` 抛异常 → `return 0`（源码注释自称 "fail-open"）：git 不可用时守卫等于不存在（`rc=0`） |
+| 5 | 第 5 步 `--staged` | 非仓库目录 / 文件名含换行 | `check_output(stderr=DEVNULL)` + `splitlines()`：前者抛 traceback（`rc=1` 但看不到 git 原因），后者把一条路径切成两条不存在的路径 |
+
+### 实测证据
+
+1. 造一份 `blocking=0` 的旧报告，把 `run()` 换成 `(2, "配置读取错误")` 且不写报告：
+   修前 `check_void() -> True`、`check_citation() -> True`、`check_claim_code_consistency() -> True`；
+   修后三者均为 `False`，detail 带「报告不是本次生成的」「扫描器退出码 2」。
+2. `printf 'not json' | test_file_guard.py --pretooluse`：修前 `rc=0`，修后 `rc=2` 且给出原因。
+3. 真·非 git 目录下 `--pretooluse`（命令含 `git commit`）：修前 `rc=0`，修后 `rc=1`；
+   `--staged` 修前是一段 `CalledProcessError` traceback，修后是「环境错误：git 退出码 129 …」。
+
+### 改法
+
+- 终检新增 `report_signature()`（mtime_ns + 字节数 + sha1）、`run_with_report()` 返回
+  `(rc, out, fresh)`、`scanner_verdict()` 作为唯一判定入口：`fresh=False` / `rc != 0` /
+  `blocking != 0` 任一即 FAIL，且**理由写进用户看到的 detail**。
+  三项检查（含 junit）都加新鲜度校验；`blocking_of()` 对损坏 JSON 返回 None 而不是抛栈。
+- **不改** `check_tests()` 的既有约定：判定仍以 junit 为准（本环境 safe-delete 钩子会污染
+  pytest 的 shell 退出码），只是额外要求 junit 必须是这一次跑出来的。
+- 第 5 步守卫：`staged_files()` 改 `-z` + 返回 `(路径, 错误)`；`decide()` 把环境错误判 1；
+  stdin 解析失败判 2；既有 `check(files)` 契约（4 条断言）逐字保留。
+- 两个脚本各加 `--self-test`（11/11 与 8/8），两份 `ci.yml` 的 `Pre-commit gates` 里
+  补跑自证（这两个脚本本身不在 CI 全量链上：前者扫整个工作区、后者依赖暂存区语义）。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_presubmit_stale_report.py` **19 项** + `tests/test_file_guard_fail_open.py` **15 项**；原 `test_gate_scripts.py` 13 项不回归 |
+| 自证 | `--self-test` **11/11** 与 **8/8** |
+| 变异目标 | 71 → **79**；新增 8 条逐条承重（5 / 5 / 3 / 1 / 1 / 4 / 2 / 2 个用例变红） |
+| 其余门禁 | honesty / caliber `--strict` / closure `--strict` / registry mirror / secrets `--tracked --strict` / structure `--all --strict` / void `--strict` / anonymity `--tracked` 全过 |
+
 ## 2026-11-07 — 作废令牌门禁的五处「查了等于没查」：UTF-16 读出乱码 / PDF 解析失败仍计已扫 / git 失败判通过 / hook 第 6 步从未运行
 
 > 本节只记工具与测试变更，不含任何实验数字。

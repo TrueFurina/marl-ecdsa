@@ -124,6 +124,16 @@ AUDIT_INVARIANT_IDS = {
     "void-cwd-relative-paths",
     "void-downgrade-reason",
     "void-strict-zero-scan",
+    # 2026-11-07：提交前终检把「上一次的旧报告」当新证据、吞掉扫描器退出码 2；
+    # 以及 pre-commit 第 5 步守卫 --pretooluse 通道的两处 fail-open。
+    "presubmit-stale-report-blocks",
+    "presubmit-rc-nonzero-blocks",
+    "presubmit-fresh-flag-honest",
+    "presubmit-claim-fresh-blocks",
+    "presubmit-junit-fresh-blocks",
+    "guard-git-error-blocks",
+    "guard-bad-stdin-blocks",
+    "guard-z-split",
 }
 
 

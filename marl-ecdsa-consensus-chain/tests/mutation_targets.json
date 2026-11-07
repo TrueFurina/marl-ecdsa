@@ -1018,6 +1018,126 @@
         "expect": "all_red"
       },
       "why": "--strict 下零文件仍判通过：空暂存区 / 目录内无匹配扩展名时看到的 ✅ 与「扫过 N 个文件」不可分"
+    },
+    {
+      "id": "presubmit-stale-report-blocks",
+      "file": "scripts/pre_submission_gate.py",
+      "locator": "    if not fresh:\n        reasons.append(\"报告不是本次生成的（读到上一次的陈旧报告 / 工具没落盘）\")",
+      "mutation": "    if False:  # MUTATION-PROBE\n        reasons.append(\"报告不是本次生成的（读到上一次的陈旧报告 / 工具没落盘）\")",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_presubmit_stale_report.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "终检只读磁盘报告判 blocking，磁盘上『上一次成功』的旧报告会被当成这一次的证据；实测 rc=2 且没写报告时 check_void/check_citation 全判 PASS"
+    },
+    {
+      "id": "presubmit-rc-nonzero-blocks",
+      "file": "scripts/pre_submission_gate.py",
+      "locator": "    if rc != 0:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_presubmit_stale_report.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "扫描器退出码 2（读不出/路径缺失/配置错）被终检吞掉：信号印在 detail 里却仍然 PASS，等于把 PR #20 的 fail-closed 又抹平"
+    },
+    {
+      "id": "presubmit-fresh-flag-honest",
+      "file": "scripts/pre_submission_gate.py",
+      "locator": "    return rc, out, (after is not None and after != before)",
+      "mutation": "    return rc, out, True  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_presubmit_stale_report.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "报告指纹必须真实比较；恒为 True 等于宣布『每次都重写了报告』，陈旧证据重新生效"
+    },
+    {
+      "id": "presubmit-claim-fresh-blocks",
+      "file": "scripts/pre_submission_gate.py",
+      "locator": "    if not CLAIM_REPORT.exists() or not fresh:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_presubmit_stale_report.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "code_check 终检原来只判『报告存在』，工具报错时旧报告仍在 ⇒ 通过"
+    },
+    {
+      "id": "presubmit-junit-fresh-blocks",
+      "file": "scripts/pre_submission_gate.py",
+      "locator": "    if not fresh:\n        # 判定仍以 junit 为准",
+      "mutation": "    if False:  # MUTATION-PROBE\n        # 判定仍以 junit 为准",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_presubmit_stale_report.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--with-tests 的 junit 判定同样会读到上一次成功跑留下的旧 XML；本环境 safe-delete 打断 pytest 时正是这种形态"
+    },
+    {
+      "id": "guard-git-error-blocks",
+      "file": "scripts/pre-commit/test_file_guard.py",
+      "locator": "    if error:\n        print(f\"❌ 测试文件禁改守卫：环境错误：{error} —— 一个文件都没检查，不等于合规\",",
+      "mutation": "    if False:  # MUTATION-PROBE\n        print(f\"❌ 测试文件禁改守卫：环境错误：{error} —— 一个文件都没检查，不等于合规\",",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_file_guard_fail_open.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--pretooluse 旧码 except: return 0（注释自称 fail-open），git 不可用时这道守卫等于不存在"
+    },
+    {
+      "id": "guard-bad-stdin-blocks",
+      "file": "scripts/pre-commit/test_file_guard.py",
+      "locator": "            return 2",
+      "mutation": "            return 0  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_file_guard_fail_open.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "stdin 不是合法 JSON 时旧码静默放行；输入格式错误不等于『本次提交合规』"
+    },
+    {
+      "id": "guard-z-split",
+      "file": "scripts/pre-commit/test_file_guard.py",
+      "locator": "    names = [f for f in raw.decode(\"utf-8\", \"replace\").split(\"\\x00\") if f]",
+      "mutation": "    names = [f for f in raw.decode(\"utf-8\", \"replace\").splitlines() if f]  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_file_guard_fail_open.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "按行切 git -z 输出会把含换行的文件名切成两条不存在的路径；旧版用 splitlines 且 stderr 被 DEVNULL 吞掉"
     }
   ]
 }
