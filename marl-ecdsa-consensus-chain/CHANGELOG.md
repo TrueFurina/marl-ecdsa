@@ -15,6 +15,55 @@
 
 ---
 
+## 2026-11-08 — 权威登记表镜像：CI 上唯一生效的校验只查键，改数字也放行
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+`scripts/check_registry_mirror.py` 是 CI 的 `Registry mirror integrity`。权威登记表
+`deliverables/number_registry.json` **不入库**，所以 CI 里这道门禁必然走「权威缺失」
+分支，唯一生效的检查是 `structural_check()` —— 它只看「有没有 id / declared /
+analysis / sources 这些键」。于是**镜像内容可以随便改**。
+
+修前实测（用 `--registry` 指向不存在的权威源、`--mirror` 指向临时镜像，模拟 CI）：
+
+| # | 镜像形态 | 旧行为 |
+|---|---|---|
+| 1 | `{"entries": []}` | `[ok] 结构校验通过（0 条目）` + `rc=0` |
+| 2 | 3 条键齐但内容全假的条目 | `[ok] 结构校验通过（3 条目）` + `rc=0` |
+| 3 | 真实镜像改一条 `declared` | `[ok] 结构校验通过（191 条目）` + `rc=0` |
+| 4 | 真实镜像删掉一条 | `[ok] 结构校验通过（190 条目）` + `rc=0` |
+| 5 | 真实镜像删掉 `_mirror_sha256` | `[ok] 结构校验通过（191 条目）` + `rc=0` |
+| 6 | JSON 损坏 | `JSONDecodeError` traceback，无诊断 |
+| 7 | UTF-16 镜像 | `UnicodeDecodeError` traceback，无诊断 |
+
+### 修法：不需要权威源在场的自洽指纹
+
+`--sync` 写入的 `_mirror_sha256` 是按**权威实体内容**算的规范化指纹，而镜像实体
+又是权威的字节级副本（只多 4 行元数据），因此恒成立：
+
+    entity_fingerprint(strip_mirror(镜像)) == 镜像["_mirror_sha256"]
+
+当前入库镜像实测两侧均为 `sha256:00db05e0d468261e`，所以这个判据**不会让 CI 变红**，
+却能抓住任何对镜像实体的手改。新增 `self_consistent_problems()`（entries 非空 +
+元数据存在/格式 + 指纹自洽）与 `integrity_check()`（结构 + 自洽，统一打印）；
+权威缺失分支改走 `integrity_check`，SKIP 文案里明确写出「一致性仍无法核对，但自洽性照做」。
+
+其余：`load_json_document()` 统一处理 BOM / UTF-16 / GBK / 损坏 JSON / 顶层非对象，
+读不出判退出码 **2** 并给出诊断（不再 traceback）；权威存在分支也先核一遍镜像自洽；
+`--sync` 前校验权威结构、并拒绝单行 JSON（原来 `data.index(b"\n")` 会抛 ValueError）；
+新增 `--self-test`（13 夹具）与两份 `ci.yml` 的自证步骤。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 修后复现 | ①–⑤ 均 `rc=1` 且打印「完整性校验未通过」；⑥ `rc=2` 带「镜像读不出：JSON 解析失败」；⑦ UTF-16 正常解码且指纹自洽 `rc=0` |
+| 当前入库镜像 | `--registry <不存在>`：`[ok] 完整性校验通过（191 条目，指纹自洽 sha256:00db05e0d468261e）` `rc=0` |
+| 新增测试 | `tests/test_registry_mirror_integrity.py` **25 项** |
+| 自证 | `--self-test` **13/13** |
+| 变异目标 | 85 → **91**；新增 6 条逐条承重（7 / 6 / 3 / 5 / 2 / 1 个用例变红） |
+| 其余门禁 | honesty / caliber `--strict` / closure `--strict` / secrets `--tracked --strict` / structure `--all --strict` / void `--strict` / citation `--strict` / 四个既有自证 全过 |
+
 ## 2026-11-08 — 引用黑名单门禁的四处「查了等于没查」：UTF-16 读出乱码 / 零文件判通过 / 相对路径落空 / 降级无证据
 
 > 本节只记工具与测试变更，不含任何实验数字。

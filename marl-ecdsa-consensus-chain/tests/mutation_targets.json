@@ -1228,6 +1228,96 @@
         "expect": "all_red"
       },
       "why": "声明性上下文整行降级是既定策略，但不留 downgrade_reason 就无从核对是哪一条 marker 生效"
+    },
+    {
+      "id": "mirror-skip-uses-integrity",
+      "file": "scripts/check_registry_mirror.py",
+      "locator": "        problems = integrity_check(mir_doc, \"镜像\")",
+      "mutation": "        problems = structural_check(mir_doc, \"镜像\")  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_registry_mirror_integrity.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "CI 里权威源必然缺失，唯一生效的分支退回只看结构：改数字/删条目/清空 entries/删元数据都会重新判通过（实测五种全部 exit 0）"
+    },
+    {
+      "id": "mirror-self-consistent-wired",
+      "file": "scripts/check_registry_mirror.py",
+      "locator": "    problems.extend(self_consistent_problems(doc))",
+      "mutation": "    pass  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_registry_mirror_integrity.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "完整性校验必须把自洽判据接进来；只做 structural_check 等于没校验内容"
+    },
+    {
+      "id": "mirror-empty-entries-blocked",
+      "file": "scripts/check_registry_mirror.py",
+      "locator": "    if not ents:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_registry_mirror_integrity.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "空表不等于结构合格；旧版对 {\"entries\": []} 打印「结构校验通过（0 条目）」"
+    },
+    {
+      "id": "mirror-fingerprint-must-match",
+      "file": "scripts/check_registry_mirror.py",
+      "locator": "        if recorded != actual:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_registry_mirror_integrity.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "镜像实体指纹与 _mirror_sha256 不符是「镜像被手改」的唯一证据，不需要权威源在场"
+    },
+    {
+      "id": "mirror-meta-required",
+      "file": "scripts/check_registry_mirror.py",
+      "locator": "    if recorded is None:\n        problems.append(\"缺少 _mirror_sha256 —— 无法证明镜像实体未被手改\")",
+      "mutation": "    if False:  # MUTATION-PROBE\n        problems.append(\"缺少 _mirror_sha256 —— 无法证明镜像实体未被手改\")",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_registry_mirror_integrity.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "删掉 _mirror_sha256 仍能过旧版结构校验；元数据缺失必须判失败而不是「格式非法」蒙混"
+    },
+    {
+      "id": "mirror-data-error-exit2",
+      "file": "scripts/check_registry_mirror.py",
+      "locator": "    if mir_err:\n        print(f\"[FAIL] 镜像读不出：{mir_err}\")\n        return EXIT_DATA_ERROR",
+      "mutation": "    if mir_err:\n        print(f\"[FAIL] 镜像读不出：{mir_err}\")\n        return EXIT_FAIL  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_registry_mirror_integrity.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "损坏 JSON / 顶层非对象 / 读不出应与「镜像不一致」区分开：退出码 2 且给诊断，不再是 traceback 或 1"
     }
   ]
 }

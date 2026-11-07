@@ -142,6 +142,14 @@ AUDIT_INVARIANT_IDS = {
     "citation-strict-zero-scan",
     "citation-cwd-relative-root",
     "citation-downgrade-reason",
+    # 2026-11-08：CI 上唯一生效的镜像校验只查键不查内容 —— 改数字/删条目/清空
+    # entries/删 _mirror_sha256 都判通过。补上不需要权威源在场的实体指纹自洽判据。
+    "mirror-skip-uses-integrity",
+    "mirror-self-consistent-wired",
+    "mirror-empty-entries-blocked",
+    "mirror-fingerprint-must-match",
+    "mirror-meta-required",
+    "mirror-data-error-exit2",
 }
 
 
