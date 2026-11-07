@@ -132,6 +132,10 @@ jobs:
           python scripts/pre-commit/secrets_scan.py --self-test
           python scripts/pre-commit/structure_guard.py --self-test
           python scripts/pre-commit/honesty_scan.py --self-test
+          # 提交前终检与 pre-commit 第 5 步不在 CI 主链上跑全量（前者扫整个工作区、
+          # 后者依赖暂存区语义），但必须证明它们的失败路径没有退化成静默放行。
+          python scripts/pre_submission_gate.py --self-test
+          python scripts/pre-commit/test_file_guard.py --self-test
           # secrets_scan 自己调 `git ls-files -z` 取清单：此前写的是
           #   secrets_scan.py $(git ls-files)
           # shell 按空格切词，文件名含空格就变成两个不存在的路径，两个都被静默跳过。
