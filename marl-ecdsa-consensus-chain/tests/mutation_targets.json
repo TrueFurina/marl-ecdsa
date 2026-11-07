@@ -1138,6 +1138,96 @@
         "expect": "all_red"
       },
       "why": "按行切 git -z 输出会把含换行的文件名切成两条不存在的路径；旧版用 splitlines 且 stderr 被 DEVNULL 吞掉"
+    },
+    {
+      "id": "citation-utf16-not-decoded",
+      "file": "scripts/scan_citation_blacklist.py",
+      "locator": "    if raw.startswith((b\"\\xff\\xfe\", b\"\\xfe\\xff\")):",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_citation_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "撤回 UTF-16 BOM 分支：scan_text_lines(errors='replace') 把 freederia.com 拆成 f\\x00r\\x00e\\x00...，0 命中却 files_scanned=1（实测 UTF-8 版 blocking=1、UTF-16 版 rc=0）"
+    },
+    {
+      "id": "citation-unreadable-not-counted",
+      "file": "scripts/scan_citation_blacklist.py",
+      "locator": "        if status != STATUS_TEXT:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_citation_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "读不出/二进制文件旧实现仍计入 files_scanned，报告写「扫过 N 个文件」——读不懂不等于没有伪引用"
+    },
+    {
+      "id": "citation-unreadable-blocks",
+      "file": "scripts/scan_citation_blacklist.py",
+      "locator": "    if unreadable:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_citation_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "读不出的文件即使留痕，只要不阻断就仍是「没检查 ⇒ 通过」"
+    },
+    {
+      "id": "citation-strict-zero-scan",
+      "file": "scripts/scan_citation_blacklist.py",
+      "locator": "        if strict:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_citation_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--strict 下零文件仍判通过：空目录 / 目录内只有被排除的 .pdf 时看到的 ✅ 与「扫过 N 个文件」不可分"
+    },
+    {
+      "id": "citation-cwd-relative-root",
+      "file": "scripts/scan_citation_blacklist.py",
+      "locator": "    cand = Path.cwd() / p",
+      "mutation": "    cand = ac.WORKSPACE_ROOT / p  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_citation_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--root 相对路径只按 WORKSPACE_ROOT（项目父目录）拼，项目内相对路径全部落空"
+    },
+    {
+      "id": "citation-downgrade-reason",
+      "file": "scripts/scan_citation_blacklist.py",
+      "locator": "            return mk",
+      "mutation": "            return None  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_citation_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "声明性上下文整行降级是既定策略，但不留 downgrade_reason 就无从核对是哪一条 marker 生效"
     }
   ]
 }

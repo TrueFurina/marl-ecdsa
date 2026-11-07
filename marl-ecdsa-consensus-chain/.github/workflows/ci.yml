@@ -148,9 +148,13 @@ jobs:
 
       - name: Citation gate — synthetic references
         run: |
+          # 自证先行：临时目录现造样本，证明 UTF-16 / 二进制 / 零文件这些
+          # 「查了等于没查」的路径确实被堵上，再拿门禁判仓库。
+          python scripts/scan_citation_blacklist.py --self-test
           python scripts/scan_citation_blacklist.py \
             --root "$PWD" \
             --report "$RUNNER_TEMP/scan_citation_report.json" \
+            --strict \
             --overwrite
 
       # 权威登记表在仓库外（不入库），CI 里必然缺失 → 本步打印 SKIP 并对
