@@ -107,9 +107,13 @@ jobs:
       # （检出目录的父级）解析的，`--root .` 会指向父目录而非仓库根。
       - name: Caliber gate — void tokens (fail-closed)
         run: |
+          # 自证先行：临时目录现造样本，证明 UTF-16 / PDF 解析失败 / git 失败
+          # 这些「查了等于没查」的路径确实被堵上，再拿门禁判仓库。
+          python scripts/scan_void_tokens.py --self-test
           python scripts/scan_void_tokens.py \
             --root "$PWD" \
             --report "$RUNNER_TEMP/scan_void_tokens_report.json" \
+            --strict \
             --overwrite
 
       # ---- pre-commit 门禁全仓化（2026-10-02 纳入 CI）---------------------- #

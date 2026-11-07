@@ -15,6 +15,69 @@
 
 ---
 
+## 2026-11-07 — 作废令牌门禁的五处「查了等于没查」：UTF-16 读出乱码 / PDF 解析失败仍计已扫 / git 失败判通过 / hook 第 6 步从未运行
+
+> 本节只记工具与测试变更，不含任何实验数字。
+
+`scripts/scan_void_tokens.py` 是 pre-commit 第 3/6 步、也是 CI 的
+`Caliber gate — void tokens`。前几节修的是「读不懂 ⇒ 判通过」，这一节修的是
+**报告写了「扫过 N 个文件」，可那份文件根本没被读到**，以及「压根没拿到文件清单」。
+
+| # | 形态 | 旧行为（实测） | 应有 |
+|---|---|---|---|
+| 1 | UTF-16 文档 | `scan_text_lines()` 用 `errors="replace"` 解码，`6026` 被拆成 `6\x000\x002\x006`，数字边界正则再也匹配不上；**0 命中**却 `files_scanned=1` | BOM 嗅探 + utf-8/gbk 回退，读得出就扫 |
+| 2 | PDF / PPTX 解析失败 | `extract_pdf_body()` 在 pypdf 不可用或解析失败时返回 `[]`，主循环当成「扫过但没命中」，`files_scanned=1`；本机实测 `pypdf` 未安装、requirements 里也没声明 | 记 `parse_failed`，**不计入**已扫，并判失败 |
+| 3 | git 不可用 / 不在仓库里 | `_staged_files()` 的 `except Exception: return []` 与「暂存区确实是空的」不可分，打印「暂存区无文件，跳过扫描」+ `rc=0` | 返回 `(路径, 错误)`，错误非空判退出码 2 |
+| 4 | `--paths` 路径不存在 | 不存在的路径被静默丢弃；全部不存在则「指定路径均不存在，跳过扫描」+ `rc=0`。且相对路径只按 `WORKSPACE_ROOT`（项目父目录）拼，项目内相对路径全部落空 | 缺失留痕；全缺失判 2；相对路径先按 cwd 找、再按工作区根找 |
+| 5 | 零文件 / hook 第 6 步 | 空暂存区、目录内无匹配扩展名都判通过且不打计数；第 6 步写死的 `deliverables/工程与代码锐评_20261001.md` 在工作区私有层、**不入库**，干净 checkout 上实测「指定路径均不存在，跳过扫描」+ `rc=0` —— 这道门在克隆者机器上从未运行 | 打印扫描计数；`--strict` 下零文件判 2；hook 加存在性判断与暂存区严格复扫兜底 |
+
+### 实测证据（临时目录现造，不依赖仓库状态）
+
+1. 同一句 `吞吐 6026 TPS` 存成 UTF-8 → `blocking=1, rc=1`；存成 UTF-16 → 旧版
+   `hits=0 / files_scanned=1 / rc=0`，新版 `blocking=1 / rc=1`；UTF-8 BOM 与 GBK 同样检出。
+2. 造一个不是真 PDF 的 `.pdf`（本机无 `pypdf`）：旧版
+   `hits=0 / files_scanned=1 / rc=0`；新版 `unreadable=1 / files_scanned=0 / rc=2`，
+   报告里留 `parse_failed` 与原因。
+3. 真·非 git 目录跑 `--cached`：旧版「暂存区无文件，跳过扫描」`rc=0`；新版
+   `❌ 环境错误：git 退出码 129：…` `rc=2`。
+4. hook 第 6 步那条命令在干净树上：旧版 `rc=0`；新版 `❌ 1 个指定路径不存在` `rc=2`，
+   hook 模板已改为「文档在则严格扫、不在则明确告知并对暂存区严格复扫」。
+5. 项目内相对路径 `_exp/thesis/README_demo.md`：旧版解析成工作区父目录下的同名路径
+   （不存在）→ 全部丢弃 → `rc=0`；新版按 cwd 命中并 `rc=1`。
+
+### 一处**没有**改动的既定策略（如实记录，不假装修了）
+
+`context_markers.mention` 有 **77 个词**（含 `→`、`并非`、`取代`、`应改为`），任一出现
+在该行就把**整行所有命中**降为 `info`（不阻断）。实测：
+`吞吐 6026 TPS → 见正文` 与 `吞吐 6026 TPS，应改为新口径` 都判 `rc=0`，去掉 marker
+立刻 `rc=1`。这与上一节 `secrets_scan` 的哈希字段整行豁免同构，但**它是被
+`tests/test_scan_void_tokens.py::test_mention_context_downgrades_to_info` 明确钉死的
+设计契约**：历史快照文档靠它豁免存量作废数字，收紧会让全仓扫描转红。本轮**不改判定**，
+只给每条命中补 `downgrade_reason`（如 `mention:→` / `code_line_ref` / `needs_review`），
+让「为什么这一条没阻断」可被核对。它是仍开着的策略性放宽，不是已修复的缺陷。
+
+### 改法
+
+- `read_lines()` 返回 `(行列表, status, reason)`，状态只有 `text` 才计入 `files_scanned`；
+  `scan_paths_detailed()` 额外返回 `unreadable`，报告新增 `unreadable / missing_paths` 计数
+  与明细；原 `scan_paths()` 保留**两元组**兼容（既有 15 项契约测试依赖它）。
+- `_staged_files()` 改 `-c core.quotePath=false ... -z --diff-filter=ACMR` 并返回错误说明；
+  `resolve_paths()` 先按 cwd 再按工作区根解析；新增 `decide_exit()` 纯函数统一判定。
+- 新增 `--strict`、`--self-test`（16 夹具）；收尾固定打印
+  「扫过 N 个文件 / 读不出 M / 指定路径缺失 K」。
+- 调用点：hook 第 3 步 `|| exit $?`、第 6 步存在性判断 + 严格兜底；两份 `ci.yml`
+  的 `Caliber gate` 改为「自证先行 + `--strict`」。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| 新增测试 | `tests/test_void_tokens_silent_skip.py` **28 项**；原 `test_scan_void_tokens.py` 15 项不回归 |
+| 自证 | `--self-test` **16/16** |
+| 变异目标 | 63 → **71**；新增 8 条逐条承重（3 / 2 / 3 / 3 / 4 / 2 / 2 / 3 个用例变红） |
+| 本仓实跑 | `--root <项目> --strict`：**529 个文件 / 0 blocking / 0 读不出 / 0 路径缺失**，`rc=0` |
+| 其余门禁 | honesty / caliber `--strict` / closure `--strict` / registry mirror / secrets `--tracked --strict` / structure `--all --strict` / anonymity `--tracked` 全过 |
+
 ## 2026-11-06 — 密钥扫描与结构守卫的六处「查了等于没查」：哈希字段整行豁免 / `.github` 被当 `.git` 跳过 / git 失败 return 0 / `git mv` 到根级看不见
 
 > 本节只记工具与测试变更，不含任何实验数字。
