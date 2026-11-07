@@ -12,14 +12,25 @@ python scripts/pre-commit/secrets_scan.py --staged || exit $?
 echo "=== [2/7] 诚实口径 ==="
 python scripts/pre-commit/honesty_scan.py --cached || exit 1
 echo "=== [3/7] 作废令牌/口径门禁（fail-closed，仅扫暂存区，覆盖 thesis 与对外 PDF）==="
-python scripts/scan_void_tokens.py --cached || exit 1
+# 退出码 2 = git 不可用 / 一个都没扫到（以前是「跳过扫描」+ exit 0）
+python scripts/scan_void_tokens.py --cached || exit $?
 echo "=== [4/7] 结构守卫 ==="
 # 退出码 2 = git 不可用 / 不在仓库里（以前是打印警告后 return 0）
 python scripts/pre-commit/structure_guard.py || exit $?
 echo "=== [5/7] 测试文件禁改守卫 ==="
 python scripts/pre-commit/test_file_guard.py --staged || exit 1
 echo "=== [6/7] 锐评文档口径门禁（fail-closed，阻断作废口径回潮）==="
-python scripts/scan_void_tokens.py --paths "deliverables/工程与代码锐评_20261001.md" --overwrite || exit 1
+# 这份锐评文档在工作区私有层（WORKSPACE_ROOT/deliverables），**不入库**。
+# 2026-11-07 实测：在干净 checkout 上该路径不存在，旧版打印
+# 「指定路径均不存在，跳过扫描」后 exit 0 —— 第 6 步在克隆者机器上从未运行过。
+# 现在：文档在则严格扫它；不在则明确告知，并对暂存区做严格复扫兜底。
+DOC="deliverables/工程与代码锐评_20261001.md"
+if [ -f "../$DOC" ] || [ -f "$DOC" ]; then
+    python scripts/scan_void_tokens.py --paths "$DOC" --strict --overwrite || exit $?
+else
+    echo "[6/7] 私有锐评文档不在本工作区；改对暂存区严格复扫兜底"
+    python scripts/scan_void_tokens.py --cached --strict --overwrite || exit $?
+fi
 echo "=== [7/7] 匿名/机器路径门禁（补 secrets_scan 明确豁免的那半边）==="
 # 为什么必须与 secrets_scan 并存：secrets_scan 按设计**豁免绝对路径**
 # （tests/test_secrets_scan.py::test_exempts_absolute_path），因此

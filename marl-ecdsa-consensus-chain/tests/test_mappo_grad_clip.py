@@ -13,9 +13,14 @@ import types
 
 import numpy as np
 import pytest
-import torch
 
-from marl.algorithms.mappo import MAPPOTrainer, HAS_TORCH
+# 回退档 job 刻意不装 torch。此前顶层 ``import torch`` 在模块收集期就抛
+# ImportError，连下面的 ``skipif(not HAS_TORCH)`` 都来不及生效 —— 于是整个
+# 测试套件在收集阶段中断（exit 2），而不是「跳过这几条用例」。
+# 与 tests/test_cooperation_detector_ml.py 的 importorskip 约定保持一致。
+torch = pytest.importorskip("torch", reason="无 torch 的回退档跳过本模块")
+
+from marl.algorithms.mappo import MAPPOTrainer, HAS_TORCH  # noqa: E402
 
 logging.basicConfig(level=logging.CRITICAL)
 

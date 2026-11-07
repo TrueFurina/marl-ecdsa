@@ -898,6 +898,126 @@
         "expect": "all_red"
       },
       "why": "撤回重命名/复制/修改：git mv docs/report.md ./report.md 是 R100，只取 A 时文件列表为空 —— 而根级平铺恰恰最常由搬运既有文件产生"
+    },
+    {
+      "id": "void-utf16-not-decoded",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "    if raw.startswith((b\"\\xff\\xfe\", b\"\\xfe\\xff\")):",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "撤回 UTF-16 BOM 分支：旧实现 errors='replace' 把 6026 拆成 6\\x000\\x002\\x006，数字边界正则永不命中，却照样 files_scanned+1（audited 2026-11-07）"
+    },
+    {
+      "id": "void-unreadable-not-counted",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "        if status != STATUS_TEXT:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "PDF/PPTX 解析失败返回空行列表时，旧实现仍计入 files_scanned，报告写「扫过 1 个文件」——读不懂不等于没有作废令牌"
+    },
+    {
+      "id": "void-git-error-not-pass",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "        return ac.EXIT_USAGE, f\"环境错误：{error} —— 没拿到文件清单不等于没有作废令牌\"",
+      "mutation": "        return ac.EXIT_OK, \"\"  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "_staged_files 旧实现 except: return []，git 不可用时与「暂存区确实为空」不可分；恢复成判 0 即放回这个假绿"
+    },
+    {
+      "id": "void-unreadable-blocks",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "    if unreadable:",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "读不出/解析失败的文件即使留痕，只要不阻断就仍是「没检查 ⇒ 通过」"
+    },
+    {
+      "id": "void-missing-path-blocks",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "    if missing and (strict or files_scanned == 0):",
+      "mutation": "    if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--paths 里不存在的路径旧版被静默丢弃，全部缺失时打印「跳过扫描」+ exit 0；hook 第 6 步在干净 checkout 上正是这样空转"
+    },
+    {
+      "id": "void-cwd-relative-paths",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "            cand = [Path.cwd() / p, ac.WORKSPACE_ROOT / p]",
+      "mutation": "            cand = [ac.WORKSPACE_ROOT / p]  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "相对路径只按 WORKSPACE_ROOT（项目父目录）拼，项目内相对路径全部落空并被当作「不存在」跳过"
+    },
+    {
+      "id": "void-downgrade-reason",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "                        why = f\"mention:{marker}\"",
+      "mutation": "                        why = \"\"  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "77 个 mention marker 会把真数字整行降为 info；不留 downgrade_reason 就无从核对是哪一条放宽生效"
+    },
+    {
+      "id": "void-strict-zero-scan",
+      "file": "scripts/scan_void_tokens.py",
+      "locator": "        if strict:",
+      "mutation": "        if False:  # MUTATION-PROBE",
+      "check": {
+        "kind": "pytest",
+        "args": [
+          "tests/test_void_tokens_silent_skip.py",
+          "-q"
+        ],
+        "expect": "all_red"
+      },
+      "why": "--strict 下零文件仍判通过：空暂存区 / 目录内无匹配扩展名时看到的 ✅ 与「扫过 N 个文件」不可分"
     }
   ]
 }

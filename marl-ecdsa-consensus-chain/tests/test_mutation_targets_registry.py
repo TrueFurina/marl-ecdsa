@@ -113,6 +113,17 @@ AUDIT_INVARIANT_IDS = {
     "structure-git-error-fail-open",
     "structure-strict-zero-scan",
     "structure-diff-filter-a-only",
+    # 2026-11-07：作废令牌门禁的五处「查了等于没查」——UTF-16 读出乱码仍计已扫、
+    # PDF 解析失败仍计已扫、git 失败判通过、路径不存在静默跳过、零文件通过；
+    # 外加降级证据与相对路径基准。
+    "void-utf16-not-decoded",
+    "void-unreadable-not-counted",
+    "void-git-error-not-pass",
+    "void-unreadable-blocks",
+    "void-missing-path-blocks",
+    "void-cwd-relative-paths",
+    "void-downgrade-reason",
+    "void-strict-zero-scan",
 }
 
 

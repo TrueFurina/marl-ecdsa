@@ -147,9 +147,13 @@ jobs:
       # ---- 口径门禁（rules 已分层入库，CI 无私有配置时规则依然生效）--------
       - name: Caliber gate — void tokens (fail-closed)
         run: |
+          # 自证先行：临时目录现造样本，证明 UTF-16 / PDF 解析失败 / git 失败
+          # 这些「查了等于没查」的路径确实被堵上，再拿门禁判仓库。
+          python scripts/scan_void_tokens.py --self-test
           python scripts/scan_void_tokens.py \
             --root "$PWD" \
             --report "$RUNNER_TEMP/scan_void_tokens_report.json" \
+            --strict \
             --overwrite
 
       - name: Pre-commit gates — repo-wide (fail-closed)
