@@ -45,6 +45,9 @@ class NetworkConsensusNode:
         allow_insecure_register: bool = False,  # BUG1: 透传给 P2PNode
         enable_tls: bool = True,  # BUG4: 透传给 P2PNode（默认开启）
         tls_dir: str = "keys/tls",  # BUG4: 透传给 P2PNode
+        use_batch_async_verify: bool = False,  # 共识投票批量异步验签 offload 开关（默认关闭；开启=needs-design 批量热路径改造，须全面回归）
+        batch_verify_threshold: int = 16,  # 批量 flush 阈值（缓冲达此值即内联批量验签）
+        batch_verify_flush_timeout: float = 0.002,  # 批量 flush 定时器超时（秒）
         use_async_verify: bool = False,  # 共识投票验签异步 offload 开关（默认关闭；开启=needs-design 接入，须全面回归）
     ):
         self.node_id = node_id
@@ -58,6 +61,15 @@ class NetworkConsensusNode:
         # 共识验签异步 offload 开关：默认 False = 走原同步 _verify_vote_signature（行为逐字一致）；
         # 开启后三处共识处理器改走 _verify_vote_signature_async（await verify_cached_async，offload 出 event loop）。
         self._use_async_verify = use_async_verify
+        # 共识投票批量异步验签 offload 开关：默认 False = 不进入批量分支（_verify_vote_signature_auto
+        # 行为与历史逐字一致）；开启后按 (block_height, phase) 缓冲投票，达阈值/超时后一次
+        # verify_batch_async 批量 offload。fail-safe：批量异常整批回退逐票同步，绝不漏检伪造票。
+        self._use_batch_async_verify = use_batch_async_verify
+        self._batch_threshold = batch_verify_threshold
+        self._batch_flush_timeout = batch_verify_flush_timeout
+        # 批量验签缓冲：键=(block_height, phase) -> 列表[(data, voter_id, asyncio.Future)]
+        self._verify_batches: Dict = {}
+        self._verify_batch_timers: Dict = {}
 
         # P2P 底层通信（P1-9修复：传递key_manager给P2PNode；BUG1/BUG4 透传）
         self.p2p = P2PNode(
@@ -618,13 +630,122 @@ class NetworkConsensusNode:
     async def _verify_vote_signature_auto(self, data: Dict, voter_id: str) -> bool:
         """
         共识验签统一入口（opt-in 分支）：
-        - use_async_verify=False（默认）：走原同步 _verify_vote_signature，行为与历史逐字一致；
-        - use_async_verify=True：走 _verify_vote_signature_async（异步 offload）。
-        三处共识处理器统一通过本方法 await，开关关闭时零行为改动。
+        - use_batch_async_verify=True：走 _verify_vote_signature_batch（批量异步 offload，失败安全）；
+        - use_async_verify=True：走 _verify_vote_signature_async（逐票异步 offload）；
+        - 两者均默认 False：走原同步 _verify_vote_signature，行为与历史逐字一致。
+        三处共识处理器统一通过本方法 await，所有开关关闭时零行为改动。
         """
+        if self._use_batch_async_verify:
+            return await self._verify_vote_signature_batch(data, voter_id)
         if self._use_async_verify:
             return await self._verify_vote_signature_async(data, voter_id)
         return self._verify_vote_signature(data, voter_id)
+
+    # -------------------------------------------------------------------------
+    # 共识投票批量异步验签 offload（opt-in，默认关闭；needs-design 热路径改造）
+    # -------------------------------------------------------------------------
+
+    def _verify_vote_signature_quick_decision(self, data: Dict, voter_id: str):
+        """批量路径下『无需真验签即可定论』分支，返回 bool 或 None（None=需走真验签）。
+
+        与 _verify_vote_signature 的无 crypto 分支逐字对应：
+        - 无 signature_hex 且 key_manager 存在 -> False；
+        - 无 signature_hex 且 key_manager 缺失 -> insecure 放行/拒绝；
+        - key_manager 缺失 -> insecure 长度兜底/拒绝；
+        - 公钥缺失 -> False。
+        """
+        sig_hex = data.get("signature_hex")
+        if sig_hex is None:
+            if self.key_manager is not None:
+                return False
+            return True if self._allow_insecure_vote else False
+        if self.key_manager is None:
+            if self._allow_insecure_vote:
+                try:
+                    return len(bytes.fromhex(sig_hex)) >= 64
+                except Exception:
+                    return False
+            return False
+        pub_key = self.key_manager.get_public_key(voter_id)
+        if pub_key is None:
+            return False
+        return None  # 需走真验签
+
+    async def _verify_vote_signature_batch(self, data: Dict, voter_id: str) -> bool:
+        """批量异步验签路径（opt-in，仅 use_batch_async_verify=True 时由 _verify_vote_signature_auto 调用）。
+
+        按 (block_height, phase) 缓冲到达的投票；缓冲达 batch_verify_threshold 或
+        batch_verify_flush_timeout 超时后，一次 verify_batch_async 批量 offload。
+        每张票独立拿到自己的布尔结果后才放行对应处理器——顺序保真、失败票统一丢弃。
+        失败安全：批量验签抛异常时整批回退逐票同步，绝不漏检伪造票。
+        """
+        loop = asyncio.get_running_loop()
+        key = (data.get("block_height"), data.get("phase"))
+        fut = loop.create_future()
+        buf = self._verify_batches.setdefault(key, [])
+        buf.append((data, voter_id, fut))
+        if len(buf) >= self._batch_threshold:
+            await self._flush_verify_batch(key)
+        elif key not in self._verify_batch_timers:
+            self._verify_batch_timers[key] = loop.call_later(
+                self._batch_flush_timeout,
+                lambda k=key: asyncio.ensure_future(self._flush_verify_batch(k)),
+            )
+        return await fut
+
+    async def _flush_verify_batch(self, key):
+        """flush 一个 (block_height, phase) 缓冲：批量验签并逐票 set_result。
+
+        失败安全：verify_batch_async 抛异常时，整批回退为逐票同步 _verify_vote_signature，
+        保证可用性且不弱化验证（绝不漏检伪造票）。
+        """
+        pending = self._verify_batches.pop(key, [])
+        timer = self._verify_batch_timers.pop(key, None)
+        if timer is not None:
+            timer.cancel()
+        if not pending:
+            return
+        try:
+            from ..crypto.ecdsa_utils import ECDSAUtils
+
+            entries = []
+            entry_map = []  # 与 pending 索引对齐（仅收录需真验签的票）
+            for idx, (data, voter_id, fut) in enumerate(pending):
+                if fut.done():
+                    continue
+                quick = self._verify_vote_signature_quick_decision(data, voter_id)
+                if quick is not None:
+                    fut.set_result(quick)
+                    continue
+                # 需真验签：构造与同步 _verify_vote_signature 对称的验签材料
+                try:
+                    verify_data = {
+                        "voter_id": data.get("voter_id", ""),
+                        "block_hash": data.get("block_hash", ""),
+                        "phase": data.get("phase", ""),
+                        "weight": data.get("weight", 1.0),
+                        "timestamp": data.get("timestamp", 0),
+                        "block_height": data.get("block_height"),
+                    }
+                    message_bytes = json.dumps(verify_data, sort_keys=True).encode('utf-8')
+                    message_hash = hashlib.sha256(message_bytes).digest()
+                    signature_bytes = bytes.fromhex(data["signature_hex"])
+                    pub_key = self.key_manager.get_public_key(voter_id)
+                    entries.append((pub_key, message_hash, signature_bytes))
+                    entry_map.append(idx)
+                except Exception:
+                    # 材料构造失败（如坏 hex）：直接判 False（与同步外层 except 同口径）
+                    fut.set_result(False)
+            if entries:
+                results = await ECDSAUtils.verify_batch_async(entries)
+                for r_i, p_idx in enumerate(entry_map):
+                    _, _, fut = pending[p_idx]
+                    fut.set_result(results[r_i])
+        except Exception:
+            # 整批回退逐票同步（绝不漏检）
+            for (data, voter_id, fut) in pending:
+                if not fut.done():
+                    fut.set_result(self._verify_vote_signature(data, voter_id))
 
     # -------------------------------------------------------------------------
     # 权重更新（由外部激励模块调用）
@@ -675,7 +796,8 @@ class P2PConsensusNetwork:
                  tls_dir: str = "keys/tls",  # BUG4: 透传
                  node_addrs: Optional[Dict[str, tuple]] = None,  # D3 跨主机：node_id -> (host, port)
                  local_node_ids: Optional[List[str]] = None,  # D3 跨主机：本进程启动的节点子集
-                 use_async_verify: bool = False):  # 共识验签异步 offload 开关（透传，默认关闭）
+                 use_async_verify: bool = False,  # 共识验签异步 offload 开关（透传，默认关闭）
+                 use_batch_async_verify: bool = False):  # 共识投票批量异步验签 offload 开关（透传，默认关闭）
         self.n_nodes = n_nodes
         self.base_port = base_port
         self.node_ids = [f"agent_{i}" for i in range(n_nodes)]
@@ -694,6 +816,8 @@ class P2PConsensusNetwork:
         self._local_node_ids = list(local_node_ids) if local_node_ids else list(self.node_ids)
         # 共识验签异步 offload 开关（透传，默认关闭）
         self._use_async_verify = use_async_verify
+        # 共识投票批量异步验签 offload 开关（透传，默认关闭）
+        self._use_batch_async_verify = use_batch_async_verify
 
         # 统计
         self.total_consensus_rounds = 0
@@ -729,6 +853,7 @@ class P2PConsensusNetwork:
                 enable_tls=self._enable_tls,  # BUG4 透传
                 tls_dir=self._tls_dir,  # BUG4 透传
                 use_async_verify=self._use_async_verify,  # 共识验签异步 offload 开关（透传）
+                use_batch_async_verify=self._use_batch_async_verify,  # 共识投票批量异步验签 offload 开关（透传）
             )
             node.start()
             self.nodes[node_id] = node
