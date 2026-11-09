@@ -45,6 +45,7 @@ class NetworkConsensusNode:
         allow_insecure_register: bool = False,  # BUG1: 透传给 P2PNode
         enable_tls: bool = True,  # BUG4: 透传给 P2PNode（默认开启）
         tls_dir: str = "keys/tls",  # BUG4: 透传给 P2PNode
+        use_async_verify: bool = False,  # 共识投票验签异步 offload 开关（默认关闭；开启=needs-design 接入，须全面回归）
     ):
         self.node_id = node_id
         self.host = host
@@ -54,6 +55,9 @@ class NetworkConsensusNode:
         self.consensus_mode = consensus_mode
         # BUG2 修复：投票签名默认 fail-closed（生产必须配 key_manager）
         self._allow_insecure_vote = allow_insecure_vote
+        # 共识验签异步 offload 开关：默认 False = 走原同步 _verify_vote_signature（行为逐字一致）；
+        # 开启后三处共识处理器改走 _verify_vote_signature_async（await verify_cached_async，offload 出 event loop）。
+        self._use_async_verify = use_async_verify
 
         # P2P 底层通信（P1-9修复：传递key_manager给P2PNode；BUG1/BUG4 透传）
         self.p2p = P2PNode(
@@ -261,7 +265,7 @@ class NetworkConsensusNode:
         # P0修复（2026-10-15）：PRE-PREPARE 也必须验签，与 _on_prepare/_on_commit 同口径。
         # 此前唯独本 handler 缺校验：伪造报文可触发下方 reset() 抹掉已达成的
         # COMMITTED 状态，构成活性攻击（测试 test_preprepare_auth.py 的守护意图）。
-        if not self._verify_vote_signature(data, primary_id):
+        if not await self._verify_vote_signature_auto(data, primary_id):
             logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PRE-PREPARE：签名验证失败 from {primary_id}")
             return
 
@@ -326,7 +330,7 @@ class NetworkConsensusNode:
         voter_id = data.get("voter_id", from_node)
 
         # P1-7修复：验证投票签名，确认voter_id与签名公钥绑定
-        if not self._verify_vote_signature(data, voter_id):
+        if not await self._verify_vote_signature_auto(data, voter_id):
             logger.warning(f"[NetConsensus] {self.node_id} 丢弃 PREPARE：签名验证失败 from {voter_id}")
             return
 
@@ -378,7 +382,7 @@ class NetworkConsensusNode:
         voter_id = data.get("voter_id", from_node)
 
         # P1-7修复：验证投票签名，确认voter_id与签名公钥绑定
-        if not self._verify_vote_signature(data, voter_id):
+        if not await self._verify_vote_signature_auto(data, voter_id):
             logger.warning(f"[NetConsensus] {self.node_id} 丢弃 COMMIT：签名验证失败 from {voter_id}")
             return
 
@@ -545,6 +549,83 @@ class NetworkConsensusNode:
             logger.warning(f"[NetConsensus] 签名验证异常: voter={voter_id}, {e}")
             return False
 
+    async def _verify_vote_signature_async(self, data: Dict, voter_id: str) -> bool:
+        """
+        异步版投票签名验证（opt-in，仅当 use_async_verify=True 时由三处共识处理器调用）。
+
+        与原同步 _verify_vote_signature 逻辑逐字对应，唯二差异：
+        1. 本方法为 async def，调用方需 await；
+        2. 公钥验签改用 ``await ECDSAUtils.verify_cached_async(...)``，把 CPU 密集的
+           ECDSA 验签 offload 到 worker 线程，解除共识热路径对 event loop 的阻塞。
+        默认关闭，故不改变任何现有同步行为；本方法本身零风险。
+        """
+        signature_hex = data.get("signature_hex")
+        if signature_hex is None:
+            if self.key_manager is not None:
+                logger.warning(f"[NetConsensus] 投票无签名: voter={voter_id}")
+                return False
+            if self._allow_insecure_vote:
+                logger.debug(f"[NetConsensus] 非生产安全模式(insecure)：放行无签名投票 voter={voter_id}")
+                return True
+            logger.warning(
+                f"[NetConsensus] 投票签名验证失败(默认fail-closed): key_manager未配置且未开启"
+                f"insecure模式，拒绝无签名投票 voter={voter_id}"
+            )
+            return False
+
+        try:
+            verify_data = {
+                "voter_id": data.get("voter_id", ""),
+                "block_hash": data.get("block_hash", ""),
+                "phase": data.get("phase", ""),
+                "weight": data.get("weight", 1.0),
+                "timestamp": data.get("timestamp", 0),
+                # F13：轮次高度进签名体验证体（与 _broadcast_vote 的签名体对称；
+                # 旧报文缺该键时两侧同为 None，验签语义不变）
+                "block_height": data.get("block_height"),
+            }
+            message_bytes = json.dumps(verify_data, sort_keys=True).encode('utf-8')
+            message_hash = hashlib.sha256(message_bytes).digest()
+            signature_bytes = bytes.fromhex(signature_hex)
+
+            if self.key_manager is not None:
+                pub_key = self.key_manager.get_public_key(voter_id)
+                if pub_key is None:
+                    logger.warning(f"[NetConsensus] 无法获取voter={voter_id}的公钥")
+                    return False
+                from ..crypto.ecdsa_utils import ECDSAUtils
+                # 异步 offload：把 ECDSA 验签移到 worker 线程，避免阻塞 event loop
+                verified = await ECDSAUtils.verify_cached_async(pub_key, message_hash, signature_bytes)
+                if not verified:
+                    logger.warning(
+                        f"[NetConsensus] 签名验证失败: voter={voter_id}，"
+                        f"voter_id与签名公钥不绑定"
+                    )
+                return verified
+            else:
+                if self._allow_insecure_vote:
+                    # 仅连通性测试：校验签名字节长度（ECDSA secp256r1 下界≥64），不真验签
+                    return len(signature_bytes) >= 64
+                logger.warning(
+                    f"[NetConsensus] 投票签名验证失败(默认fail-closed): key_manager未配置且未开启"
+                    f"insecure模式，拒绝投票 voter={voter_id}"
+                )
+                return False
+        except Exception as e:
+            logger.warning(f"[NetConsensus] 签名验证异常: voter={voter_id}, {e}")
+            return False
+
+    async def _verify_vote_signature_auto(self, data: Dict, voter_id: str) -> bool:
+        """
+        共识验签统一入口（opt-in 分支）：
+        - use_async_verify=False（默认）：走原同步 _verify_vote_signature，行为与历史逐字一致；
+        - use_async_verify=True：走 _verify_vote_signature_async（异步 offload）。
+        三处共识处理器统一通过本方法 await，开关关闭时零行为改动。
+        """
+        if self._use_async_verify:
+            return await self._verify_vote_signature_async(data, voter_id)
+        return self._verify_vote_signature(data, voter_id)
+
     # -------------------------------------------------------------------------
     # 权重更新（由外部激励模块调用）
     # -------------------------------------------------------------------------
@@ -593,7 +674,8 @@ class P2PConsensusNetwork:
                  enable_tls: bool = True,  # BUG4: 默认开启
                  tls_dir: str = "keys/tls",  # BUG4: 透传
                  node_addrs: Optional[Dict[str, tuple]] = None,  # D3 跨主机：node_id -> (host, port)
-                 local_node_ids: Optional[List[str]] = None):  # D3 跨主机：本进程启动的节点子集
+                 local_node_ids: Optional[List[str]] = None,  # D3 跨主机：本进程启动的节点子集
+                 use_async_verify: bool = False):  # 共识验签异步 offload 开关（透传，默认关闭）
         self.n_nodes = n_nodes
         self.base_port = base_port
         self.node_ids = [f"agent_{i}" for i in range(n_nodes)]
@@ -610,6 +692,8 @@ class P2PConsensusNetwork:
         # 默认均为 None 时行为与单机回环模式完全一致（BASE_HOST + base_port 递增）。
         self._node_addrs = dict(node_addrs) if node_addrs else {}
         self._local_node_ids = list(local_node_ids) if local_node_ids else list(self.node_ids)
+        # 共识验签异步 offload 开关（透传，默认关闭）
+        self._use_async_verify = use_async_verify
 
         # 统计
         self.total_consensus_rounds = 0
@@ -644,6 +728,7 @@ class P2PConsensusNetwork:
                 allow_insecure_register=self._allow_insecure_register,  # BUG1 透传
                 enable_tls=self._enable_tls,  # BUG4 透传
                 tls_dir=self._tls_dir,  # BUG4 透传
+                use_async_verify=self._use_async_verify,  # 共识验签异步 offload 开关（透传）
             )
             node.start()
             self.nodes[node_id] = node
