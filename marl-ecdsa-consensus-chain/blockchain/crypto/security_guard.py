@@ -53,6 +53,12 @@ class SecurityGuard:
         self._r_registry: Dict[str, OrderedDict] = defaultdict(OrderedDict)
         # 每个 agent 因超出 MAX_R_ENTRIES 被淘汰的条数（用于检测降级自查）
         self._r_evicted: Dict[str, int] = defaultdict(int)
+        # 优化（2026-11-10 自进化）：按 agent 维护"已淘汰 r 值"的内存集合，
+        # 使复用检测在稳态下走 O(1) 集合成员判断，免去每查一次的 sha256(_r_digest)。
+        # ⚠️ 本集合**不是**真值源：跨重启后它为空，此时 _check_r_reuse 回落到
+        #    _r_evicted_digests 摘要档案查询（见下方 lookup 分支）。因此本优化对
+        #    正确性零影响、失败安全——最坏退化为原行为，绝不漏检 k 重用。
+        self._r_evicted_by_agent: Dict[str, Set[int]] = defaultdict(set)
         # 已被淘汰的 r 的摘要档案（跨窗口的自检测能力，见 _r_digest）
         #
         # ⚠️ 本集合**刻意不设上限**，请勿"优化"成有界队列：
@@ -200,7 +206,11 @@ class SecurityGuard:
             )
         # 查"已淘汰"档案：被 FIFO 挤出内存的 r 也必须能被认出来，
         # 否则淘汰就等于给攻击者开了一个可复用的窗口（实测能放行真实重用）。
-        if self._r_digest(agent_id, r) in self._r_evicted_digests:
+        # 优化（2026-11-10 自进化）：稳态优先走按 agent 的内存集合（O(1)，
+        # 免去每查一次 sha256）；跨重启冷启动场景下该集合为空，回落到摘要档案
+        # 查询（_r_evicted_digests 才是真值源，随快照持久化）。失败安全。
+        if r in self._r_evicted_by_agent.get(agent_id, ()) or \
+                self._r_digest(agent_id, r) in self._r_evicted_digests:
             return False, (
                 f"k值重用攻击检测（历史档案命中）！agent={agent_id} 的 r 值 "
                 f"{hex(r)[:16]}... 曾出现过（已超出内存窗口、从淘汰档案中认出），"
@@ -237,6 +247,7 @@ class SecurityGuard:
             while len(reg) > self.MAX_R_ENTRIES:
                 old_r, _ = reg.popitem(last=False)      # FIFO：弹出最早插入的
                 self._r_evicted_digests.add(self._r_digest(aid, old_r))
+                self._r_evicted_by_agent[aid].add(old_r)
                 self._r_evicted[aid] += 1
 
     def get_detection_status(self) -> Dict:
@@ -380,6 +391,7 @@ class SecurityGuard:
         因此重置只清"当前准入状态"（r 表 / nonce 表 / 失败计数），历史重用证据保留。
         """
         self._r_registry.pop(agent_id, None)
+        self._r_evicted_by_agent.pop(agent_id, None)
         self._nonce_registry.pop(agent_id, None)
         self._fail_counts.pop(agent_id, None)
         logger.info(f"[SecurityGuard] 已重置 {agent_id} 的安全记录")
