@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 
 import pytest
 
@@ -198,3 +199,88 @@ class TestHandlerWiring:
             src = inspect.getsource(handler)
             assert "await self._verify_vote_signature_auto" in src, \
                 f"{handler.__name__} 未接线 await self._verify_vote_signature_auto"
+
+
+# ---------------------------------------------------------------------------
+# 5) 事件循环响应性（确定性证明 offload 释放 event loop，无需抖动计时）
+# ---------------------------------------------------------------------------
+
+class TestEventLoopResponsive:
+    def test_async_keeps_loop_responsive_while_sync_blocks(self):
+        """确定性验证：同步验签在 event loop 线程内阻塞循环；异步 offload 释放循环。
+
+        方法：在运行验签批处理的同时启动一个心跳协程（每轮 yield 一次即 +1）。
+        同步路径（默认关闭）把验签作为 CPU 密集调用阻塞在 loop 线程，心跳在批处理
+        期间几乎不推进；异步路径把验签 offload 到 worker 线程，loop 在等待期间持续
+        运行心跳。由此确定性地证明 offload 达成其设计目的，不依赖易抖动的计时断言。
+        """
+        n_sync, km_sync = _make_keyed_node(use_async_verify=False, port=7620)
+        n_async, km_async = _make_keyed_node(use_async_verify=True, port=7621)
+        good_sync = _signed_payload(km_sync, "node_1", block_hash="h_resp", phase="prepare")
+        good_async = _signed_payload(km_async, "node_1", block_hash="h_resp", phase="prepare")
+
+        async def measure(node, payload):
+            counter = {"n": 0}
+
+            async def heartbeat():
+                while True:
+                    counter["n"] += 1
+                    await asyncio.sleep(0)
+
+            hb = asyncio.create_task(heartbeat())
+            for _ in range(50):
+                await node._verify_vote_signature_auto(payload, "node_1")
+            final = counter["n"]  # 仅在批处理期间计数（批后 cancel 不计入）
+            hb.cancel()
+            try:
+                await hb
+            except asyncio.CancelledError:
+                pass
+            return final
+
+        sync_hb = asyncio.run(measure(n_sync, good_sync))
+        async_hb = asyncio.run(measure(n_async, good_async))
+
+        # 异步路径必须让 event loop 在验签期间持续响应（心跳显著推进）
+        assert async_hb > 5, f"异步路径未释放 event loop（批处理期间心跳仅 {async_hb}）"
+        # 确定性：异步心跳数应明显高于同步（同步在 loop 内阻塞，心跳几乎不推进）
+        assert async_hb > sync_hb, \
+            f"异步路径未比同步更释放 loop：sync_hb={sync_hb}, async_hb={async_hb}"
+
+
+# ---------------------------------------------------------------------------
+# 6) 吞吐基准（信息性；硬断言仅覆盖完成与一致性，不依赖易抖动计时）
+# ---------------------------------------------------------------------------
+
+class TestThroughputBaseline:
+    def test_sync_vs_async_throughput_reports(self):
+        """对比同步/异步验签批处理墙钟时间，输出基准表供后续'翻开关'评审参考。
+
+        硬断言仅覆盖：两条路径均能完成且结果一致（功能等价）；异步确实 offload
+        （已由 TestOffloadWiring 覆盖）。计时不作硬性断言，避免 CI 抖动。
+        """
+        n_sync, km_sync = _make_keyed_node(use_async_verify=False, port=7622)
+        n_async, km_async = _make_keyed_node(use_async_verify=True, port=7623)
+        good_sync = _signed_payload(km_sync, "node_1", block_hash="h_bench", phase="prepare")
+        good_async = _signed_payload(km_async, "node_1", block_hash="h_bench", phase="prepare")
+        K = 100
+
+        async def batch(node, payload):
+            for _ in range(K):
+                await node._verify_vote_signature_auto(payload, "node_1")
+
+        t0 = time.perf_counter()
+        asyncio.run(batch(n_sync, good_sync))
+        t_sync = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        asyncio.run(batch(n_async, good_async))
+        t_async = time.perf_counter() - t0
+
+        # 功能等价（两条路径结果一致）
+        assert asyncio.run(n_sync._verify_vote_signature_auto(good_sync, "node_1")) is True
+        assert asyncio.run(n_async._verify_vote_signature_auto(good_async, "node_1")) is True
+
+        print(f"\n[bench] verify x{K}: sync={t_sync*1e3:.2f}ms  "
+              f"async={t_async*1e3:.2f}ms  (async/sync={t_async/max(t_sync,1e-9):.2f}x)")
+
