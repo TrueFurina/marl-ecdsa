@@ -8,7 +8,7 @@ import random
 import logging
 import hashlib
 from collections import deque
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +198,7 @@ if HAS_TORCH:
             use_iql: bool = True,
             use_vdn: bool = None,
             algorithm: str = None,
+            lr_scheduler: Optional[Callable] = None,
         ):
             self.n_agents = n_agents
             self.obs_dim = obs_dim
@@ -249,6 +250,8 @@ if HAS_TORCH:
                 params += list(self.mixer.parameters())
             # VDN mixer 无参数，不需要加入优化器
             self.optimizer = optim.Adam(params, lr=lr)
+            # 学习率调度器（opt-in）：工厂以优化器为参数构建；默认 None 不调度。
+            self.lr_scheduler = lr_scheduler(self.optimizer) if lr_scheduler is not None else None
 
             # 经验回放（较小容量，focus on 近期数据）
             self.replay_buffer = ReplayBuffer(capacity=2500)
@@ -322,11 +325,14 @@ if HAS_TORCH:
                 return None
             self.last_effective_algorithm = self.algorithm  # 默认生效=声明算法
             if self.algorithm == 'vdn':
-                return self._train_step_vdn(batch_size)
+                loss = self._train_step_vdn(batch_size)
             elif self.algorithm == 'qmix':
-                return self._train_step_qmix(batch_size)
+                loss = self._train_step_qmix(batch_size)
             else:
-                return self._train_step_iql(batch_size)
+                loss = self._train_step_iql(batch_size)
+            if self.lr_scheduler is not None and loss is not None:
+                self.lr_scheduler.step()
+            return loss
 
         def _train_step_iql(self, batch_size: int = 64) -> Optional[float]:
             """
