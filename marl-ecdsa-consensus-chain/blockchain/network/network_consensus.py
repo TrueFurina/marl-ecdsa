@@ -550,8 +550,14 @@ class NetworkConsensusNode:
             else:
                 # 无key_manager：默认 fail-closed
                 if self._allow_insecure_vote:
-                    # 仅连通性测试：校验签名字节长度（ECDSA secp256r1 下界≥64），不真验签
-                    return len(signature_bytes) >= 64
+                    # 纵深防御（A 方案）：除长度≥64 外，要求签名为合法 DER 结构，
+                    # 挡住纯垃圾字节（不绑定身份，仅防意外）；仍不真验签。
+                    try:
+                        from ..crypto.ecdsa_utils import ECDSAUtils
+                        ECDSAUtils.extract_rs(signature_bytes)
+                        return len(signature_bytes) >= 64
+                    except Exception:
+                        return False
                 logger.warning(
                     f"[NetConsensus] 投票签名验证失败(默认fail-closed): key_manager未配置且未开启"
                     f"insecure模式，拒绝投票 voter={voter_id}"
@@ -616,8 +622,14 @@ class NetworkConsensusNode:
                 return verified
             else:
                 if self._allow_insecure_vote:
-                    # 仅连通性测试：校验签名字节长度（ECDSA secp256r1 下界≥64），不真验签
-                    return len(signature_bytes) >= 64
+                    # 纵深防御（A 方案）：除长度≥64 外，要求签名为合法 DER 结构，
+                    # 挡住纯垃圾字节（不绑定身份，仅防意外）；仍不真验签。
+                    try:
+                        from ..crypto.ecdsa_utils import ECDSAUtils
+                        ECDSAUtils.extract_rs(signature_bytes)
+                        return len(signature_bytes) >= 64
+                    except Exception:
+                        return False
                 logger.warning(
                     f"[NetConsensus] 投票签名验证失败(默认fail-closed): key_manager未配置且未开启"
                     f"insecure模式，拒绝投票 voter={voter_id}"
@@ -662,7 +674,10 @@ class NetworkConsensusNode:
         if self.key_manager is None:
             if self._allow_insecure_vote:
                 try:
-                    return len(bytes.fromhex(sig_hex)) >= 64
+                    from ..crypto.ecdsa_utils import ECDSAUtils
+                    raw = bytes.fromhex(sig_hex)
+                    ECDSAUtils.extract_rs(raw)
+                    return len(raw) >= 64
                 except Exception:
                     return False
             return False

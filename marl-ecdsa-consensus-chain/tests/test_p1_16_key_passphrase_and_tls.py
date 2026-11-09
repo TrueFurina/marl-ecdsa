@@ -210,7 +210,10 @@ class TestVoteSignatureFailClosed:
     def test_b2_insecure_opt_in_still_works(self):
         n = _mk_node(allow_insecure_vote=True)
         assert n._verify_vote_signature({}, "node_1") is True
-        assert n._verify_vote_signature({"signature_hex": "ab" * 64}, "node_1") is True
+        # A 方案：insecure 仍放行无签名票；合法 DER 签名放行；纯垃圾字节（非 DER）拒绝
+        valid_sig = ECDSAUtils.encode_rs(2 ** 255, 2 ** 255)
+        assert n._verify_vote_signature({"signature_hex": valid_sig.hex()}, "node_1") is True
+        assert n._verify_vote_signature({"signature_hex": "ab" * 64}, "node_1") is False
         assert n._verify_vote_signature({"signature_hex": "abcd"}, "node_1") is False
 
 

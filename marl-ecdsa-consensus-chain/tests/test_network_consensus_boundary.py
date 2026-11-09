@@ -69,9 +69,16 @@ class TestVerifyVoteSignatureLoose:
         assert insecure_node._verify_vote_signature(data, "node_1") is False
 
     def test_valid_length_sig_accepted(self, insecure_node):
-        """显式 insecure 模式：64 字节签名 → 宽松通过（仅查格式）"""
-        data = {"signature_hex": "ab" * 64}
+        """显式 insecure 模式：合法 DER 结构且长度≥64 的签名 → 宽松通过（仅查结构，不真验签）"""
+        # A 方案后：除长度外还需是合法 DER 结构；用 encode_rs 造一条结构合法、长度≥64 的签名
+        valid_sig = ECDSAUtils.encode_rs(2 ** 255, 2 ** 255)
+        data = {"signature_hex": valid_sig.hex()}
         assert insecure_node._verify_vote_signature(data, "node_1") is True
+
+    def test_garbage_length_sig_rejected(self, insecure_node):
+        """显式 insecure 模式：长度≥64 但非合法 DER 的垃圾字节 → 拒绝（A 方案纵深防御）"""
+        data = {"signature_hex": "ab" * 64}
+        assert insecure_node._verify_vote_signature(data, "node_1") is False
 
 
 class TestVerifyVoteSignatureFailClosed:
