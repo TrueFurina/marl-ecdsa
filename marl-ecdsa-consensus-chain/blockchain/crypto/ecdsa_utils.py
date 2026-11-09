@@ -3,6 +3,7 @@ ECDSA工具类 - MARL-ECDSA共识链密码学核心
 基于 NIST secp256r1 (P-256) 椭圆曲线
 遵循 FIPS 186-5 标准 + RFC 6979 确定性k值生成
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -357,6 +358,39 @@ class ECDSAUtils:
         n = len(ECDSAUtils._VERIFY_CACHE)
         ECDSAUtils._VERIFY_CACHE.clear()
         return n
+
+    @staticmethod
+    async def verify_cached_async(
+        public_key: "ec.EllipticCurvePublicKey",
+        message: bytes,
+        signature: bytes,
+    ) -> bool:
+        """异步版 verify_cached：把 CPU 密集的 ECDSA 验签 offload 到 worker 线程，
+        避免阻塞 asyncio 事件循环。语义与 verify_cached 完全一致。
+
+        属 backlog#1（共识热路径同步验签阻塞 event loop）的**安全子集**：
+        仅提供原语，network_consensus 调用点接入属 needs-design 热路径改造，
+        本方法本身零风险（不改任何既有同步路径，不影响已固化主结局）。
+        """
+        return await asyncio.to_thread(
+            ECDSAUtils.verify_cached, public_key, message, signature
+        )
+
+    @staticmethod
+    async def verify_batch_async(
+        entries: List[Tuple[Any, bytes, bytes]],
+        *,
+        use_cache: bool = True,
+    ) -> List[bool]:
+        """并发批量验签（异步 offload）。每条验签在 worker 线程并行执行，
+        解决共识热路径 O(n^2) 串行验签阻塞事件循环的根因（仅提供原语，
+        network_consensus 接入属 needs-design）。返回逐条布尔列表，
+        与同步 verify_batch 语义完全一致。
+        """
+        fn = ECDSAUtils.verify_cached if use_cache else ECDSAUtils.verify
+        tasks = [asyncio.to_thread(fn, pub, msg, sig) for pub, msg, sig in entries]
+        return list(await asyncio.gather(*tasks))
+
     # -------------------------------------------------------------------------
 
     @staticmethod
