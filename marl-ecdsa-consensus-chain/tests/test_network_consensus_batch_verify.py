@@ -18,6 +18,7 @@ import json
 import logging
 import shutil
 import tempfile
+import time
 
 import pytest
 
@@ -260,3 +261,74 @@ class TestOrderingFidelity:
         assert results == [True, False, True, False], f"顺序/结果不符: {results}"
         # 批量仅调用一次且含 4 条，按到达顺序
         assert len(calls) == 1 and len(calls[0]) == 4
+
+
+# ---------------------------------------------------------------------------
+# 6) 批量吞吐基准（信息性；硬断言仅覆盖正确性与真正聚批，不依赖易抖动计时）
+# ---------------------------------------------------------------------------
+
+class TestBatchThroughputBaseline:
+    def test_batch_vs_sync_throughput_reports(self, keyed_factory, monkeypatch):
+        """对比 sync / 逐票异步 / 批量异步 三种验签路径的墙钟时间。
+
+        方法：用并发 asyncio.gather 模拟真实多连接并发到达，使批量缓冲真正聚批
+        （顺序循环下每次 await 会阻塞、批量退化为定时器单票 flush，无法反映真实收益）。
+        硬断言仅覆盖：三条路径均完成且结果一致（功能等价）、批量确实聚批
+        （verify_batch_async 调用次数 << K）；计时不作硬性断言，避免 CI 抖动。
+        价值：为『是否在生产开启 use_batch_async_verify』提供数据，绝不预先声称收益。
+        """
+        n_sync, km = keyed_factory(use_batch_async_verify=False, port=7711)
+        n_per, km = keyed_factory(use_async_verify=True, port=7712)
+        n_batch, km = keyed_factory(use_batch_async_verify=True,
+                                    batch_verify_threshold=16,
+                                    batch_verify_flush_timeout=0.0005, port=7713)
+        K = 64
+        # 签名仅在计时区外构造一次（避免把签名开销计入验签基准）
+        payloads = [
+            _signed_payload(km, "node_1", block_hash=f"bh{i}", phase="prepare")
+            for i in range(K)
+        ]
+
+        calls = []
+        real = ECDSAUtils.verify_batch_async
+
+        async def spy(entries, **kw):
+            calls.append(entries)
+            return await real(entries, **kw)
+        monkeypatch.setattr(ECDSAUtils, "verify_batch_async", spy)
+
+        # 1) 同步（顺序 CPU 密集）
+        t0 = time.perf_counter()
+        sync_results = [n_sync._verify_vote_signature(p, "node_1") for p in payloads]
+        t_sync = time.perf_counter() - t0
+
+        # 2) 逐票异步（并发 offload 单票，不聚合）
+        async def run_per():
+            return await asyncio.gather(
+                *[n_per._verify_vote_signature_auto(p, "node_1") for p in payloads]
+            )
+        t0 = time.perf_counter()
+        per_results = asyncio.run(run_per())
+        t_per = time.perf_counter() - t0
+
+        # 3) 批量异步（并发到达 -> 按阈值聚批，一次 verify_batch_async 并行验签）
+        calls.clear()
+        async def run_batch():
+            return await asyncio.gather(
+                *[n_batch._verify_vote_signature_auto(p, "node_1") for p in payloads]
+            )
+        t0 = time.perf_counter()
+        batch_results = asyncio.run(run_batch())
+        t_batch = time.perf_counter() - t0
+
+        # 硬断言：功能等价（三条路径结果一致且全 True）
+        assert all(sync_results) and all(per_results) and all(batch_results)
+        # 硬断言：批量确实聚批（verify_batch_async 调用次数远小于 K）
+        assert len(calls) <= K // 2, f"批量未有效聚批：{len(calls)} 次 / K={K}"
+
+        print(
+            f"\n[bench] verify x{K}: sync={t_sync*1e3:.2f}ms  "
+            f"per-async={t_per*1e3:.2f}ms  batch-async={t_batch*1e3:.2f}ms  "
+            f"(batch/sync={t_batch/max(t_sync,1e-9):.2f}x, "
+            f"batch/per={t_batch/max(t_per,1e-9):.2f}x)"
+        )
