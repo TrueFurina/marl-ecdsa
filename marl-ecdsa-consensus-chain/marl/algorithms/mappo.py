@@ -12,7 +12,7 @@ import numpy as np
 import random
 import logging
 from collections import deque
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,7 @@ if HAS_TORCH:
             entropy_coef: float = 0.01, value_coef: float = 0.5,
             ppo_epochs: int = 4, batch_episodes: int = 4,
             max_grad_norm: Optional[float] = None,
+            lr_scheduler: Optional[Callable] = None,
             **kwargs,
         ):
             """
@@ -151,6 +152,15 @@ if HAS_TORCH:
             仅作为**稳定性护栏**存在：默认关闭时，train_step 的行为与历史版本
             逐字一致（不影响已结算的主结局指标）。开启后，在 actor/critic 各自
             optimizer.step() 之前对参数梯度做全局范数裁剪，抑制训练初期梯度爆炸。
+
+            lr_scheduler: 学习率调度器**工厂**（opt-in，默认 None 关闭）。
+            传入一个 `optimizer -> scheduler` 的工厂，例如
+            `lambda opt: torch.optim.lr_scheduler.StepLR(opt, step_size=1, gamma=0.9)`。
+            构造时以 actor 优化器为参数构建调度器；之后每个 train_step 完成至少一次
+            更新后调用 `scheduler.step()` 一次，对 actor 学习率做衰减
+            （默认 actor/critic 共享同一 lr）。
+            默认 None：train_step 与历史版本逐字一致（不创建、不调用任何调度器，
+            不影响已结算的主结局指标）。
             """
             self.n_agents = n_agents
             self.obs_dim = obs_dim
@@ -178,6 +188,8 @@ if HAS_TORCH:
 
             self.actor_opt = optim.Adam(self.agents.parameters(), lr=lr)
             self.critic_opt = optim.Adam(self.critic.parameters(), lr=lr)
+            # 学习率调度器（opt-in）：工厂以 actor 优化器为参数构建；默认 None 不调度。
+            self.lr_scheduler = lr_scheduler(self.actor_opt) if lr_scheduler is not None else None
 
             self.buffer = MAPPOBuffer(capacity=max(2, batch_episodes))
             self._episode_active = False
@@ -343,6 +355,8 @@ if HAS_TORCH:
                     n += 1
                 if n > 0:
                     all_losses.append((actor_loss_sum + self.value_coef * critic_loss_sum) / n)
+            if self.lr_scheduler is not None and all_losses:
+                self.lr_scheduler.step()
             return float(np.mean(all_losses)) if all_losses else None
 
 else:
